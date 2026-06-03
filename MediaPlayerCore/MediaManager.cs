@@ -196,15 +196,11 @@ namespace MediaPlayerCore {
     }
 
     public void Dispose() {
-      Task.Run(async () => {
-        notDisposed = false;
-        CleanSounds();
-        try {
-          if (_updateLoop != null) {
-            _updateLoop?.Dispose();
-          }
-        } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
-      });
+      notDisposed = false;
+      CleanSounds();
+      try {
+        _updateLoop?.Wait(TimeSpan.FromSeconds(2));
+      } catch { }
     }
   }
 }

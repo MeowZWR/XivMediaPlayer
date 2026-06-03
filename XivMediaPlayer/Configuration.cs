@@ -11,7 +11,6 @@ namespace XivMediaPlayer {
     private bool _tuneIntoTwitchStreams = true;
     private bool _tuneIntoTwitchStreamPrompt = true;
     private int _defaultVideoOpen = 1; // 0 = open, 1 = closed
-    private int _audioOutputDeviceIndex = -1;
 
     int IPluginConfiguration.Version { get; set; }
 
@@ -21,21 +20,27 @@ namespace XivMediaPlayer {
     public bool TuneIntoTwitchStreams { get => _tuneIntoTwitchStreams; set => _tuneIntoTwitchStreams = value; }
     public bool TuneIntoTwitchStreamPrompt { get => _tuneIntoTwitchStreamPrompt; set => _tuneIntoTwitchStreamPrompt = value; }
     public int DefaultVideoOpen { get => _defaultVideoOpen; set => _defaultVideoOpen = value; }
-    public int AudioOutputDeviceIndex { get => _audioOutputDeviceIndex; set => _audioOutputDeviceIndex = value; }
 
     // yt-dlp settings
-    public string YtDlpPath { get; set; } = "";
     public int PreferredQuality { get; set; } = 720;
-    public bool AutoUpdateYtDlp { get; set; } = false;
 
     // World screen compositing settings
     public MediaPlayerCore.Compositing.WorldScreenTransform WorldScreen { get; set; } = new MediaPlayerCore.Compositing.WorldScreenTransform();
 
     #endregion
 
-    private readonly IDalamudPluginInterface pluginInterface;
+    [NonSerialized]
+    private IDalamudPluginInterface pluginInterface;
 
-    public Configuration(IDalamudPluginInterface pi) {
+    /// <summary>
+    /// Parameterless constructor required for Dalamud deserialization.
+    /// </summary>
+    public Configuration() { }
+
+    /// <summary>
+    /// Call after construction or deserialization to wire up the save interface.
+    /// </summary>
+    public void Initialize(IDalamudPluginInterface pi) {
       this.pluginInterface = pi;
     }
 

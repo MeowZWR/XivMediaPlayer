@@ -1,16 +1,17 @@
 using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
-using NAudio.Wave;
 using System;
 using System.Numerics;
 
 namespace XivMediaPlayer.Windows {
   internal class SettingsWindow : Window {
     private Configuration _config;
+    private Action _onVolumeFix;
 
-    public SettingsWindow(Configuration config) :
+    public SettingsWindow(Configuration config, Action onVolumeFix = null) :
       base("Media Player Settings", ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize, false) {
       _config = config;
+      _onVolumeFix = onVolumeFix;
       Size = new Vector2(420, 0);
       SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -26,12 +27,8 @@ namespace XivMediaPlayer.Windows {
         _config.Save();
       }
 
-      // Audio output device
-      string[] deviceNames = GetAudioDeviceNames();
-      int selectedDevice = _config.AudioOutputDeviceIndex + 1; // -1 = default, shift to 0-based
-      if (ImGui.Combo("Audio Output", ref selectedDevice, deviceNames, deviceNames.Length)) {
-        _config.AudioOutputDeviceIndex = selectedDevice - 1;
-        _config.Save();
+      if (_onVolumeFix != null && ImGui.Button("Fix Game Volume")) {
+        _onVolumeFix.Invoke();
       }
 
       ImGui.Spacing();
@@ -69,20 +66,9 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
       ImGui.Spacing();
 
-      // yt-dlp 
+      // yt-dlp quality
       ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "yt-dlp");
       ImGui.Separator();
-
-      string ytDlpPath = _config.YtDlpPath ?? "";
-      if (ImGui.InputText("yt-dlp Path", ref ytDlpPath, 512)) {
-        _config.YtDlpPath = ytDlpPath;
-        _config.Save();
-      }
-      ImGui.SameLine();
-      ImGui.TextDisabled("(?)");
-      if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Leave empty to auto-detect from PATH.\nDownload yt-dlp from https://github.com/yt-dlp/yt-dlp/releases");
-      }
 
       string[] qualityLabels = new string[] { "360p", "480p", "720p", "1080p", "Best" };
       int[] qualityValues = new int[] { 360, 480, 720, 1080, 0 };
@@ -93,22 +79,8 @@ namespace XivMediaPlayer.Windows {
         _config.Save();
       }
 
-      bool autoUpdate = _config.AutoUpdateYtDlp;
-      if (ImGui.Checkbox("Auto-update yt-dlp on plugin load", ref autoUpdate)) {
-        _config.AutoUpdateYtDlp = autoUpdate;
-        _config.Save();
-      }
-    }
-
-    private string[] GetAudioDeviceNames() {
-      int deviceCount = WaveOut.DeviceCount;
-      string[] names = new string[deviceCount + 1];
-      names[0] = "Default";
-      for (int i = 0; i < deviceCount; i++) {
-        var caps = WaveOut.GetCapabilities(i);
-        names[i + 1] = caps.ProductName;
-      }
-      return names;
+      ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
+        "yt-dlp is automatically downloaded and updated.");
     }
   }
 }

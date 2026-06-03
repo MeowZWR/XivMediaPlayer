@@ -136,29 +136,57 @@ namespace MediaPlayerCore {
             try {
               _parent.LastFrame = new byte[0];
               string location = _libVLCPath + @"\libvlc\win-x64";
+              Debug.WriteLine($"[MediaObject] Initializing VLC from: {location}");
+              Debug.WriteLine($"[MediaObject] Media path: {mediaPath.Substring(0, Math.Min(100, mediaPath.Length))}...");
+
               Core.Initialize(location);
               libVLC = new LibVLC("--vout", "none");
+
+              // Hook VLC's internal log to catch errors
+              libVLC.Log += (s, e) => {
+                if (e.Level >= LogLevel.Warning) {
+                  Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
+                  OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception($"VLC [{e.Level}] {e.Module}: {e.Message}") });
+                }
+              };
+
               var media = new Media(libVLC, mediaPath, mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp")
                 ? FromType.FromLocation : FromType.FromPath);
+              Debug.WriteLine("[MediaObject] Parsing media...");
               await media.Parse(mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp")
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
+              Debug.WriteLine($"[MediaObject] Media parsed. Duration: {media.Duration}ms");
+
               _vlcPlayer = new MediaPlayer(media);
               _vlcPlayer.SetAudioOutput("waveout");
               _vlcPlayer.Stopped += delegate { _parent.LastFrame = new byte[0]; };
+              _vlcPlayer.EncounteredError += (s, e) => {
+                Debug.WriteLine("[MediaObject] VLC EncounteredError event fired!");
+                OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC player encountered an error during playback.") });
+              };
               if (mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.EndsWith(".mp4") || mediaPath.EndsWith(".avi")) {
                 _vlcPlayer.SetVideoFormat("RV32", _width, _height, _pitch);
                 _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
               }
               _baseVolume = volume;
               Volume = volume;
-              _vlcPlayer.Play();
-              _vlcWasAbleToStart = true;
+              bool playResult = _vlcPlayer.Play();
+              Debug.WriteLine($"[MediaObject] VLC Play() returned: {playResult}");
+              _vlcWasAbleToStart = playResult;
+
+              if (!playResult) {
+                OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC Play() returned false — playback failed to start.") });
+              }
             } catch (Exception e) {
+              Debug.WriteLine($"[MediaObject] Play exception: {e}");
               OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
               PlaybackStopped?.Invoke(this, "OK");
             }
+          } else {
+            Debug.WriteLine($"[MediaObject] Play skipped. mediaPath empty={string.IsNullOrEmpty(mediaPath)}, state={PlaybackState}");
           }
         } catch (Exception e) {
+          Debug.WriteLine($"[MediaObject] Outer play exception: {e}");
           OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
           PlaybackStopped?.Invoke(this, "ERR");
         }

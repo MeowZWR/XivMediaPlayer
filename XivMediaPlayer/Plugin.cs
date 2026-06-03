@@ -14,6 +14,7 @@ using MediaPlayerCore.Compositing;
 using MediaPlayerCore.Twitch;
 using MediaPlayerCore.YtDlp;
 using XivMediaPlayer.Compositing;
+using Dalamud.Bindings.ImGui;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -38,6 +39,7 @@ namespace XivMediaPlayer {
     private readonly IPluginLog _pluginLog;
     private readonly ITextureProvider _textureProvider;
     private readonly IGameGui _gameGui;
+    private readonly IObjectTable _objectTable;
 
     private readonly Configuration _config;
     private readonly WindowSystem _windowSystem;
@@ -60,6 +62,11 @@ namespace XivMediaPlayer {
     private string _potentialStream;
     private bool _streamWasPlaying;
     private bool _disposed;
+    private bool _bgmWasMutedByUs;
+
+    // Clipboard cookie watcher
+    private DateTime _lastClipboardCheck = DateTime.MinValue;
+    private int _lastCookieHash;
     private bool _hasBeenInitialized;
 
     private Stopwatch _streamSetCooldown = new Stopwatch();
@@ -73,7 +80,8 @@ namespace XivMediaPlayer {
       IGameConfig gameConfig,
       IPluginLog pluginLog,
       ITextureProvider textureProvider,
-      IGameGui gameGui) {
+      IGameGui gameGui,
+      IObjectTable objectTable) {
       _pluginInterface = pluginInterface;
       _commandManager = commandManager;
       _chat = chat;
@@ -83,20 +91,21 @@ namespace XivMediaPlayer {
       _pluginLog = pluginLog;
       _textureProvider = textureProvider;
       _gameGui = gameGui;
+      _objectTable = objectTable;
 
       // Load configuration
       _config = (Configuration)_pluginInterface.GetPluginConfig()
-           ?? _pluginInterface.Create<Configuration>();
+           ?? new Configuration();
+      _config.Initialize(_pluginInterface);
 
       // Initialize yt-dlp manager
-      string ytDlpPath = !string.IsNullOrEmpty(_config.YtDlpPath) ? _config.YtDlpPath : null;
-      _ytDlpManager = new YtDlpManager(ytDlpPath, _config.PreferredQuality);
+      string pluginDir = Path.GetDirectoryName(_pluginInterface.AssemblyLocation.FullName) ?? "";
+      _ytDlpManager = new YtDlpManager(pluginDir, _config.PreferredQuality);
       _ytDlpManager.OnStatusUpdate += (s, msg) => _pluginLog.Info("[yt-dlp] " + msg);
       _ytDlpManager.OnError += (s, ex) => _pluginLog.Warning(ex, "[yt-dlp] " + ex.Message);
 
-      if (_config.AutoUpdateYtDlp && _ytDlpManager.IsAvailable()) {
-        Task.Run(async () => await _ytDlpManager.SelfUpdate());
-      }
+      // Auto-download if missing, then always self-update
+      Task.Run(async () => await _ytDlpManager.EnsureAvailableAsync());
 
       // Initialize world-space video renderer
       _worldRenderer = new WorldVideoRenderer(_config.WorldScreen, _gameGui);
@@ -104,7 +113,7 @@ namespace XivMediaPlayer {
       // Create windows
       _windowSystem = new WindowSystem("XivMediaPlayer");
       _videoWindow = new VideoWindow(_pluginInterface, _textureProvider, _pluginLog);
-      _settingsWindow = new SettingsWindow(_config);
+      _settingsWindow = new SettingsWindow(_config, FixWindowsVolume);
       _browserWindow = new MediaBrowserWindow();
       _screenSettingsWindow = new ScreenSettingsWindow(
         _config.WorldScreen,
@@ -171,17 +180,48 @@ namespace XivMediaPlayer {
       if (!_hasBeenInitialized && _clientState.IsLoggedIn) {
         try {
           InitializeMediaManager();
-          _hasBeenInitialized = true;
+          // Only mark done if we actually succeeded
+          _hasBeenInitialized = _playerObject != null;
         } catch (Exception e) {
           _pluginLog.Error(e, "Failed to initialize media manager");
         }
+      }
+
+      // Clipboard cookie watcher — check every 5 seconds
+      CheckClipboardForCookies();
+    }
+
+    private void CheckClipboardForCookies() {
+      if ((DateTime.UtcNow - _lastClipboardCheck).TotalSeconds < 5) return;
+      _lastClipboardCheck = DateTime.UtcNow;
+
+      try {
+        string? clipText = ImGui.GetClipboardText();
+        if (string.IsNullOrEmpty(clipText)) return;
+
+        int hash = clipText.GetHashCode();
+        if (hash == _lastCookieHash) return;
+
+        if (YtDlpManager.IsNetscapeCookieFormat(clipText)) {
+          _lastCookieHash = hash;
+          if (_ytDlpManager.SaveCookiesFromText(clipText)) {
+            _pluginLog.Info("[yt-dlp] Auto-detected YouTube cookies from clipboard.");
+          }
+        }
+      } catch {
+        // Clipboard access can throw — silently ignore
       }
     }
 
     private unsafe void InitializeMediaManager() {
       var localPlayer = GetLocalPlayer();
-      if (localPlayer == null) return;
+      if (localPlayer == null) {
+        _pluginLog.Warning("[Media Player] LocalPlayer is null, cannot initialize media manager.");
+        _hasBeenInitialized = false; // Allow retry next frame
+        return;
+      }
 
+      _pluginLog.Info("[Media Player] Initializing media manager...");
       _playerObject = new MediaGameObject(localPlayer);
       _camera = CameraManager.Instance()->GetActiveCamera();
       _playerCamera = new MediaCameraObject(_camera);
@@ -189,18 +229,20 @@ namespace XivMediaPlayer {
       _mediaManager.OnErrorReceived += OnMediaError;
       _mediaManager.LiveStreamVolume = _config.LivestreamVolume;
       _videoWindow.MediaManager = _mediaManager;
+      _pluginLog.Info("[Media Player] Media manager initialized successfully.");
     }
 
     private Dalamud.Game.ClientState.Objects.Types.IGameObject GetLocalPlayer() {
-      // Use reflection-free approach — IClientState doesn't expose LocalPlayer directly,
-      // but framework objects do. For simplicity we get it from the object table at index 0.
-      // Actually, IClientState has LocalPlayer in newer Dalamud.
       try {
-        var prop = _clientState.GetType().GetProperty("LocalPlayer");
-        if (prop != null) {
-          return prop.GetValue(_clientState) as Dalamud.Game.ClientState.Objects.Types.IGameObject;
+        // ObjectTable[0] is always the local player in Dalamud
+        var player = _objectTable[0];
+        if (player != null) {
+          _pluginLog.Debug($"[Media Player] Found LocalPlayer from ObjectTable: {player.Name}");
         }
-      } catch { }
+        return player;
+      } catch (Exception e) {
+        _pluginLog.Warning(e, "[Media Player] Failed to get LocalPlayer from ObjectTable");
+      }
       return null;
     }
 
@@ -254,20 +296,23 @@ namespace XivMediaPlayer {
         case "play":
           if (splitArgs.Length > 1) {
             string url = splitArgs[1];
-            if (_playerObject != null) {
-              _lastStreamObject = _playerObject;
-              if (url.Contains("twitch.tv")) {
-                TuneIntoStream(url, _playerObject, false);
-              } else if (url.StartsWith("rtmp")) {
-                TuneIntoStream(url, _playerObject, true);
-              } else if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable()) {
-                // Resolve via yt-dlp then play
-                _chat.Print("[Media Player] Resolving URL via yt-dlp...");
-                PlayViaYtDlp(url, _playerObject);
-              } else {
-                // Fallback — direct URL to VLC
-                TuneIntoStream(url, _playerObject, true);
-              }
+            if (_playerObject == null) {
+              _chat.PrintError("[Media Player] Not initialized yet. Are you logged in?");
+              _pluginLog.Warning("[Media Player] _playerObject is null. _hasBeenInitialized=" + _hasBeenInitialized);
+              break;
+            }
+            _lastStreamObject = _playerObject;
+            if (url.Contains("twitch.tv")) {
+              TuneIntoStream(url, _playerObject, false);
+            } else if (url.StartsWith("rtmp")) {
+              TuneIntoStream(url, _playerObject, true);
+            } else if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable()) {
+              // Resolve via yt-dlp then play
+              _chat.Print("[Media Player] Resolving URL via yt-dlp...");
+              PlayViaYtDlp(url, _playerObject);
+            } else {
+              // Fallback — direct URL to VLC
+              TuneIntoStream(url, _playerObject, true);
             }
           } else {
             _chat.PrintError("[Media Player] Usage: /media play <url>");
@@ -288,8 +333,15 @@ namespace XivMediaPlayer {
 
         case "stop":
           _mediaManager?.StopStream();
+          RestoreBgm();
           ResetStreamValues();
           _chat.Print("[Media Player] Stream stopped.");
+          break;
+
+        case "fixaudio":
+          RestoreBgm();
+          FixWindowsVolume();
+          _chat.Print("[Media Player] Game audio restored.");
           break;
 
         case "video":
@@ -363,7 +415,7 @@ namespace XivMediaPlayer {
       });
       _streamWasPlaying = true;
       try {
-        _gameConfig.Set(SystemConfigOption.IsSndBgm, true);
+        MuteBgm();
       } catch (Exception e) {
         _pluginLog.Warning(e, e.Message);
       }
@@ -410,7 +462,7 @@ namespace XivMediaPlayer {
 
           _streamWasPlaying = true;
           try {
-            _gameConfig.Set(SystemConfigOption.IsSndBgm, true);
+            MuteBgm();
           } catch (Exception e) {
             _pluginLog.Warning(e, e.Message);
           }
@@ -458,7 +510,7 @@ namespace XivMediaPlayer {
           _streamWasPlaying = false;
           _videoWindow.IsOpen = false;
           try {
-            _gameConfig.Set(SystemConfigOption.IsSndBgm, false);
+            RestoreBgm();
           } catch (Exception e) {
             _pluginLog.Warning(e, e.Message);
           }
@@ -543,6 +595,57 @@ namespace XivMediaPlayer {
 
     private void OnMediaError(object sender, MediaError e) {
       _pluginLog.Warning(e.Exception, e.Exception?.Message);
+    }
+
+    /// <summary>
+    /// Mutes the in-game BGM, saving the previous state so we can restore it.
+    /// </summary>
+    private void MuteBgm() {
+      try {
+        _gameConfig.TryGet(SystemConfigOption.IsSndBgm, out bool wasMuted);
+        if (!wasMuted) {
+          _bgmWasMutedByUs = true;
+          _gameConfig.Set(SystemConfigOption.IsSndBgm, true);
+        }
+      } catch (Exception e) {
+        _pluginLog.Warning(e, "[Media Player] Failed to mute BGM");
+      }
+    }
+
+    /// <summary>
+    /// Restores BGM if we were the ones who muted it.
+    /// </summary>
+    private void RestoreBgm() {
+      try {
+        if (_bgmWasMutedByUs) {
+          _bgmWasMutedByUs = false;
+          _gameConfig.Set(SystemConfigOption.IsSndBgm, false);
+        }
+      } catch (Exception e) {
+        _pluginLog.Warning(e, "[Media Player] Failed to restore BGM");
+      }
+    }
+
+    /// <summary>
+    /// Fixes the Windows audio mixer volume for this process.
+    /// VLC can zero it out via the Windows audio session API.
+    /// Uses COM interfaces + WaveOutEvent trick (same approach as ArtemisRoleplayingKit).
+    /// </summary>
+    private void FixWindowsVolume() {
+      try {
+        int pid = Process.GetCurrentProcess().Id;
+        VolumeMixer.SetApplicationVolume(pid, 100);
+        VolumeMixer.SetApplicationMute(pid, false);
+
+        // Force Windows to re-register the audio session at full volume
+        using (var tempPlayer = new NAudio.Wave.WaveOutEvent()) {
+          tempPlayer.Volume = 1;
+        }
+
+        _pluginLog.Info("[Media Player] Windows mixer volume restored.");
+      } catch (Exception e) {
+        _pluginLog.Warning(e, "[Media Player] Failed to fix Windows volume");
+      }
     }
 
     #endregion
