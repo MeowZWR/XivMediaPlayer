@@ -39,7 +39,7 @@ namespace MediaPlayerCore {
       _updateLoop = Task.Run(() => Update());
     }
 
-    public async void PlayStream(IMediaGameObject playerObject, string audioPath, int delay = 0) {
+    public async void PlayStream(IMediaGameObject playerObject, string audioPath, int delay = 0, Dictionary<string, string>? httpHeaders = null) {
       Task.Run(() => {
         try {
           OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
@@ -55,7 +55,7 @@ namespace MediaPlayerCore {
                 }
               });
 
-              ConfigureStream(playerObject, audioPath, delay);
+              ConfigureStream(playerObject, audioPath, delay, httpHeaders);
             }
           }
         } catch (Exception e) {
@@ -111,7 +111,7 @@ namespace MediaPlayerCore {
       return false;
     }
 
-    private void ConfigureStream(IMediaGameObject playerObject, string audioPath, int delay = 0) {
+    private void ConfigureStream(IMediaGameObject playerObject, string audioPath, int delay = 0, Dictionary<string, string>? httpHeaders = null) {
       if (playerObject != null) {
         try {
           if (_playbackStreams.ContainsKey(playerObject.Name)) {
@@ -129,7 +129,7 @@ namespace MediaPlayerCore {
           lock (_playbackStreams[playerObject.Name]) {
             float volume = _livestreamVolume;
             _playbackStreams[playerObject.Name].OnErrorReceived += MediaManager_OnErrorReceived;
-            _playbackStreams[playerObject.Name].Play(audioPath, volume, delay);
+            _playbackStreams[playerObject.Name].Play(audioPath, volume, delay, httpHeaders);
           }
         } catch (Exception e) {
           OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });

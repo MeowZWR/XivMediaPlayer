@@ -16,6 +16,7 @@ using MediaPlayerCore.YtDlp;
 using XivMediaPlayer.Compositing;
 using Dalamud.Bindings.ImGui;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -417,13 +418,13 @@ namespace XivMediaPlayer {
 
     #region Stream Management
 
-    private void TuneIntoStream(string url, MediaPlayerCore.IMediaGameObject audioGameObject, bool isNotTwitch) {
+    private void TuneIntoStream(string url, MediaPlayerCore.IMediaGameObject audioGameObject, bool isNotTwitch, Dictionary<string, string>? httpHeaders = null) {
       Task.Run(async () => {
         string cleanedURL = RemoveSpecialSymbols(url);
         _streamURLs = isNotTwitch ? new string[] { url } : TwitchFeedManager.GetServerResponse(cleanedURL);
         _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
         if (_streamURLs.Length > 0) {
-          _mediaManager.PlayStream(audioGameObject, _streamURLs[(int)_videoWindow.FeedType]);
+          _mediaManager.PlayStream(audioGameObject, _streamURLs[(int)_videoWindow.FeedType], 0, httpHeaders);
           _lastStreamURL = cleanedURL;
           if (!isNotTwitch) {
             _currentStreamer = cleanedURL.Replace(@"https://", null).Replace(@"www.", null).Replace("twitch.tv/", null);
@@ -463,13 +464,13 @@ namespace XivMediaPlayer {
             _pluginLog.Warning(resolveEx, "[yt-dlp] Failed to resolve stream URL.");
           }
 
+          var metadata = await metadataTask;
+
           if (string.IsNullOrEmpty(streamUrl)) {
             _chat.PrintError("[Media Player] Failed to resolve URL via yt-dlp. Trying direct playback...");
-            TuneIntoStream(url, audioGameObject, true);
+            TuneIntoStream(url, audioGameObject, true, metadata?.HttpHeaders);
             return;
           }
-
-          var metadata = await metadataTask;
           string title = metadata?.Title ?? "Unknown";
           string uploader = metadata?.Uploader ?? "";
           bool isLive = metadata?.IsLive ?? false;
@@ -478,7 +479,7 @@ namespace XivMediaPlayer {
           _streamURLs = new string[] { streamUrl };
           _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
 
-          _mediaManager.PlayStream(audioGameObject, streamUrl);
+          _mediaManager.PlayStream(audioGameObject, streamUrl, 0, metadata?.HttpHeaders);
           _lastStreamURL = url;
           _currentStreamer = !string.IsNullOrEmpty(uploader) ? uploader : title;
 
@@ -830,6 +831,14 @@ namespace XivMediaPlayer {
                 }
               }
             }
+          }
+
+          if (hoverUV.HasValue) {
+             ImGui.GetForegroundDrawList().AddText(ImGui.GetMainViewport().Pos + new System.Numerics.Vector2(50, 50), 
+               0xFF00FF00, $"Raycast HIT! UV: {hoverUV.Value.X:F2}, {hoverUV.Value.Y:F2}");
+          } else {
+             ImGui.GetForegroundDrawList().AddText(ImGui.GetMainViewport().Pos + new System.Numerics.Vector2(50, 50), 
+               0xFF0000FF, "Raycast MISS");
           }
 
           _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying);

@@ -140,7 +140,7 @@ namespace MediaPlayerCore {
       Invalidated = true;
     }
 
-    public async void Play(string mediaPath, float volume, int delay) {
+    public async void Play(string mediaPath, float volume, int delay, Dictionary<string, string>? httpHeaders = null) {
       await Task.Run(async delegate {
         try {
           if (!string.IsNullOrEmpty(mediaPath) && PlaybackState == PlaybackState.Stopped) {
@@ -151,12 +151,18 @@ namespace MediaPlayerCore {
               Debug.WriteLine($"[MediaObject] Media path: {mediaPath.Substring(0, Math.Min(100, mediaPath.Length))}...");
 
               Core.Initialize(location);
-              libVLC = new LibVLC(
+              var vlcArgs = new List<string> {
                 "--vout=none", 
                 "--http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "--http-reconnect",
                 "--network-caching=2000"
-              );
+              };
+
+              if (httpHeaders != null && httpHeaders.TryGetValue("Referer", out string referer)) {
+                vlcArgs.Add($"--http-referrer={referer}");
+              }
+
+              libVLC = new LibVLC(vlcArgs.ToArray());
 
               // Hook VLC's internal log to catch errors
               libVLC.Log += (s, e) => {

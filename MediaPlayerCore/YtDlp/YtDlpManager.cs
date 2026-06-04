@@ -29,6 +29,9 @@ namespace MediaPlayerCore.YtDlp {
     [JsonProperty("is_live")]
     public bool? IsLive { get; set; }
 
+    [JsonProperty("http_headers")]
+    public Dictionary<string, string>? HttpHeaders { get; set; }
+
     [JsonProperty("ext")]
     public string? Extension { get; set; }
   }
