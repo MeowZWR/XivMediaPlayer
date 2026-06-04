@@ -70,10 +70,17 @@ namespace MediaPlayerCore {
     }
 
     public async void StopStream() {
-      foreach (var sound in _playbackStreams) {
-        sound.Value?.Stop();
-      }
+      // Copy references before clearing to avoid collection modification issues
+      var streams = _playbackStreams.Values.ToArray();
       _playbackStreams.Clear();
+      // VLC's Stop() is synchronous and blocks — run on background thread
+      await Task.Run(() => {
+        foreach (var stream in streams) {
+          try {
+            stream?.Stop();
+          } catch { }
+        }
+      });
     }
 
     public bool IsAllowedToStartStream(IMediaGameObject playerObject) {

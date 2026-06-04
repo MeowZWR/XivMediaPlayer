@@ -1,6 +1,7 @@
 using Dalamud.Configuration;
 using Dalamud.Plugin;
 using System;
+using System.Collections.Generic;
 
 namespace XivMediaPlayer {
   [Serializable]
@@ -24,8 +25,12 @@ namespace XivMediaPlayer {
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;
 
-    // World screen compositing settings
+    // World screen compositing settings (legacy single placement)
     public MediaPlayerCore.Compositing.WorldScreenTransform WorldScreen { get; set; } = new MediaPlayerCore.Compositing.WorldScreenTransform();
+
+    // Per-location screen placements: key = location string, value = transform
+    public Dictionary<string, MediaPlayerCore.Compositing.WorldScreenTransform> ScreenPlacements { get; set; }
+      = new Dictionary<string, MediaPlayerCore.Compositing.WorldScreenTransform>();
 
     #endregion
 

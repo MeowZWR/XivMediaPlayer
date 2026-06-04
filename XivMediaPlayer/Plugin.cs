@@ -125,6 +125,7 @@ namespace XivMediaPlayer {
         _worldRenderer,
         onSave: () => {
           _config.WorldScreen = _worldRenderer.Transform.Clone();
+          SaveScreenForCurrentLocation();
           _config.Save();
           _chat.Print("[Media Player] Screen placement saved.");
         },
@@ -595,9 +596,80 @@ namespace XivMediaPlayer {
     #region Event Handlers
 
     private void OnTerritoryChanged(uint territoryId) {
+      // Auto-save current screen placement for the location we're leaving
+      SaveScreenForCurrentLocation();
+
       _videoWindow.IsOpen = false;
       _mediaManager?.CleanSounds();
       ResetStreamValues();
+
+      // Auto-restore screen placement for the new location (deferred — housing data isn't ready yet)
+      Task.Run(async () => {
+        await Task.Delay(3000); // Wait for housing data to be available
+        RestoreScreenForCurrentLocation();
+      });
+    }
+
+    /// <summary>
+    /// Saves the current screen placement to the config for the current location.
+    /// </summary>
+    private void SaveScreenForCurrentLocation() {
+      if (_worldRenderer?.Transform == null || !_worldRenderer.Transform.Enabled) return;
+      var key = GetLocationKey();
+      if (string.IsNullOrEmpty(key)) return;
+      _config.ScreenPlacements[key] = _worldRenderer.Transform.Clone();
+      _config.Save();
+    }
+
+    /// <summary>
+    /// Restores a saved screen placement for the current location, if one exists.
+    /// </summary>
+    private void RestoreScreenForCurrentLocation() {
+      var key = GetLocationKey();
+      if (string.IsNullOrEmpty(key)) return;
+      if (_config.ScreenPlacements.TryGetValue(key, out var saved)) {
+        _worldRenderer.Transform.Position = saved.Position;
+        _worldRenderer.Transform.RotationDegrees = saved.RotationDegrees;
+        _worldRenderer.Transform.Scale = saved.Scale;
+        _worldRenderer.Transform.Enabled = saved.Enabled;
+      }
+    }
+
+    /// <summary>
+    /// Generates a unique key for the current location.
+    /// Regular zones: "zone_{territoryId}"
+    /// Housing: "house_{worldId}_{territoryId}_{ward}_{plot}_{room}"
+    /// </summary>
+    private unsafe string GetLocationKey() {
+      try {
+        var territoryId = _clientState.TerritoryType;
+        if (territoryId == 0) return null;
+
+        var housingMgr = HousingManager.Instance();
+        if (housingMgr != null && housingMgr->IsInside()) {
+          // Get world ID from local player character struct
+          ushort worldId = 0;
+          try {
+            var charMgr = FFXIVClientStructs.FFXIV.Client.Game.Character.CharacterManager.Instance();
+            if (charMgr != null) {
+              var localChar = charMgr->LookupBattleCharaByEntityId(
+                _objectTable[0]?.EntityId ?? 0);
+              if (localChar != null) {
+                worldId = localChar->HomeWorld;
+              }
+            }
+          } catch { }
+
+          short ward = housingMgr->GetCurrentWard();
+          short plot = housingMgr->GetCurrentPlot();
+          short room = housingMgr->GetCurrentRoom();
+          return $"house_{worldId}_{territoryId}_{ward}_{plot}_{room}";
+        }
+
+        return $"zone_{territoryId}";
+      } catch {
+        return $"zone_{_clientState.TerritoryType}";
+      }
     }
 
     private void OnLogin() {
@@ -845,8 +917,10 @@ namespace XivMediaPlayer {
 
         case "save":
           _config.WorldScreen = _worldRenderer.Transform.Clone();
+          SaveScreenForCurrentLocation();
           _config.Save();
-          _chat.Print("[Media Player] Screen placement saved.");
+          var locKey = GetLocationKey();
+          _chat.Print($"[Media Player] Screen placement saved for {locKey}.");
           break;
 
         case "depth":
