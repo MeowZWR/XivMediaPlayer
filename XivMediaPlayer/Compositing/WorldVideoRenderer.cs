@@ -58,42 +58,87 @@ namespace XivMediaPlayer.Compositing {
     /// <summary>
     /// Renders the video texture as a 3D quad in world space.
     /// </summary>
-    /// <param name="textureWrap">The texture wrap from ITextureProvider</param>
-    /// <param name="viewProjection">Optional VP matrix for depth-tested rendering</param>
-    public void Render(IDalamudTextureWrap textureWrap, Matrix4x4? viewProjection = null) {
+    public void Render(IDalamudTextureWrap textureWrap, Matrix4x4? viewProjection = null,
+      DepthBufferCapture depthCapture = null) {
       if (_disposed || !IsActive || textureWrap == null) return;
 
-      // Try depth-tested D3D11 rendering first
-      if (_useDepthOcclusion && viewProjection.HasValue) {
-        if (RenderDepthTested(textureWrap, viewProjection.Value)) {
-          return; // Success — skip ImGui fallback
-        }
+      if (_useDepthOcclusion && depthCapture != null) {
+        RenderWithOcclusion(textureWrap, depthCapture);
+      } else {
+        RenderScreenSpace(textureWrap);
       }
-
-      // Fallback: ImGui screen-space rendering (no occlusion)
-      RenderScreenSpace(textureWrap);
     }
 
     /// <summary>
-    /// Renders using D3D11 with depth testing. Returns true on success.
+    /// Renders as a tessellated ImGui grid with per-vertex alpha from depth buffer.
     /// </summary>
-    private bool RenderDepthTested(IDalamudTextureWrap textureWrap, Matrix4x4 viewProjection) {
-      if (_depthRenderer == null) {
-        _depthRenderer = new DepthTestedRenderer();
+    private void RenderWithOcclusion(IDalamudTextureWrap textureWrap, DepthBufferCapture depthCapture) {
+      var (tl, tr, br, bl) = _transform.Corners;
+
+      // Project all 4 corners to screen space
+      if (!WorldToScreen(tl, out var sTL) ||
+        !WorldToScreen(tr, out var sTR) ||
+        !WorldToScreen(br, out var sBR) ||
+        !WorldToScreen(bl, out var sBL)) {
+        return;
       }
 
-      if (!_depthRenderer.IsInitialized) {
-        if (!_depthRenderer.Initialize()) {
-          return false; // Init failed — fall back to ImGui
+      // Determine reference depth: sample depth at corners and use the minimum
+      // (in reverse-Z, smaller = further away = the quad's expected depth plane).
+      // We take the min because corners least likely to be occluded represent the quad's true depth.
+      float d0 = depthCapture.GetDepthAt((int)sTL.X, (int)sTL.Y);
+      float d1 = depthCapture.GetDepthAt((int)sTR.X, (int)sTR.Y);
+      float d2 = depthCapture.GetDepthAt((int)sBR.X, (int)sBR.Y);
+      float d3 = depthCapture.GetDepthAt((int)sBL.X, (int)sBL.Y);
+
+      // Use the minimum as the quad's depth reference (reverse-Z: lower = further)
+      float quadDepth = MathF.Min(MathF.Min(d0, d1), MathF.Min(d2, d3));
+      // Add a small tolerance
+      float threshold = quadDepth + 0.001f;
+
+      const int gridSize = 256;
+      var drawList = ImGui.GetBackgroundDrawList();
+
+      // For each grid cell, draw a textured quad with depth-based alpha
+      for (int gy = 0; gy < gridSize; gy++) {
+        for (int gx = 0; gx < gridSize; gx++) {
+          float u0 = gx / (float)gridSize;
+          float v0 = gy / (float)gridSize;
+          float u1 = (gx + 1) / (float)gridSize;
+          float v1 = (gy + 1) / (float)gridSize;
+
+          // Bilinear interpolation from quad corners to get screen positions
+          var p00 = Bilerp(sTL, sTR, sBL, sBR, u0, v0);
+          var p10 = Bilerp(sTL, sTR, sBL, sBR, u1, v0);
+          var p01 = Bilerp(sTL, sTR, sBL, sBR, u0, v1);
+          var p11 = Bilerp(sTL, sTR, sBL, sBR, u1, v1);
+
+          // Sample depth at cell center to determine alpha
+          var center = Bilerp(sTL, sTR, sBL, sBR, (u0 + u1) * 0.5f, (v0 + v1) * 0.5f);
+          uint color = DepthToColor(depthCapture, center, threshold);
+
+          drawList.AddImageQuad(
+            textureWrap.Handle,
+            p00, p10, p11, p01,
+            new Vector2(u0, v0), new Vector2(u1, v0),
+            new Vector2(u1, v1), new Vector2(u0, v1),
+            color);
         }
       }
+    }
 
-      var corners = _transform.Corners;
-      // Extract the native D3D11 SRV pointer from the ImTextureID struct
-      var handle = textureWrap.Handle;
-      var srvPtr = System.Runtime.CompilerServices.Unsafe.As<Dalamud.Bindings.ImGui.ImTextureID, IntPtr>(ref handle);
-      _depthRenderer.Render(corners, srvPtr, viewProjection);
-      return true;
+    private static Vector2 Bilerp(Vector2 tl, Vector2 tr, Vector2 bl, Vector2 br, float u, float v) {
+      var top = Vector2.Lerp(tl, tr, u);
+      var bot = Vector2.Lerp(bl, br, u);
+      return Vector2.Lerp(top, bot, v);
+    }
+
+    private static uint DepthToColor(DepthBufferCapture depthCapture, Vector2 screenPos, float threshold) {
+      float depth = depthCapture.GetDepthAt((int)screenPos.X, (int)screenPos.Y);
+      // In reverse-Z: higher depth = closer. If game geometry is closer (depth > threshold),
+      // the quad should be occluded (alpha = 0).
+      byte alpha = depth > threshold ? (byte)0 : (byte)255;
+      return (uint)(alpha << 24) | 0x00FFFFFF; // ABGR format
     }
 
     /// <summary>

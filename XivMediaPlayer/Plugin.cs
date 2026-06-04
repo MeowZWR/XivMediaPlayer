@@ -685,7 +685,7 @@ namespace XivMediaPlayer {
             vpMatrix = GetViewProjectionMatrix();
           }
 
-          _worldRenderer.Render(textureWrap, vpMatrix);
+          _worldRenderer.Render(textureWrap, vpMatrix, _depthCapture);
         }
       }
     }
@@ -699,15 +699,11 @@ namespace XivMediaPlayer {
       try {
         var sceneCamera = _camera->CameraBase.SceneCamera;
 
-        // The ViewMatrix from SceneCamera is the view matrix
-        // Cast from FFXIV's Matrix4x4 to System.Numerics.Matrix4x4
         var rawView = sceneCamera.ViewMatrix;
         var view = System.Runtime.CompilerServices.Unsafe.As<
           FFXIVClientStructs.FFXIV.Common.Math.Matrix4x4,
           System.Numerics.Matrix4x4>(ref rawView);
 
-        // Build a perspective projection matrix from camera parameters
-        // FFXIV uses reverse-Z, so near/far are swapped
         var device = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance();
         if (device == null) return null;
 
@@ -716,7 +712,6 @@ namespace XivMediaPlayer {
         float nearPlane = sceneCamera.RenderCamera->NearPlane;
         float farPlane = sceneCamera.RenderCamera->FarPlane;
 
-        // Reverse-Z perspective projection
         var proj = CreateReverseZProjection(fov, aspectRatio, nearPlane, farPlane);
 
         return System.Numerics.Matrix4x4.Multiply(view, proj);

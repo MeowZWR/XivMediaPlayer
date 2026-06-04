@@ -18,6 +18,7 @@ namespace XivMediaPlayer.Compositing {
     private ID3D11Texture2D _depthCopy;       // Our persistent copy of the depth buffer
     private ID3D11Texture2D _stagingTexture;   // CPU-readable copy for preview
     private ID3D11DepthStencilView _depthCopyDSV; // DSV created from our copy for rendering
+    private ID3D11ShaderResourceView _depthCopySRV; // SRV for shader-based depth sampling
     private int _texWidth, _texHeight;
     private Format _texFormat;
     private bool _disposed;
@@ -29,17 +30,26 @@ namespace XivMediaPlayer.Compositing {
     private byte[] _lastRgbaData;
     private int _captureWidth, _captureHeight;
 
+    // Per-frame depth array for occlusion queries
+    private float[] _depthData;
+
     public string DebugInfo => _debugInfo;
     public byte[] LastRgbaData => _lastRgbaData;
     public int CaptureWidth => _captureWidth;
     public int CaptureHeight => _captureHeight;
     public bool IsInitialized => _initialized;
+    public int DepthWidth => _texWidth;
+    public int DepthHeight => _texHeight;
 
     /// <summary>
     /// Returns the DSV of our captured depth copy, for use in depth-tested rendering.
-    /// Returns null if no capture has been made.
     /// </summary>
     public ID3D11DepthStencilView CapturedDSV => _depthCopyDSV;
+
+    /// <summary>
+    /// Returns the SRV of our captured depth copy, for sampling in a pixel shader.
+    /// </summary>
+    public ID3D11ShaderResourceView CapturedSRV => _depthCopySRV;
 
     public bool Initialize() {
       if (_initialized || _disposed) return _initialized;
@@ -98,15 +108,17 @@ namespace XivMediaPlayer.Compositing {
       if (_depthCopy == null || _texWidth != (int)texDesc.Width || _texHeight != (int)texDesc.Height) {
         _depthCopy?.Dispose();
         _depthCopyDSV?.Dispose();
+        _depthCopySRV?.Dispose();
         _stagingTexture?.Dispose();
         _depthCopyDSV = null;
+        _depthCopySRV = null;
         _stagingTexture = null;
 
         _texWidth = (int)texDesc.Width;
         _texHeight = (int)texDesc.Height;
         _texFormat = texDesc.Format;
 
-        // Create a non-MSAA copy with DepthStencil bind flag so we can create a DSV
+        // Create copy with both DepthStencil + ShaderResource bind flags
         _depthCopy = _device.CreateTexture2D(new Texture2DDescription {
           Width = texDesc.Width,
           Height = texDesc.Height,
@@ -115,11 +127,11 @@ namespace XivMediaPlayer.Compositing {
           Format = texDesc.Format,
           SampleDescription = new SampleDescription(1, 0),
           Usage = ResourceUsage.Default,
-          BindFlags = BindFlags.DepthStencil,
+          BindFlags = BindFlags.DepthStencil | BindFlags.ShaderResource,
           CPUAccessFlags = CpuAccessFlags.None,
         });
 
-        // Create DSV from our copy for rendering
+        // Create DSV view
         Format dsvFormat = texDesc.Format switch {
           Format.R24G8_Typeless => Format.D24_UNorm_S8_UInt,
           Format.R32_Typeless => Format.D32_Float,
@@ -129,6 +141,19 @@ namespace XivMediaPlayer.Compositing {
         _depthCopyDSV = _device.CreateDepthStencilView(_depthCopy, new DepthStencilViewDescription {
           Format = dsvFormat,
           ViewDimension = DepthStencilViewDimension.Texture2D,
+        });
+
+        // Create SRV view for shader sampling
+        Format srvFormat = texDesc.Format switch {
+          Format.R24G8_Typeless => Format.R24_UNorm_X8_Typeless,
+          Format.R32_Typeless => Format.R32_Float,
+          Format.R32G8X24_Typeless => Format.R32_Float_X8X24_Typeless,
+          _ => texDesc.Format,
+        };
+        _depthCopySRV = _device.CreateShaderResourceView(_depthCopy, new ShaderResourceViewDescription {
+          Format = srvFormat,
+          ViewDimension = Vortice.Direct3D.ShaderResourceViewDimension.Texture2D,
+          Texture2D = new Texture2DShaderResourceView { MipLevels = 1, MostDetailedMip = 0 },
         });
 
         // Staging texture for CPU readback (preview)
@@ -158,9 +183,61 @@ namespace XivMediaPlayer.Compositing {
       try {
         var depthTexture = new ID3D11Texture2D(_gameDepthTexturePtr);
         CopyDepthBuffer(depthTexture);
+        ReadDepthToArray();
       } catch {
         // ignore — texture may become invalid during shutdown
       }
+    }
+
+    /// <summary>
+    /// Reads depth buffer from staging texture into a cached float array.
+    /// </summary>
+    private void ReadDepthToArray() {
+      if (_depthCopy == null || _stagingTexture == null || _context == null) return;
+
+      try {
+        _context.CopyResource(_stagingTexture, _depthCopy);
+        var mapped = _context.Map(_stagingTexture, 0, MapMode.Read);
+        try {
+          if (_depthData == null || _depthData.Length != _texWidth * _texHeight) {
+            _depthData = new float[_texWidth * _texHeight];
+          }
+
+          for (int y = 0; y < _texHeight; y++) {
+            IntPtr rowPtr = mapped.DataPointer + y * (int)mapped.RowPitch;
+            for (int x = 0; x < _texWidth; x++) {
+              float depth = 0;
+              switch (_texFormat) {
+                case Format.R24G8_Typeless:
+                case Format.D24_UNorm_S8_UInt: {
+                    uint raw = (uint)Marshal.PtrToStructure<int>(rowPtr + x * 4);
+                    depth = (raw & 0x00FFFFFF) / (float)0x00FFFFFF;
+                    break;
+                  }
+                case Format.R32_Typeless:
+                case Format.D32_Float:
+                case Format.R32_Float:
+                  depth = Marshal.PtrToStructure<float>(rowPtr + x * 4);
+                  break;
+              }
+              _depthData[y * _texWidth + x] = depth;
+            }
+          }
+        } finally {
+          _context.Unmap(_stagingTexture, 0);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    /// <summary>
+    /// Get the depth value at a screen coordinate. Returns 0 if out of bounds.
+    /// </summary>
+    public float GetDepthAt(int screenX, int screenY) {
+      if (_depthData == null || screenX < 0 || screenY < 0 || screenX >= _texWidth || screenY >= _texHeight)
+        return 0;
+      return _depthData[screenY * _texWidth + screenX];
     }
 
     /// <summary>
@@ -256,6 +333,7 @@ namespace XivMediaPlayer.Compositing {
       _disposed = true;
 
       _depthCopyDSV?.Dispose();
+      _depthCopySRV?.Dispose();
       _depthCopy?.Dispose();
       _stagingTexture?.Dispose();
 
