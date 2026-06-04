@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Vortice.Direct3D11;
@@ -8,9 +7,10 @@ using Vortice.D3DCompiler;
 
 namespace XivMediaPlayer.Compositing {
   /// <summary>
-  /// Renders a textured quad with shader-based depth occlusion to an offscreen
-  /// render target. The result is an RGBA texture with transparent pixels where
-  /// game geometry occludes the quad. This texture is then displayed via ImGui.
+  /// Renders a textured quad with per-pixel depth occlusion using a fullscreen
+  /// shader pass. Takes screen-space corners (from WorldToScreen) and computes
+  /// correct UVs per-pixel via inverse bilinear interpolation — no triangle
+  /// seams or perspective distortion.
   /// </summary>
   internal unsafe class DepthTestedRenderer : IDisposable {
     private ID3D11Device _device;
@@ -19,15 +19,11 @@ namespace XivMediaPlayer.Compositing {
     // Pipeline state
     private ID3D11VertexShader _vertexShader;
     private ID3D11PixelShader _pixelShader;
-    private ID3D11InputLayout _inputLayout;
-    private ID3D11RasterizerState _rasterizerState;
     private ID3D11BlendState _blendState;
     private ID3D11SamplerState _videoSampler;
     private ID3D11SamplerState _depthSampler;
 
     // Buffers
-    private ID3D11Buffer _vertexBuffer;
-    private ID3D11Buffer _indexBuffer;
     private ID3D11Buffer _constantBuffer;
 
     // Offscreen render target
@@ -41,25 +37,25 @@ namespace XivMediaPlayer.Compositing {
     private string _initError;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct QuadVertex {
-      public Vector3 Position;
-      public Vector2 TexCoord;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct VSConstants {
-      public Matrix4x4 ViewProjection;
+    private struct PSConstants {
+      public Vector2 CornerTL;
+      public Vector2 CornerTR;
+      public Vector2 CornerBR;
+      public Vector2 CornerBL;
       public Vector2 ScreenSize;
-      public Vector2 _pad;
+      public float QuadDepth;
+      public float _pad;
     }
-
-    private static readonly ushort[] QuadIndices = { 0, 1, 2, 2, 3, 0 };
 
     private const string ShaderCode = @"
 cbuffer Constants : register(b0) {
-  row_major matrix ViewProjection;
+  float2 CornerTL;
+  float2 CornerTR;
+  float2 CornerBR;
+  float2 CornerBL;
   float2 ScreenSize;
-  float2 _pad;
+  float QuadDepth;
+  float _pad;
 };
 
 Texture2D VideoTexture : register(t0);
@@ -67,38 +63,81 @@ Texture2D DepthTexture : register(t1);
 SamplerState VideoSampler : register(s0);
 SamplerState DepthSampler : register(s1);
 
-struct VS_IN {
-  float3 pos : POSITION;
-  float2 uv : TEXCOORD;
-};
-
-struct PS_IN {
+struct VS_OUT {
   float4 pos : SV_POSITION;
   float2 uv : TEXCOORD;
 };
 
-PS_IN VS(VS_IN input) {
-  PS_IN output = (PS_IN)0;
-  output.pos = mul(float4(input.pos, 1.0f), ViewProjection);
-  output.uv = input.uv;
-  return output;
+// Fullscreen triangle — no vertex buffer needed
+VS_OUT VS(uint id : SV_VertexID) {
+  VS_OUT o;
+  o.uv = float2((id << 1) & 2, id & 2);
+  o.pos = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);
+  return o;
 }
 
-float4 PS(PS_IN input) : SV_TARGET {
-  float4 color = VideoTexture.Sample(VideoSampler, input.uv);
+// 2D cross product
+float cross2d(float2 a, float2 b) {
+  return a.x * b.y - a.y * b.x;
+}
 
-  // Convert SV_POSITION (pixel coords) to depth buffer UV
-  float2 screenUV = input.pos.xy / ScreenSize;
+// Inverse bilinear interpolation: given a point p inside quad (a,b,c,d),
+// returns (u,v) where p = bilerp(a,b,c,d, u,v)
+// a=TL, b=TR, c=BR, d=BL
+// p = (1-v)*((1-u)*a + u*b) + v*((1-u)*d + u*c)
+float2 InverseBilinear(float2 p, float2 a, float2 b, float2 c, float2 d) {
+  float2 e = b - a;       // top edge
+  float2 f = d - a;       // left edge
+  float2 g = a - b + c - d; // cross term
+  float2 h = p - a;       // vector to point
 
-  // Sample the game's depth buffer
+  float k2 = cross2d(g, f);
+  float k1 = cross2d(e, f) + cross2d(h, g);
+  float k0 = cross2d(h, e);
+
+  float v;
+  if (abs(k2) < 0.0001) {
+    // Linear case
+    v = -k0 / k1;
+  } else {
+    float disc = k1 * k1 - 4.0 * k0 * k2;
+    if (disc < 0) return float2(-1, -1);
+    disc = sqrt(disc);
+    float v0 = (-k1 - disc) / (2.0 * k2);
+    float v1 = (-k1 + disc) / (2.0 * k2);
+    // Pick the solution in [0,1]
+    v = (v0 >= -0.001 && v0 <= 1.001) ? v0 : v1;
+  }
+
+  // Compute u from v
+  float2 denom = e + v * g;
+  float u;
+  if (abs(denom.x) > abs(denom.y)) {
+    u = (h.x - v * f.x) / denom.x;
+  } else {
+    u = (h.y - v * f.y) / denom.y;
+  }
+
+  return float2(u, v);
+}
+
+float4 PS(VS_OUT input) : SV_TARGET {
+  float2 pixelPos = input.pos.xy;
+
+  // Compute UV via inverse bilinear — correct for any quad shape
+  float2 uv = InverseBilinear(pixelPos, CornerTL, CornerTR, CornerBR, CornerBL);
+
+  // Outside the quad? Transparent.
+  if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) {
+    return float4(0, 0, 0, 0);
+  }
+
+  float4 color = VideoTexture.Sample(VideoSampler, uv);
+
+  // Same depth comparison as old CPU grid
+  float2 screenUV = pixelPos / ScreenSize;
   float gameDepth = DepthTexture.Sample(DepthSampler, screenUV).r;
-
-  // input.pos.z is the quad's depth after VP transform
-  float quadDepth = input.pos.z;
-
-  // The game uses reverse-Z: closer objects have HIGHER depth values.
-  // Occlude when game geometry is closer (gameDepth > quadDepth).
-  if (gameDepth > quadDepth + 0.0001) {
+  if (gameDepth > QuadDepth) {
     color.a = 0;
   }
 
@@ -108,13 +147,7 @@ float4 PS(PS_IN input) : SV_TARGET {
 
     public bool IsInitialized => _initialized;
     public string InitError => _initError;
-
-    /// <summary>
-    /// Returns the SRV of the offscreen render target, for use as an ImGui texture.
-    /// </summary>
     public ID3D11ShaderResourceView OutputSRV => _renderTargetSRV;
-    public int OutputWidth => _rtWidth;
-    public int OutputHeight => _rtHeight;
 
     public bool Initialize() {
       if (_initialized || _disposed) return _initialized;
@@ -126,57 +159,34 @@ float4 PS(PS_IN input) : SV_TARGET {
           return false;
         }
 
-        _context = new ID3D11DeviceContext((IntPtr)ffxivDevice->D3D11DeviceContext);
+        var contextPtr = (IntPtr)ffxivDevice->D3D11DeviceContext;
+        System.Runtime.InteropServices.Marshal.AddRef(contextPtr);
+        _context = new ID3D11DeviceContext(contextPtr);
+        System.Runtime.InteropServices.Marshal.AddRef(_context.Device.NativePointer);
         _device = _context.Device;
 
         // Compile shaders
         var vsBytecode = Compiler.Compile(ShaderCode, "VS", "", "vs_5_0");
         _vertexShader = _device.CreateVertexShader(vsBytecode.Span);
 
-        var inputElements = new[] {
-          new InputElementDescription("POSITION", 0, Format.R32G32B32_Float, 0, 0),
-          new InputElementDescription("TEXCOORD", 0, Format.R32G32_Float, 12, 0),
-        };
-        _inputLayout = _device.CreateInputLayout(inputElements, vsBytecode.Span);
-
         var psBytecode = Compiler.Compile(ShaderCode, "PS", "", "ps_5_0");
         _pixelShader = _device.CreatePixelShader(psBytecode.Span);
 
-        // Constant buffer (VP matrix + screen size = 64 + 16 = 80 bytes)
+        // Constant buffer (48 bytes: 4x float2 corners + float2 screen + float depth + float pad)
         _constantBuffer = _device.CreateBuffer(new BufferDescription {
-          ByteWidth = 80,
+          ByteWidth = Marshal.SizeOf<PSConstants>(),
           Usage = ResourceUsage.Default,
           BindFlags = BindFlags.ConstantBuffer,
           CPUAccessFlags = CpuAccessFlags.None,
         });
 
-        // Vertex buffer (4 vertices, updated each frame)
-        _vertexBuffer = _device.CreateBuffer(new BufferDescription {
-          ByteWidth = Marshal.SizeOf<QuadVertex>() * 4,
-          Usage = ResourceUsage.Default,
-          BindFlags = BindFlags.VertexBuffer,
-          CPUAccessFlags = CpuAccessFlags.None,
-        });
-
-        // Index buffer (6 indices, static)
-        _indexBuffer = _device.CreateBuffer(QuadIndices, BindFlags.IndexBuffer);
-
-        // Blend state: premultiplied alpha output
+        // Blend state: write-through
         var blendDesc = new BlendDescription();
         blendDesc.RenderTarget[0] = new RenderTargetBlendDescription {
           BlendEnable = false,
           RenderTargetWriteMask = ColorWriteEnable.All,
         };
         _blendState = _device.CreateBlendState(blendDesc);
-
-        // Rasterizer: no culling
-        _rasterizerState = _device.CreateRasterizerState(new RasterizerDescription {
-          FillMode = FillMode.Solid,
-          CullMode = CullMode.None,
-          FrontCounterClockwise = false,
-          DepthClipEnable = false, // Don't clip — we handle depth in shader
-          ScissorEnable = false,
-        });
 
         // Samplers
         _videoSampler = _device.CreateSamplerState(new SamplerDescription {
@@ -200,9 +210,6 @@ float4 PS(PS_IN input) : SV_TARGET {
       }
     }
 
-    /// <summary>
-    /// Ensures the offscreen render target is the correct size.
-    /// </summary>
     private void EnsureRenderTarget(int width, int height) {
       if (_renderTarget != null && _rtWidth == width && _rtHeight == height) return;
 
@@ -230,50 +237,40 @@ float4 PS(PS_IN input) : SV_TARGET {
     }
 
     /// <summary>
-    /// Render the video quad with depth occlusion to the offscreen render target.
-    /// After calling this, use OutputSRV to display the result in ImGui.
-    /// Returns true if rendering succeeded.
+    /// Render the video quad with per-pixel depth occlusion.
+    /// Uses a fullscreen pass with inverse bilinear UV mapping.
     /// </summary>
     public bool Render(
-      (Vector3 tl, Vector3 tr, Vector3 br, Vector3 bl) corners,
+      (Vector2 tl, Vector2 tr, Vector2 br, Vector2 bl) screenCorners,
       IntPtr videoTextureSRV,
-      Matrix4x4 viewProjection,
       ID3D11ShaderResourceView depthSRV,
+      float quadDepth,
       int screenWidth, int screenHeight) {
 
       if (!_initialized || _disposed || videoTextureSRV == IntPtr.Zero || depthSRV == null) return false;
 
       EnsureRenderTarget(screenWidth, screenHeight);
 
-      // Save current pipeline state
       var savedRTVs = new ID3D11RenderTargetView[1];
       ID3D11DepthStencilView savedDSV;
       _context.OMGetRenderTargets(1, savedRTVs, out savedDSV);
 
       try {
-        // Clear our render target to fully transparent
         _context.ClearRenderTargetView(_renderTargetView, new Vortice.Mathematics.Color4(0, 0, 0, 0));
 
-        // Update vertex buffer
-        var vertices = new QuadVertex[] {
-          new() { Position = corners.tl, TexCoord = new Vector2(0, 0) },
-          new() { Position = corners.tr, TexCoord = new Vector2(1, 0) },
-          new() { Position = corners.br, TexCoord = new Vector2(1, 1) },
-          new() { Position = corners.bl, TexCoord = new Vector2(0, 1) },
-        };
-        _context.UpdateSubresource(vertices, _vertexBuffer);
-
-        // Update constant buffer
-        var constants = new VSConstants {
-          ViewProjection = viewProjection,
+        // Update constants with screen corners + depth threshold
+        var constants = new PSConstants {
+          CornerTL = screenCorners.tl,
+          CornerTR = screenCorners.tr,
+          CornerBR = screenCorners.br,
+          CornerBL = screenCorners.bl,
           ScreenSize = new Vector2(screenWidth, screenHeight),
+          QuadDepth = quadDepth,
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 
-        // Set pipeline
-        _context.IASetInputLayout(_inputLayout);
-        _context.IASetVertexBuffer(0, _vertexBuffer, Marshal.SizeOf<QuadVertex>());
-        _context.IASetIndexBuffer(_indexBuffer, Format.R16_UInt, 0);
+        // Set pipeline — no vertex buffer, no input layout
+        _context.IASetInputLayout(null);
         _context.IASetPrimitiveTopology(Vortice.Direct3D.PrimitiveTopology.TriangleList);
 
         _context.VSSetShader(_vertexShader);
@@ -287,20 +284,17 @@ float4 PS(PS_IN input) : SV_TARGET {
         _context.PSSetSampler(0, _videoSampler);
         _context.PSSetSampler(1, _depthSampler);
 
-        _context.RSSetState(_rasterizerState);
         _context.OMSetBlendState(_blendState);
-
-        // Set viewport and render target to our offscreen texture
         _context.RSSetViewport(0, 0, screenWidth, screenHeight);
         _context.OMSetRenderTargets(_renderTargetView);
 
-        // Draw
-        _context.DrawIndexed(6, 0, 0);
+        // Draw fullscreen triangle (3 verts from SV_VertexID)
+        _context.Draw(3, 0);
 
         return true;
       } finally {
-        // Restore
         _context.OMSetRenderTargets(savedRTVs, savedDSV);
+        _context.PSSetShaderResource(0, (ID3D11ShaderResourceView)null);
         _context.PSSetShaderResource(1, (ID3D11ShaderResourceView)null);
       }
     }
@@ -315,11 +309,7 @@ float4 PS(PS_IN input) : SV_TARGET {
       _depthSampler?.Dispose();
       _videoSampler?.Dispose();
       _blendState?.Dispose();
-      _rasterizerState?.Dispose();
-      _indexBuffer?.Dispose();
-      _vertexBuffer?.Dispose();
       _constantBuffer?.Dispose();
-      _inputLayout?.Dispose();
       _pixelShader?.Dispose();
       _vertexShader?.Dispose();
     }

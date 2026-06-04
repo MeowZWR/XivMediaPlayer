@@ -162,26 +162,6 @@ namespace XivMediaPlayer.Windows {
       ImGui.SameLine();
       if (ImGui.Button("Cinema (12m)")) { _scale = new Vector2(12f, 6.75f); _transform.Scale = _scale; }
 
-      ImGui.Spacing();
-      ImGui.Separator();
-
-      // Depth Occlusion 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Rendering");
-
-      bool depthOcclusion = _renderer?.UseDepthOcclusion ?? false;
-      if (ImGui.Checkbox("Enable Depth Occlusion", ref depthOcclusion)) {
-        if (_renderer != null) _renderer.UseDepthOcclusion = depthOcclusion;
-      }
-      if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("When enabled, game geometry (walls, characters)\n" +
-          "will appear in front of the video screen.\n" +
-          "Uses the game's depth buffer for per-pixel occlusion.");
-      }
-
-      if (depthOcclusion && _renderer?.DepthRendererError != null) {
-        ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f),
-          _renderer.DepthRendererError);
-      }
 
       ImGui.Spacing();
       ImGui.Separator();
@@ -189,8 +169,6 @@ namespace XivMediaPlayer.Windows {
       // Info 
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
         $"Screen: {_scale.X:F1}m x {_scale.Y:F1}m at ({_position.X:F1}, {_position.Y:F1}, {_position.Z:F1})");
-      ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        $"Mode: {(depthOcclusion ? "D3D11 Depth-Tested" : "ImGui Overlay")}");
     }
 
     /// <summary>

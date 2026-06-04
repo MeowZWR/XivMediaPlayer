@@ -56,7 +56,7 @@ namespace XivMediaPlayer.Compositing {
     /// <summary>
     /// Returns initialization error from the depth renderer, if any.
     /// </summary>
-    public string? DepthRendererError => _depthRenderer?.InitError;
+    public string? DepthRendererError { get; private set; }
 
     public WorldVideoRenderer(WorldScreenTransform transform, IGameGui? gameGui = null) {
       _transform = transform ?? new WorldScreenTransform();
@@ -80,66 +80,86 @@ namespace XivMediaPlayer.Compositing {
     }
 
     /// <summary>
-    /// Renders as a tessellated ImGui grid with per-vertex alpha from depth buffer.
+    /// GPU-accelerated per-pixel depth occlusion. Uses the same methodology as the
+    /// old CPU grid (WorldToScreen corners + reverse-Z depth threshold) but runs
+    /// the depth comparison per-pixel on the GPU instead of per-cell on the CPU.
     /// </summary>
     private void RenderWithOcclusion(IDalamudTextureWrap textureWrap, DepthBufferCapture depthCapture,
       Vector3 cameraPos, float nearPlane, float farPlane) {
       var (tl, tr, br, bl) = _transform.Corners;
 
-      // Project all corners to screen space (never cull)
+      // Same projection as before — WorldToScreen is the source of truth
       WorldToScreenClamped(tl, out var sTL, out _);
       WorldToScreenClamped(tr, out var sTR, out _);
       WorldToScreenClamped(br, out var sBR, out _);
       WorldToScreenClamped(bl, out var sBL, out _);
 
-      // Compute the quad's actual depth from camera distance
+      // Same depth threshold as before
       var quadCenter = (tl + tr + br + bl) * 0.25f;
       float distance = Vector3.Distance(cameraPos, quadCenter);
-
-      // Reverse-Z depth formula: near maps to 1.0, far maps to 0.0
-      // depth = near * (far - distance) / (distance * (far - near))
       float quadDepth = nearPlane * (farPlane - distance) / (distance * (farPlane - nearPlane));
       quadDepth = Math.Clamp(quadDepth, 0f, 1f);
 
-      // Threshold: anything with higher depth (closer in reverse-Z) occludes the quad
-      float threshold = quadDepth;
-
       var drawList = ImGui.GetBackgroundDrawList();
 
-      // Draw backlit glow layers behind the video
+      // Draw glow behind the video
       if (_enableGlow) {
-        // Compute screen visibility for glow attenuation
-        float visibility = ComputeVisibility(depthCapture, sTL, sTR, sBR, sBL, threshold);
+        float visibility = ComputeVisibility(depthCapture, sTL, sTR, sBR, sBL, quadDepth);
         RenderGlow(drawList, textureWrap, sTL, sTR, sBR, sBL, visibility);
       }
 
-      const int gridSize = 512;
-
-      // For each grid cell, draw a textured quad with depth-based alpha
-      for (int gy = 0; gy < gridSize; gy++) {
-        for (int gx = 0; gx < gridSize; gx++) {
-          float u0 = gx / (float)gridSize;
-          float v0 = gy / (float)gridSize;
-          float u1 = (gx + 1) / (float)gridSize;
-          float v1 = (gy + 1) / (float)gridSize;
-
-          // Bilinear interpolation from quad corners to get screen positions
-          var p00 = Bilerp(sTL, sTR, sBL, sBR, u0, v0);
-          var p10 = Bilerp(sTL, sTR, sBL, sBR, u1, v0);
-          var p01 = Bilerp(sTL, sTR, sBL, sBR, u0, v1);
-          var p11 = Bilerp(sTL, sTR, sBL, sBR, u1, v1);
-
-          // Sample depth at cell center
-          var center = Bilerp(sTL, sTR, sBL, sBR, (u0 + u1) * 0.5f, (v0 + v1) * 0.5f);
-          uint color = DepthToColor(depthCapture, center, threshold);
-
-          drawList.AddImageQuad(
-            textureWrap.Handle,
-            p00, p10, p11, p01,
-            new Vector2(u0, v0), new Vector2(u1, v0),
-            new Vector2(u1, v1), new Vector2(u0, v1),
-            color);
+      // Ensure DepthTestedRenderer is initialized
+      if (_depthRenderer == null) {
+        _depthRenderer = new DepthTestedRenderer();
+      }
+      if (!_depthRenderer.IsInitialized) {
+        if (!_depthRenderer.Initialize()) {
+          DepthRendererError = $"Init failed: {_depthRenderer.InitError}";
+          RenderScreenSpace(textureWrap);
+          return;
         }
+      }
+
+      // Get viewport size
+      var viewport = ImGui.GetMainViewport();
+      int screenW = (int)viewport.Size.X;
+      int screenH = (int)viewport.Size.Y;
+
+      // Get the video texture SRV pointer
+      var texId = textureWrap.Handle;
+      var videoSrvPtr = Unsafe.As<ImTextureID, IntPtr>(ref texId);
+
+      try {
+        if (depthCapture.CapturedSRV == null) {
+          DepthRendererError = "Depth SRV not available";
+          RenderScreenSpace(textureWrap);
+          return;
+        }
+
+        // Same corners, same depth threshold — just GPU per-pixel instead of CPU per-cell
+        bool success = _depthRenderer.Render(
+          (sTL, sTR, sBR, sBL),
+          videoSrvPtr,
+          depthCapture.CapturedSRV,
+          quadDepth,
+          screenW, screenH);
+
+        if (success && _depthRenderer.OutputSRV != null) {
+          var outputPtr = _depthRenderer.OutputSRV.NativePointer;
+          var outputId = Unsafe.As<IntPtr, ImTextureID>(ref outputPtr);
+
+          drawList.AddImage(
+            outputId,
+            viewport.Pos,
+            viewport.Pos + viewport.Size);
+          DepthRendererError = null;
+        } else {
+          DepthRendererError = "GPU render returned false";
+          RenderScreenSpace(textureWrap);
+        }
+      } catch (Exception ex) {
+        DepthRendererError = $"GPU render exception: {ex.Message}";
+        RenderScreenSpace(textureWrap);
       }
     }
 
@@ -274,6 +294,23 @@ namespace XivMediaPlayer.Compositing {
       }
 
       return total > 0 ? passing / (float)total : 1f;
+    }
+
+    /// <summary>
+    /// Computes visibility for glow using the CPU depth readback.
+    /// Derives the threshold from camera distance to the quad center.
+    /// </summary>
+    private float ComputeVisibilityFromGPU(DepthBufferCapture depthCapture,
+      Vector2 sTL, Vector2 sTR, Vector2 sBR, Vector2 sBL,
+      Vector3 cameraPos, float nearPlane, float farPlane) {
+      var (tl, tr, br, bl) = _transform.Corners;
+      var quadCenter = (tl + tr + br + bl) * 0.25f;
+      float distance = Vector3.Distance(cameraPos, quadCenter);
+
+      float quadDepth = nearPlane * (farPlane - distance) / (distance * (farPlane - nearPlane));
+      quadDepth = Math.Clamp(quadDepth, 0f, 1f);
+
+      return ComputeVisibility(depthCapture, sTL, sTR, sBR, sBL, quadDepth);
     }
 
     private bool WorldToScreen(Vector3 worldPos, out Vector2 screenPos) {

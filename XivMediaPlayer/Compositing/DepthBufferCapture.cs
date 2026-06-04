@@ -68,7 +68,9 @@ namespace XivMediaPlayer.Compositing {
         }
 
         var contextPtr = (IntPtr)ffxivDevice->D3D11DeviceContext;
+        System.Runtime.InteropServices.Marshal.AddRef(contextPtr);
         _context = new ID3D11DeviceContext(contextPtr);
+        System.Runtime.InteropServices.Marshal.AddRef(_context.Device.NativePointer);
         _device = _context.Device;
 
         // Find the game's depth texture pointer

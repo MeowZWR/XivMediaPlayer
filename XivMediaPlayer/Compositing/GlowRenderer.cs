@@ -77,7 +77,10 @@ float4 PS(VS_OUT input) : SV_TARGET {
         if (ffxivDevice == null || ffxivDevice->D3D11DeviceContext == null)
           return false;
 
-        _context = new ID3D11DeviceContext((IntPtr)ffxivDevice->D3D11DeviceContext);
+        var contextPtr = (IntPtr)ffxivDevice->D3D11DeviceContext;
+        System.Runtime.InteropServices.Marshal.AddRef(contextPtr); // prevent Release on GC
+        _context = new ID3D11DeviceContext(contextPtr);
+        System.Runtime.InteropServices.Marshal.AddRef(_context.Device.NativePointer);
         _device = _context.Device;
         _glowSize = glowSize;
 
