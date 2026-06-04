@@ -439,13 +439,6 @@ namespace MediaPlayerCore.YtDlp
             string pluginDir = Path.GetDirectoryName(_ytDlpPath) ?? ".";
             string localCookies = Path.Combine(pluginDir, "cookies.txt");
             if (File.Exists(localCookies)) return localCookies;
-
-            //// Check VRCVideoCacher location (%APPDATA%/VRCVideoCacher/)
-            //string vrcCookies = Path.Combine(
-            //  Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            //  "VRCVideoCacher", "youtube_cookies.txt");
-            //if (File.Exists(vrcCookies)) return vrcCookies;
-
             return null;
         }
 

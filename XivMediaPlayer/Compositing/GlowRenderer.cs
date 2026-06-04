@@ -48,7 +48,21 @@ VS_OUT VS(uint id : SV_VertexID) {
 }
 
 float4 PS(VS_OUT input) : SV_TARGET {
-  float4 color = VideoTexture.Sample(VideoSampler, input.uv);
+  float4 color = 0;
+  float2 offset = float2(0.04, 0.04);
+  
+  // 9-tap scattered blur
+  color += VideoTexture.Sample(VideoSampler, input.uv);
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(offset.x, offset.y));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(-offset.x, offset.y));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(offset.x, -offset.y));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(-offset.x, -offset.y));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(0, offset.y));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(0, -offset.y));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(offset.x, 0));
+  color += VideoTexture.Sample(VideoSampler, input.uv + float2(-offset.x, 0));
+  
+  color /= 9.0;
 
   // Rectangular vignette: smooth fade to 0 at edges
   float2 d = abs(input.uv - 0.5) * 2.0; // 0 at center, 1 at edge
