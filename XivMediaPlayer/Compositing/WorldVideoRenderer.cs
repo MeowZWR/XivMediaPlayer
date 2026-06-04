@@ -215,11 +215,11 @@ namespace XivMediaPlayer.Compositing {
       // Lazy-init the GPU glow renderer
       if (_glowRenderer == null) {
         _glowRenderer = new GlowRenderer();
-        _glowRenderer.Initialize(32); // 32x32 downsample = heavy blur
+        _glowRenderer.Initialize(64); // 64x64 downsample with shader vignette
       }
       if (!_glowRenderer.IsInitialized) return;
 
-      // Update the downsampled glow texture from the current video frame
+      // Update the glow texture (GPU downsample + vignette in one shader pass)
       var texId = textureWrap.Handle;
       var texPtr = Unsafe.As<ImTextureID, IntPtr>(ref texId);
       if (!_glowRenderer.UpdateFromVideoTexture(texPtr)) return;
@@ -227,28 +227,20 @@ namespace XivMediaPlayer.Compositing {
       if (glowPtr == IntPtr.Zero) return;
       var glowId = Unsafe.As<IntPtr, ImTextureID>(ref glowPtr);
 
+      // Single draw call — vignette is baked into the texture so edges fade naturally
       var center = (sTL + sTR + sBR + sBL) * 0.25f;
+      float scale = 1.45f;
+      var gTL = center + (sTL - center) * scale;
+      var gTR = center + (sTR - center) * scale;
+      var gBR = center + (sBR - center) * scale;
+      var gBL = center + (sBL - center) * scale;
 
-      // Draw 2 glow layers using the blurred texture
-      var layers = new (float scale, byte alpha)[] {
-        (1.15f, 80),   // tight bright glow
-        (1.40f, 40),   // wider soft ambient
-      };
-
-      foreach (var (scale, alpha) in layers) {
-        var gTL = center + (sTL - center) * scale;
-        var gTR = center + (sTR - center) * scale;
-        var gBR = center + (sBR - center) * scale;
-        var gBL = center + (sBL - center) * scale;
-        uint color = (uint)(alpha << 24) | 0x00FFFFFF;
-
-        drawList.AddImageQuad(
-          glowId,
-          gTL, gTR, gBR, gBL,
-          new Vector2(0, 0), new Vector2(1, 0),
-          new Vector2(1, 1), new Vector2(0, 1),
-          color);
-      }
+      drawList.AddImageQuad(
+        glowId,
+        gTL, gTR, gBR, gBL,
+        new Vector2(0, 0), new Vector2(1, 0),
+        new Vector2(1, 1), new Vector2(0, 1),
+        0x90FFFFFF); // ~56% alpha
     }
 
     private bool WorldToScreen(Vector3 worldPos, out Vector2 screenPos) {
