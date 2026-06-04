@@ -43,8 +43,9 @@ namespace XivMediaPlayer.Compositing {
       public Vector2 CornerBR;
       public Vector2 CornerBL;
       public Vector2 ScreenSize;
-      public float QuadDepth;
-      public float _pad;
+      public float _pad0;
+      public float _pad1;
+      public Vector4 CornerDepths; // TL, TR, BR, BL depths
     }
 
     private const string ShaderCode = @"
@@ -54,8 +55,9 @@ cbuffer Constants : register(b0) {
   float2 CornerBR;
   float2 CornerBL;
   float2 ScreenSize;
-  float QuadDepth;
-  float _pad;
+  float _pad0;
+  float _pad1;
+  float4 CornerDepths; // x=TL, y=TR, z=BR, w=BL
 };
 
 Texture2D VideoTexture : register(t0);
@@ -134,10 +136,15 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
   float4 color = VideoTexture.Sample(VideoSampler, uv);
 
-  // Same depth comparison as old CPU grid
+  // Bilinear interpolation of per-corner depths using the same UV
+  float depthTop = lerp(CornerDepths.x, CornerDepths.y, uv.x);   // TL → TR
+  float depthBot = lerp(CornerDepths.w, CornerDepths.z, uv.x);   // BL → BR
+  float quadDepth = lerp(depthTop, depthBot, uv.y);
+
+  // Depth comparison per-pixel with interpolated threshold
   float2 screenUV = pixelPos / ScreenSize;
   float gameDepth = DepthTexture.Sample(DepthSampler, screenUV).r;
-  if (gameDepth > QuadDepth) {
+  if (gameDepth > quadDepth) {
     color.a = 0;
   }
 
@@ -244,7 +251,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       (Vector2 tl, Vector2 tr, Vector2 br, Vector2 bl) screenCorners,
       IntPtr videoTextureSRV,
       ID3D11ShaderResourceView depthSRV,
-      float quadDepth,
+      Vector4 cornerDepths,
       int screenWidth, int screenHeight) {
 
       if (!_initialized || _disposed || videoTextureSRV == IntPtr.Zero || depthSRV == null) return false;
@@ -265,7 +272,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           CornerBR = screenCorners.br,
           CornerBL = screenCorners.bl,
           ScreenSize = new Vector2(screenWidth, screenHeight),
-          QuadDepth = quadDepth,
+          CornerDepths = cornerDepths,
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

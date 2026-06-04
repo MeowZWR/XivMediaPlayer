@@ -94,17 +94,26 @@ namespace XivMediaPlayer.Compositing {
       WorldToScreenClamped(br, out var sBR, out _);
       WorldToScreenClamped(bl, out var sBL, out _);
 
-      // Same depth threshold as before
-      var quadCenter = (tl + tr + br + bl) * 0.25f;
-      float distance = Vector3.Distance(cameraPos, quadCenter);
-      float quadDepth = nearPlane * (farPlane - distance) / (distance * (farPlane - nearPlane));
-      quadDepth = Math.Clamp(quadDepth, 0f, 1f);
+      // Compute per-corner depths for accurate angled-view occlusion
+      float ComputeDepth(Vector3 corner) {
+        float dist = Vector3.Distance(cameraPos, corner);
+        float d = nearPlane * (farPlane - dist) / (dist * (farPlane - nearPlane));
+        return Math.Clamp(d, 0f, 1f);
+      }
+      float depthTL = ComputeDepth(tl);
+      float depthTR = ComputeDepth(tr);
+      float depthBR = ComputeDepth(br);
+      float depthBL = ComputeDepth(bl);
+      var cornerDepths = new Vector4(depthTL, depthTR, depthBR, depthBL);
+
+      // Use center depth for glow visibility (still cheap 8x8 CPU sample)
+      float centerDepth = (depthTL + depthTR + depthBR + depthBL) * 0.25f;
 
       var drawList = ImGui.GetBackgroundDrawList();
 
       // Draw glow behind the video
       if (_enableGlow) {
-        float visibility = ComputeVisibility(depthCapture, sTL, sTR, sBR, sBL, quadDepth);
+        float visibility = ComputeVisibility(depthCapture, sTL, sTR, sBR, sBL, centerDepth);
         RenderGlow(drawList, textureWrap, sTL, sTR, sBR, sBL, visibility);
       }
 
@@ -136,12 +145,12 @@ namespace XivMediaPlayer.Compositing {
           return;
         }
 
-        // Same corners, same depth threshold — just GPU per-pixel instead of CPU per-cell
+        // Per-corner depths interpolated in shader for correct angled-view occlusion
         bool success = _depthRenderer.Render(
           (sTL, sTR, sBR, sBL),
           videoSrvPtr,
           depthCapture.CapturedSRV,
-          quadDepth,
+          cornerDepths,
           screenW, screenH);
 
         if (success && _depthRenderer.OutputSRV != null) {
