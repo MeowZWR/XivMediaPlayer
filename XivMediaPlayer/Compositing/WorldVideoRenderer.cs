@@ -71,12 +71,13 @@ namespace XivMediaPlayer.Compositing {
       Vector3? cameraPos = null,
       Vector3? cameraForward = null,
       UILayerCapture uiCapture = null,
-      float nearPlane = 0.1f, float farPlane = 10000f) {
+      float nearPlane = 0.1f, float farPlane = 10000f,
+      Vector2? hoverUV = null, float progress = 0f, bool isPlaying = false) {
       if (_disposed || !IsActive || textureWrap == null) return;
 
       if (_useDepthOcclusion && depthCapture != null && cameraPos.HasValue && cameraForward.HasValue) {
         RenderWithOcclusion(textureWrap, depthCapture, cameraPos.Value,
-          cameraForward.Value, uiCapture, nearPlane, farPlane);
+          cameraForward.Value, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying);
       } else {
         RenderScreenSpace(textureWrap);
       }
@@ -93,7 +94,7 @@ namespace XivMediaPlayer.Compositing {
     /// </summary>
     private void RenderWithOcclusion(IDalamudTextureWrap textureWrap, DepthBufferCapture depthCapture,
       Vector3 cameraPos, Vector3 cameraForward, UILayerCapture uiCapture,
-      float nearPlane, float farPlane) {
+      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying) {
       var (tl, tr, br, bl) = _transform.Corners;
 
       // WorldToScreen is the source of truth for screen positions
@@ -183,7 +184,8 @@ namespace XivMediaPlayer.Compositing {
           depthCapture.CapturedSRV,
           cornerDepths,
           screenW, screenH,
-          uiCapture?.BackBufferSRV);
+          uiCapture?.BackBufferSRV,
+          hoverUV, progress, isPlaying);
 
         if (success && _depthRenderer.OutputSRV != null) {
           var outputPtr = _depthRenderer.OutputSRV.NativePointer;

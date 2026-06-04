@@ -110,6 +110,17 @@ namespace MediaPlayerCore {
         }
       }
     }
+    
+    public long Time {
+      get => _vlcPlayer?.Time ?? 0;
+      set { if (_vlcPlayer != null) _vlcPlayer.Time = value; }
+    }
+
+    public long Length => _vlcPlayer?.Length ?? 0;
+
+    public void Pause() {
+      _vlcPlayer?.Pause();
+    }
     public SoundType SoundType { get => _soundType; set => _soundType = value; }
     public string SoundPath { get => _soundPath; set => _soundPath = value; }
     public IMediaGameObject Camera { get => _camera; set => _camera = value; }
@@ -140,7 +151,12 @@ namespace MediaPlayerCore {
               Debug.WriteLine($"[MediaObject] Media path: {mediaPath.Substring(0, Math.Min(100, mediaPath.Length))}...");
 
               Core.Initialize(location);
-              libVLC = new LibVLC("--vout", "none");
+              libVLC = new LibVLC(
+                "--vout=none", 
+                "--http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "--http-reconnect",
+                "--network-caching=2000"
+              );
 
               // Hook VLC's internal log to catch errors
               libVLC.Log += (s, e) => {
@@ -248,10 +264,6 @@ namespace MediaPlayerCore {
           _currentMappedFile.Dispose();
           _currentMappedFile = null;
           _currentMappedViewAccessor = null;
-        } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
-      } else {
-        try {
-          _vlcPlayer.Stop();
         } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
       }
     }

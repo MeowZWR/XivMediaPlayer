@@ -63,6 +63,7 @@ namespace XivMediaPlayer.Windows {
       // Enable toggle 
       if (ImGui.Checkbox("Render in World", ref _enabled)) {
         _transform.Enabled = _enabled;
+        _onSave?.Invoke();
       }
 
       if (!_enabled) {
@@ -77,6 +78,7 @@ namespace XivMediaPlayer.Windows {
       if (ImGui.Button("Place at Camera")) {
         _onPlaceAtCamera?.Invoke();
         SyncFromTransform();
+        _onSave?.Invoke();
       }
       ImGui.SameLine();
       if (ImGui.Button("Save")) {
@@ -88,6 +90,7 @@ namespace XivMediaPlayer.Windows {
         _transform.Enabled = false;
         _enabled = false;
         SyncFromTransform();
+        _onSave?.Invoke();
       }
 
       ImGui.Spacing();
@@ -98,25 +101,32 @@ namespace XivMediaPlayer.Windows {
 
       bool posChanged = false;
       posChanged |= ImGui.DragFloat("X##pos", ref _position.X, 0.05f, -1000f, 1000f, "%.2f");
+      bool savePos = ImGui.IsItemDeactivatedAfterEdit();
       posChanged |= ImGui.DragFloat("Y##pos", ref _position.Y, 0.05f, -1000f, 1000f, "%.2f");
+      savePos |= ImGui.IsItemDeactivatedAfterEdit();
       posChanged |= ImGui.DragFloat("Z##pos", ref _position.Z, 0.05f, -1000f, 1000f, "%.2f");
+      savePos |= ImGui.IsItemDeactivatedAfterEdit();
+      
       if (posChanged) {
         _transform.Position = _position;
+      }
+      if (savePos) {
+        _onSave?.Invoke();
       }
 
       // Nudge buttons
       float nudge = 0.25f;
-      if (ImGui.Button("\u2190##posX")) { _position.X -= nudge; _transform.Position = _position; }
+      if (ImGui.Button("\u2190##posX")) { _position.X -= nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("\u2192##posX")) { _position.X += nudge; _transform.Position = _position; }
+      if (ImGui.Button("\u2192##posX")) { _position.X += nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("\u2193##posY")) { _position.Y -= nudge; _transform.Position = _position; }
+      if (ImGui.Button("\u2193##posY")) { _position.Y -= nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("\u2191##posY")) { _position.Y += nudge; _transform.Position = _position; }
+      if (ImGui.Button("\u2191##posY")) { _position.Y += nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Near##posZ")) { _position.Z -= nudge; _transform.Position = _position; }
+      if (ImGui.Button("Near##posZ")) { _position.Z -= nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Far##posZ")) { _position.Z += nudge; _transform.Position = _position; }
+      if (ImGui.Button("Far##posZ")) { _position.Z += nudge; _transform.Position = _position; _onSave?.Invoke(); }
 
       ImGui.Spacing();
       ImGui.Separator();
@@ -126,19 +136,24 @@ namespace XivMediaPlayer.Windows {
 
       bool rotChanged = false;
       rotChanged |= ImGui.SliderFloat("Yaw##rot", ref _rotation.X, -180f, 180f, "%.1f\u00b0");
+      bool saveRot = ImGui.IsItemDeactivatedAfterEdit();
       rotChanged |= ImGui.SliderFloat("Pitch##rot", ref _rotation.Y, -90f, 90f, "%.1f\u00b0");
+      saveRot |= ImGui.IsItemDeactivatedAfterEdit();
       if (rotChanged) {
         _transform.RotationDegrees = new Vector3(_rotation.Y, _rotation.X, 0);
       }
+      if (saveRot) {
+        _onSave?.Invoke();
+      }
 
       // Quick rotation presets
-      if (ImGui.Button("Face North")) { _rotation.X = 0; _transform.RotationDegrees = new Vector3(_rotation.Y, 0, 0); }
+      if (ImGui.Button("Face North")) { _rotation.X = 0; _transform.RotationDegrees = new Vector3(_rotation.Y, 0, 0); _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Face East")) { _rotation.X = 90; _transform.RotationDegrees = new Vector3(_rotation.Y, 90, 0); }
+      if (ImGui.Button("Face East")) { _rotation.X = 90; _transform.RotationDegrees = new Vector3(_rotation.Y, 90, 0); _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Face South")) { _rotation.X = 180; _transform.RotationDegrees = new Vector3(_rotation.Y, 180, 0); }
+      if (ImGui.Button("Face South")) { _rotation.X = 180; _transform.RotationDegrees = new Vector3(_rotation.Y, 180, 0); _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Face West")) { _rotation.X = -90; _transform.RotationDegrees = new Vector3(_rotation.Y, -90, 0); }
+      if (ImGui.Button("Face West")) { _rotation.X = -90; _transform.RotationDegrees = new Vector3(_rotation.Y, -90, 0); _onSave?.Invoke(); }
 
       ImGui.Spacing();
       ImGui.Separator();
@@ -148,19 +163,24 @@ namespace XivMediaPlayer.Windows {
 
       bool scaleChanged = false;
       scaleChanged |= ImGui.DragFloat("Width##scale", ref _scale.X, 0.1f, 0.5f, 50f, "%.1f");
+      bool saveScale = ImGui.IsItemDeactivatedAfterEdit();
       scaleChanged |= ImGui.DragFloat("Height##scale", ref _scale.Y, 0.1f, 0.3f, 30f, "%.1f");
+      saveScale |= ImGui.IsItemDeactivatedAfterEdit();
       if (scaleChanged) {
         _transform.Scale = _scale;
       }
+      if (saveScale) {
+        _onSave?.Invoke();
+      }
 
       // Preset sizes
-      if (ImGui.Button("Small (2m)")) { _scale = new Vector2(2f, 1.125f); _transform.Scale = _scale; }
+      if (ImGui.Button("Small (2m)")) { _scale = new Vector2(2f, 1.125f); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Medium (4m)")) { _scale = new Vector2(4f, 2.25f); _transform.Scale = _scale; }
+      if (ImGui.Button("Medium (4m)")) { _scale = new Vector2(4f, 2.25f); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Large (8m)")) { _scale = new Vector2(8f, 4.5f); _transform.Scale = _scale; }
+      if (ImGui.Button("Large (8m)")) { _scale = new Vector2(8f, 4.5f); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Cinema (12m)")) { _scale = new Vector2(12f, 6.75f); _transform.Scale = _scale; }
+      if (ImGui.Button("Cinema (12m)")) { _scale = new Vector2(12f, 6.75f); _transform.Scale = _scale; _onSave?.Invoke(); }
 
 
       ImGui.Spacing();
@@ -212,6 +232,9 @@ namespace XivMediaPlayer.Windows {
           SyncFromTransform();
           return true;
         } else {
+          if (_isDragging) {
+             _onSave?.Invoke();
+          }
           _isDragging = false;
         }
       }

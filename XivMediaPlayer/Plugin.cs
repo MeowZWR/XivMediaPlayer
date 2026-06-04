@@ -456,7 +456,13 @@ namespace XivMediaPlayer {
           var metadataTask = _ytDlpManager.GetMetadata(url);
           var resolveTask = _ytDlpManager.ResolveStreamUrl(url);
 
-          string? streamUrl = await resolveTask;
+          string? streamUrl = null;
+          try {
+            streamUrl = await resolveTask;
+          } catch (Exception resolveEx) {
+            _pluginLog.Warning(resolveEx, "[yt-dlp] Failed to resolve stream URL.");
+          }
+
           if (string.IsNullOrEmpty(streamUrl)) {
             _chat.PrintError("[Media Player] Failed to resolve URL via yt-dlp. Trying direct playback...");
             TuneIntoStream(url, audioGameObject, true);
@@ -604,9 +610,6 @@ namespace XivMediaPlayer {
     #region Event Handlers
 
     private void OnTerritoryChanged(uint territoryId) {
-      // Auto-save current screen placement for the location we're leaving
-      SaveScreenForCurrentLocation();
-
       _videoWindow.IsOpen = false;
       _mediaManager?.CleanSounds();
       ResetStreamValues();
@@ -640,6 +643,8 @@ namespace XivMediaPlayer {
         _worldRenderer.Transform.RotationDegrees = saved.RotationDegrees;
         _worldRenderer.Transform.Scale = saved.Scale;
         _worldRenderer.Transform.Enabled = saved.Enabled;
+      } else {
+        _worldRenderer.Transform.Enabled = false; // Turn off 3D screen in new zones by default
       }
     }
 
@@ -793,7 +798,41 @@ namespace XivMediaPlayer {
             } catch { }
           }
 
-          _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane);
+          System.Numerics.Vector2? hoverUV = null;
+          float progress = 0f;
+          bool isPlaying = false;
+
+          var activeStream = _mediaManager?.ActiveStream;
+          if (activeStream != null && activeStream.Length > 0) {
+            progress = activeStream.Time / (float)activeStream.Length;
+            isPlaying = activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
+          }
+
+          var viewProj = GetViewProjectionMatrix();
+          if (viewProj.HasValue) {
+            var mousePos = ImGui.GetIO().MousePos;
+            var viewport = ImGui.GetMainViewport();
+            var localMousePos = mousePos - viewport.Pos;
+            
+            if (MathUtils.ScreenPointToRay(localMousePos, (int)viewport.Size.X, (int)viewport.Size.Y, viewProj.Value, out var rayOrig, out var rayDir)) {
+              var (tl, tr, br, bl) = _worldRenderer.Transform.Corners;
+              if (MathUtils.RayQuadIntersect(rayOrig, rayDir, tl, tr, br, bl, out var uv)) {
+                hoverUV = uv;
+                
+                // Handle clicks on media controls
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && uv.Y > 0.85f && activeStream != null) {
+                  if (uv.X > 0.05f && uv.X < 0.10f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                    activeStream.Pause(); // Toggles play/pause
+                  } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.95f) {
+                    float seekProgress = (uv.X - 0.15f) / 0.80f;
+                    activeStream.Time = (long)(seekProgress * activeStream.Length);
+                  }
+                }
+              }
+            }
+          }
+
+          _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying);
         }
       }
     }

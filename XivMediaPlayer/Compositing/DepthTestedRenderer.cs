@@ -45,6 +45,11 @@ namespace XivMediaPlayer.Compositing {
       public float _pad0;
       public float _pad1;
       public Vector4 CornerDepths; // TL, TR, BR, BL depths
+      
+      // New fields appended at the end (16 bytes total)
+      public Vector2 HoverUV;
+      public float Progress;
+      public float IsPlaying;
     }
 
     private const string ShaderCode = @"
@@ -57,6 +62,9 @@ cbuffer Constants : register(b0) {
   float _pad0;
   float _pad1;
   float4 CornerDepths; // x=TL, y=TR, z=BR, w=BL
+  float2 HoverUV;
+  float Progress;
+  float IsPlaying;
 };
 
 Texture2D VideoTexture : register(t0);
@@ -140,6 +148,42 @@ float4 PS(VS_OUT input) : SV_TARGET {
   
   // Smoothly blend out the video behind UI drop shadows and gradients
   color.a *= saturate(1.0 - bbAlpha);
+  
+  // Media Controls UI overlay
+  if (HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
+    if (uv.y > 0.85) {
+      // Draw bottom bar background (semi-transparent black)
+      color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
+      
+      // Draw Seek Bar track and progress fill
+      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.15 && uv.x < 0.95) {
+        float barProgress = (uv.x - 0.15) / 0.80;
+        if (barProgress < Progress) {
+           color.rgb = float3(0.8, 0.2, 0.2); // FFXIV-style red progress
+        } else {
+           color.rgb = float3(0.3, 0.3, 0.3); // Grey track
+        }
+      }
+      
+      // Draw Play/Pause icon at bottom left
+      if (uv.x > 0.05 && uv.x < 0.10 && uv.y > 0.88 && uv.y < 0.94) {
+         if (IsPlaying > 0.5) {
+            // Draw two vertical bars for Pause
+            float px = (uv.x - 0.05) / 0.05;
+            if ((px > 0.2 && px < 0.4) || (px > 0.6 && px < 0.8)) {
+               color.rgb = float3(1, 1, 1);
+            }
+         } else {
+            // Draw triangle for Play
+            float px = (uv.x - 0.05) / 0.05; // 0 to 1
+            float py = (uv.y - 0.88) / 0.06; // 0 to 1
+            if (px < 1.0 - abs(py - 0.5) * 2.0) {
+               color.rgb = float3(1, 1, 1);
+            }
+         }
+      }
+    }
+  }
   
   return color;
 }
@@ -243,7 +287,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
       ID3D11ShaderResourceView depthSRV,
       Vector4 cornerDepths,
       int screenWidth, int screenHeight,
-      ID3D11ShaderResourceView backBufferSRV) {
+      ID3D11ShaderResourceView backBufferSRV,
+      Vector2? hoverUV, float progress, bool isPlaying) {
 
       if (!_initialized || _disposed || videoTextureSRV == IntPtr.Zero || depthSRV == null) return false;
 
@@ -263,7 +308,10 @@ float4 PS(VS_OUT input) : SV_TARGET {
           CornerBR = screenCorners.br,
           CornerBL = screenCorners.bl,
           ScreenSize = new Vector2(screenWidth, screenHeight),
+          HoverUV = hoverUV ?? new Vector2(-1, -1),
           CornerDepths = cornerDepths,
+          Progress = progress,
+          IsPlaying = isPlaying ? 1.0f : 0.0f
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

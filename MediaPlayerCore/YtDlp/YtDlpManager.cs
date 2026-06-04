@@ -95,8 +95,8 @@ namespace MediaPlayerCore.YtDlp {
         OnStatusUpdate?.Invoke(this, "Resolving stream URL...");
 
         string formatArg = _preferredMaxHeight > 0
-          ? $"best[height<={_preferredMaxHeight}]/best"
-          : "best";
+          ? $"b[height<={_preferredMaxHeight}]/b"
+          : "b";
 
         string result = await RunYtDlp($"--get-url -f \"{formatArg}\" \"{url}\"");
         string? streamUrl = result?.Trim().Split('\n').FirstOrDefault()?.Trim();
@@ -155,7 +155,7 @@ namespace MediaPlayerCore.YtDlp {
 
         // Video at each quality level
         foreach (int height in qualities) {
-          string? qualityUrl = await ResolveUrlWithFormat(url, $"best[height<={height}]/best");
+          string? qualityUrl = await ResolveUrlWithFormat(url, $"b[height<={height}]/b");
           urls.Add(qualityUrl ?? "");
         }
 
@@ -424,7 +424,7 @@ namespace MediaPlayerCore.YtDlp {
     /// Builds the common argument prefix (cookies, etc.) for all yt-dlp calls.
     /// </summary>
     private string BuildCommonArgs() {
-      string args = "";
+      string args = "--impersonate chrome ";
 
       // Cookie injection
       if (!string.IsNullOrEmpty(CookieBrowser)) {

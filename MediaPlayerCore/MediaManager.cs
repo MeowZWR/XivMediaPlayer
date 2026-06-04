@@ -22,6 +22,13 @@ namespace MediaPlayerCore {
     public float LiveStreamVolume { get => _livestreamVolume; set => _livestreamVolume = value; }
     public byte[] LastFrame { get => _lastFrame; set => _lastFrame = value; }
     public bool Invalidated { get => _invalidated; set => _invalidated = value; }
+    
+    public MediaObject? ActiveStream {
+      get {
+        var stream = _playbackStreams.Values.FirstOrDefault();
+        return stream;
+      }
+    }
 
     public event EventHandler OnNewMediaTriggered;
 
@@ -38,11 +45,16 @@ namespace MediaPlayerCore {
           OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
           if (!string.IsNullOrEmpty(audioPath)) {
             if (audioPath.StartsWith("http") || audioPath.StartsWith("rtmp")) {
-              foreach (var sound in _playbackStreams) {
-                sound.Value.Invalidated = true;
-                sound.Value?.Stop();
-              }
+              var streamsToStop = _playbackStreams.Values.ToList();
               _playbackStreams.Clear();
+
+              Task.Run(() => {
+                foreach (var sound in streamsToStop) {
+                  sound.Invalidated = true;
+                  sound?.Stop();
+                }
+              });
+
               ConfigureStream(playerObject, audioPath, delay);
             }
           }
