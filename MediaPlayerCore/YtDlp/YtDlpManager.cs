@@ -1,7 +1,9 @@
 using Newtonsoft.Json;
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Net;
 using System.Text;
+using System.Threading;
 
 namespace MediaPlayerCore.YtDlp
 {
@@ -42,12 +44,15 @@ namespace MediaPlayerCore.YtDlp
     /// Manages yt-dlp binary execution for resolving stream URLs and fetching metadata.
     /// Supports YouTube, Twitch, and 1000+ other sites.
     /// </summary>
-    public class YtDlpManager
+    public class YtDlpManager : IDisposable
     {
         private string _ytDlpPath;
         private string? _cookiesPath;
         private int _preferredMaxHeight;
         private readonly object _lock = new object();
+        private HttpListener? _cookieListener;
+        private Thread? _cookieListenerThread;
+        private bool _isListeningForCookies;
 
         public event EventHandler<string>? OnStatusUpdate;
         public event EventHandler<Exception>? OnError;
@@ -76,6 +81,89 @@ namespace MediaPlayerCore.YtDlp
             _ytDlpPath = Path.Combine(pluginDir, "yt-dlp.exe");
             _preferredMaxHeight = preferredMaxHeight;
             _cookiesPath = FindCookiesFile();
+            StartCookieListener();
+        }
+
+        private void StartCookieListener()
+        {
+            try
+            {
+                _cookieListener = new HttpListener();
+                _cookieListener.Prefixes.Add("http://127.0.0.1:9696/api/youtube-cookies/");
+                _cookieListener.Prefixes.Add("http://127.0.0.1:9696/");
+                _cookieListener.Start();
+
+                _isListeningForCookies = true;
+                _cookieListenerThread = new Thread(CookieListenerLoop)
+                {
+                    IsBackground = true,
+                    Name = "VRCVideoCacherCookieListener"
+                };
+                _cookieListenerThread.Start();
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke(this, new Exception("Failed to start VRCVideoCacher cookie listener. Port 9696 might be in use.", ex));
+            }
+        }
+
+        private void CookieListenerLoop()
+        {
+            while (_isListeningForCookies && _cookieListener != null)
+            {
+                try
+                {
+                    var context = _cookieListener.GetContext();
+                    var request = context.Request;
+                    var response = context.Response;
+
+                    if (request.HttpMethod == "POST")
+                    {
+                        using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+                        {
+                            string body = reader.ReadToEnd();
+                            
+                            // Try to parse out the cookies and save them
+                            if (!string.IsNullOrEmpty(body) && body.Contains(".youtube.com"))
+                            {
+                                SaveCookiesFromText(body, "VRCVideoCacher browser extension");
+                                OnStatusUpdate?.Invoke(this, "Successfully processed cookies from extension!");
+                            }
+                        }
+                    }
+
+                    // Send a CORS-friendly 200 OK
+                    response.StatusCode = 200;
+                    response.AddHeader("Access-Control-Allow-Origin", "*");
+                    response.AddHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+                    response.AddHeader("Access-Control-Allow-Headers", "Content-Type");
+                    
+                    byte[] buffer = Encoding.UTF8.GetBytes("OK");
+                    response.ContentLength64 = buffer.Length;
+                    response.OutputStream.Write(buffer, 0, buffer.Length);
+                    response.OutputStream.Close();
+                }
+                catch (HttpListenerException)
+                {
+                    // Thrown when the listener is stopped/aborted
+                    break;
+                }
+                catch (Exception e)
+                {
+                    OnError?.Invoke(this, new Exception("Error receiving cookies via HttpListener.", e));
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            _isListeningForCookies = false;
+            try
+            {
+                _cookieListener?.Stop();
+                _cookieListener?.Close();
+            }
+            catch { }
         }
 
         /// <summary>
@@ -435,10 +523,15 @@ namespace MediaPlayerCore.YtDlp
         /// </summary>
         private string? FindCookiesFile()
         {
-            // Check plugin directory first
+            // 1. Check plugin directory first
             string pluginDir = Path.GetDirectoryName(_ytDlpPath) ?? ".";
             string localCookies = Path.Combine(pluginDir, "cookies.txt");
             if (File.Exists(localCookies)) return localCookies;
+
+            // 2. Check VRCVideoCacher's youtube_cookies.txt
+            string vrcCookies = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VRCVideoCacher", "youtube_cookies.txt");
+            if (File.Exists(vrcCookies)) return vrcCookies;
+
             return null;
         }
 
@@ -481,13 +574,13 @@ namespace MediaPlayerCore.YtDlp
         /// Saves cookie text to the plugin directory and updates the cookie path.
         /// Returns true if saved successfully.
         /// </summary>
-        public bool SaveCookiesFromText(string cookieText)
+        public bool SaveCookiesFromText(string cookieText, string source = "clipboard")
         {
             try
             {
                 File.WriteAllText(CookiesSavePath, cookieText);
                 _cookiesPath = CookiesSavePath;
-                OnStatusUpdate?.Invoke(this, "YouTube cookies saved from clipboard.");
+                OnStatusUpdate?.Invoke(this, $"YouTube cookies saved from {source}.");
                 return true;
             } catch (Exception e)
             {

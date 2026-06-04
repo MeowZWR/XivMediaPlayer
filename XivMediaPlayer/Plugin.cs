@@ -1289,6 +1289,7 @@ namespace XivMediaPlayer
             _uiCapture?.Dispose();
             _depthPreviewWindow?.Dispose();
             _mediaManager?.Dispose();
+            _ytDlpManager?.Dispose();
             _windowSystem?.RemoveAllWindows();
         }
 

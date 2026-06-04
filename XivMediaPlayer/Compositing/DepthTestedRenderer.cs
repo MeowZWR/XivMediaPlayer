@@ -126,21 +126,52 @@ float4 PS(VS_OUT input) : SV_TARGET {
   float2 pixelPos = input.pos.xy;
   float2 uv = InverseBilinear(pixelPos, CornerTL, CornerTR, CornerBR, CornerBL);
 
-  if (uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) {
+  if (uv.x == -1.0 && uv.y == -1.0) {
     return float4(0, 0, 0, 0);
   }
 
-  float4 color = VideoTexture.Sample(VideoSampler, uv);
-
-  // Depth occlusion
-  float depthTop = lerp(CornerDepths.x, CornerDepths.y, uv.x);
-  float depthBot = lerp(CornerDepths.w, CornerDepths.z, uv.x);
-  float quadDepth = lerp(depthTop, depthBot, uv.y);
-
+  bool isInside = (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1);
   float2 screenUV = pixelPos / ScreenSize;
   float gameDepth = DepthTexture.Sample(DepthSampler, screenUV).r;
-  if (gameDepth > quadDepth) {
-    color.a = 0;
+  float4 color = float4(0, 0, 0, 0);
+
+  bool occluded = false;
+  if (isInside) {
+      float depthTop = lerp(CornerDepths.x, CornerDepths.y, uv.x);
+      float depthBot = lerp(CornerDepths.w, CornerDepths.z, uv.x);
+      float quadDepth = lerp(depthTop, depthBot, uv.y);
+      if (gameDepth > quadDepth) {
+          occluded = true;
+      }
+  }
+
+  if (isInside && !occluded) {
+      // Draw unoccluded TV
+      color = VideoTexture.Sample(VideoSampler, uv);
+  } else {
+      // AMBILIGHT GLOW (Pure Depth Overlay)
+      // Use the raw depth texture itself as the ONLY mask.
+      // FFXIV uses reversed-Z (1.0 is near). 
+      // Using a lower power (2.0) makes the falloff much gentler so it reaches further into the room.
+      float depthMask = pow(gameDepth, 2.0);
+      
+      if (depthMask > 0.001) {
+          // Calculate the most prominent color by averaging 5 points across the screen
+          float3 prominentColor = float3(0, 0, 0);
+          prominentColor += VideoTexture.Sample(VideoSampler, float2(0.25, 0.25)).rgb;
+          prominentColor += VideoTexture.Sample(VideoSampler, float2(0.75, 0.25)).rgb;
+          prominentColor += VideoTexture.Sample(VideoSampler, float2(0.5, 0.5)).rgb;
+          prominentColor += VideoTexture.Sample(VideoSampler, float2(0.25, 0.75)).rgb;
+          prominentColor += VideoTexture.Sample(VideoSampler, float2(0.75, 0.75)).rgb;
+          prominentColor *= 0.2;
+          
+          // Boost luminance and the overall depth mask so the effect is strongly visible
+          float luminance = dot(prominentColor, float3(0.299, 0.587, 0.114));
+          float alpha = saturate(depthMask * (luminance * 2.0 + 0.5) * 3.0);
+          
+          // Simply tint and overlay the depth buffer
+          color = float4(prominentColor, alpha);
+      }
   }
 
   // Use the BackBuffer Alpha channel for perfect UI masking!
@@ -150,7 +181,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
   color.a *= saturate(1.0 - bbAlpha);
   
   // Media Controls UI overlay
-  if (HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
+  if (isInside && HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
     if (uv.y > 0.85) {
       // Draw bottom bar background (semi-transparent black)
       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
