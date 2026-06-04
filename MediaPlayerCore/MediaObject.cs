@@ -22,6 +22,7 @@ namespace MediaPlayerCore {
     private static MemoryMappedViewAccessor _currentMappedViewAccessor;
     public event EventHandler<MediaError> OnErrorReceived;
     public event EventHandler<string> PlaybackStopped;
+    public event EventHandler<string> PlaybackFinished;
 
     private string _soundPath;
     private string _libVLCPath;
@@ -182,6 +183,9 @@ namespace MediaPlayerCore {
               _vlcPlayer = new MediaPlayer(media);
               _vlcPlayer.SetAudioOutput("waveout");
               _vlcPlayer.Stopped += delegate { _parent.LastFrame = new byte[0]; };
+              _vlcPlayer.EndReached += delegate {
+                PlaybackFinished?.Invoke(this, "OK");
+              };
               _vlcPlayer.EncounteredError += (s, e) => {
                 Debug.WriteLine("[MediaObject] VLC EncounteredError event fired!");
                 OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC player encountered an error during playback.") });

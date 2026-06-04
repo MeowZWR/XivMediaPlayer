@@ -59,12 +59,13 @@ namespace XivMediaPlayer
 
         private MediaManager _mediaManager;
         private YtDlpManager _ytDlpManager;
-        private MediaGameObject _playerObject;
+        private IMediaGameObject? _playerObject;
+        private IMediaGameObject? _lastStreamObject;
+        private Queue<string> _mediaQueue = new Queue<string>();
         private MediaCameraObject _playerCamera;
         private unsafe Camera* _camera;
 
         private string[] _streamURLs;
-        private MediaGameObject _lastStreamObject;
         private string _lastStreamURL;
         private string _currentStreamer;
         private string _potentialStream;
@@ -510,7 +511,7 @@ namespace XivMediaPlayer
             _streamSetCooldown.Start();
         }
 
-        private void PlayViaYtDlp(string url, MediaGameObject audioGameObject)
+        private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject)
         {
             Task.Run(async () =>
             {
@@ -606,6 +607,21 @@ namespace XivMediaPlayer
         private void OnVideoWindowResized(object sender, EventArgs e)
         {
             ChangeStreamQuality();
+        }
+
+        private void _mediaManager_OnNewMediaTriggered(object sender, EventArgs e)
+        {
+            _chat.Print("[Media Player] Starting Stream...");
+        }
+
+        private void _mediaManager_OnPlaybackFinished(object sender, string e)
+        {
+            if (_mediaQueue.Count > 0 && _playerObject != null)
+            {
+                string nextUrl = _mediaQueue.Dequeue();
+                _chat.Print($"[Media Player] Playing Next in Queue: {nextUrl}");
+                PlayViaYtDlp(nextUrl, _playerObject);
+            }
         }
 
         private unsafe void ResetStreamValues()
@@ -868,7 +884,8 @@ namespace XivMediaPlayer
                     tempPlayer.Volume = 1;
                 }
 
-                _pluginLog.Info("[Media Player] Windows mixer volume restored.");
+                _mediaManager.OnNewMediaTriggered += _mediaManager_OnNewMediaTriggered;
+                _mediaManager.OnPlaybackFinished += _mediaManager_OnPlaybackFinished;
             } catch (Exception e)
             {
                 _pluginLog.Warning(e, "[Media Player] Failed to fix Windows volume");
@@ -962,14 +979,42 @@ namespace XivMediaPlayer
 
                             if (isMouseClicked) {
                                 _pluginLog.Information($"Media Control Clicked at UV: {uv.X:F2}, {uv.Y:F2}");
-                                if (uv.Y > 0.85f && activeStream != null) {
+                                if (uv.Y > 0.85f) {
                                     if (uv.X > 0.05f && uv.X < 0.10f && uv.Y > 0.88f && uv.Y < 0.94f) {
-                                        _pluginLog.Information("Toggling Play/Pause!");
-                                        activeStream.Pause(); // Toggles play/pause
-                                    } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.95f) {
-                                        float seekProgress = (uv.X - 0.15f) / 0.80f;
-                                        _pluginLog.Information($"Seeking to {seekProgress * 100}%");
-                                        activeStream.Time = (long)(seekProgress * activeStream.Length);
+                                        if (activeStream != null) {
+                                            _pluginLog.Information("Toggling Play/Pause!");
+                                            activeStream.Pause(); // Toggles play/pause
+                                        }
+                                    } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.75f) {
+                                        if (activeStream != null) {
+                                            float seekProgress = (uv.X - 0.15f) / 0.60f;
+                                            _pluginLog.Information($"Seeking to {seekProgress * 100}%");
+                                            activeStream.Time = (long)(seekProgress * activeStream.Length);
+                                        }
+                                    } else if (uv.X > 0.82f && uv.X < 0.88f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                        // Paste and Play instantly
+                                        string clipboardText = ImGui.GetClipboardText();
+                                        if (!string.IsNullOrEmpty(clipboardText) && _playerObject != null) {
+                                            _pluginLog.Information("Pasted and Playing: " + clipboardText);
+                                            _chat.Print("[Media Player] Loading URL from clipboard...");
+                                            PlayViaYtDlp(clipboardText, _playerObject);
+                                        }
+                                    } else if (uv.X > 0.90f && uv.X < 0.96f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                        // Paste to Queue
+                                        string clipboardText = ImGui.GetClipboardText();
+                                        if (!string.IsNullOrEmpty(clipboardText)) {
+                                            _pluginLog.Information("Queued URL: " + clipboardText);
+                                            _mediaQueue.Enqueue(clipboardText);
+                                            _chat.Print($"[Media Player] Added to Queue ({_mediaQueue.Count} items): {clipboardText}");
+                                            
+                                            // If nothing is playing, start it immediately
+                                            if (activeStream == null || activeStream.PlaybackState == NAudio.Wave.PlaybackState.Stopped) {
+                                                if (_playerObject != null) {
+                                                    string nextUrl = _mediaQueue.Dequeue();
+                                                    PlayViaYtDlp(nextUrl, _playerObject);
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

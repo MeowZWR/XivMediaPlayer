@@ -11,6 +11,7 @@ namespace MediaPlayerCore {
 
     public event EventHandler<MediaError> OnErrorReceived;
     public event EventHandler OnCleanupTime;
+    public event EventHandler<string> OnPlaybackFinished;
     private IMediaGameObject _mainPlayer = null;
     private IMediaGameObject _camera;
     private string _libVLCPath;
@@ -129,6 +130,9 @@ namespace MediaPlayerCore {
           lock (_playbackStreams[playerObject.Name]) {
             float volume = _livestreamVolume;
             _playbackStreams[playerObject.Name].OnErrorReceived += MediaManager_OnErrorReceived;
+            _playbackStreams[playerObject.Name].PlaybackFinished += (s, e) => {
+               OnPlaybackFinished?.Invoke(this, e);
+            };
             _playbackStreams[playerObject.Name].Play(audioPath, volume, delay, httpHeaders);
           }
         } catch (Exception e) {

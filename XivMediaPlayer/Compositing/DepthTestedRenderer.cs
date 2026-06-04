@@ -156,8 +156,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
       
       // Draw Seek Bar track and progress fill
-      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.15 && uv.x < 0.95) {
-        float barProgress = (uv.x - 0.15) / 0.80;
+      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.15 && uv.x < 0.80) {
+        float barProgress = (uv.x - 0.15) / 0.65;
         if (barProgress < Progress) {
            color.rgb = float3(0.8, 0.2, 0.2); // FFXIV-style red progress
         } else {
@@ -168,18 +168,50 @@ float4 PS(VS_OUT input) : SV_TARGET {
       // Draw Play/Pause icon at bottom left
       if (uv.x > 0.05 && uv.x < 0.10 && uv.y > 0.88 && uv.y < 0.94) {
          if (IsPlaying > 0.5) {
-            // Draw two vertical bars for Pause
             float px = (uv.x - 0.05) / 0.05;
             if ((px > 0.2 && px < 0.4) || (px > 0.6 && px < 0.8)) {
                color.rgb = float3(1, 1, 1);
             }
          } else {
-            // Draw triangle for Play
-            float px = (uv.x - 0.05) / 0.05; // 0 to 1
-            float py = (uv.y - 0.88) / 0.06; // 0 to 1
+            float px = (uv.x - 0.05) / 0.05;
+            float py = (uv.y - 0.88) / 0.06;
             if (px < 1.0 - abs(py - 0.5) * 2.0) {
                color.rgb = float3(1, 1, 1);
             }
+         }
+      }
+      
+      // Draw Paste Icon (Clipboard shape) at right
+      if (uv.x > 0.82 && uv.x < 0.88 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.82) / 0.06;
+         float py = (uv.y - 0.88) / 0.06;
+         // Draw clipboard board
+         if (px > 0.2 && px < 0.8 && py > 0.1 && py < 0.9) {
+             // Draw clip at top
+             if (py < 0.3 && px > 0.4 && px < 0.6) {
+                 color.rgb = float3(0.9, 0.9, 0.9);
+             } else if (py > 0.3) {
+                 // Draw paper lines
+                 if ((py > 0.45 && py < 0.55) || (py > 0.65 && py < 0.75)) {
+                     color.rgb = float3(0.5, 0.5, 0.5); // Text lines
+                 } else {
+                     color.rgb = float3(0.8, 0.8, 0.8); // Paper
+                 }
+             } else {
+                 color.rgb = float3(0.4, 0.3, 0.2); // Board
+             }
+         }
+      }
+      
+      // Draw Queue Icon (Plus + Paper) at far right
+      if (uv.x > 0.90 && uv.x < 0.96 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.90) / 0.06;
+         float py = (uv.y - 0.88) / 0.06;
+         
+         // Draw plus sign
+         if ((px > 0.4 && px < 0.6 && py > 0.2 && py < 0.8) ||
+             (py > 0.4 && py < 0.6 && px > 0.2 && px < 0.8)) {
+             color.rgb = float3(0.2, 0.8, 0.3); // Green plus
          }
       }
     }
