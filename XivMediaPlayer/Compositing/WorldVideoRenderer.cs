@@ -96,7 +96,7 @@ namespace XivMediaPlayer.Compositing {
       // Add a small tolerance
       float threshold = quadDepth + 0.001f;
 
-      const int gridSize = 256;
+      const int gridSize = 512;
       var drawList = ImGui.GetBackgroundDrawList();
 
       // For each grid cell, draw a textured quad with depth-based alpha
@@ -113,7 +113,7 @@ namespace XivMediaPlayer.Compositing {
           var p01 = Bilerp(sTL, sTR, sBL, sBR, u0, v1);
           var p11 = Bilerp(sTL, sTR, sBL, sBR, u1, v1);
 
-          // Sample depth at cell center to determine alpha
+          // Sample depth at cell center
           var center = Bilerp(sTL, sTR, sBL, sBR, (u0 + u1) * 0.5f, (v0 + v1) * 0.5f);
           uint color = DepthToColor(depthCapture, center, threshold);
 
@@ -139,6 +139,31 @@ namespace XivMediaPlayer.Compositing {
       // the quad should be occluded (alpha = 0).
       byte alpha = depth > threshold ? (byte)0 : (byte)255;
       return (uint)(alpha << 24) | 0x00FFFFFF; // ABGR format
+    }
+
+    /// <summary>
+    /// Multi-sample depth within a cell area for anti-aliased occlusion edges.
+    /// Returns an alpha-modulated white color.
+    /// </summary>
+    private static uint DepthToColorAA(DepthBufferCapture depthCapture,
+      Vector2 sTL, Vector2 sTR, Vector2 sBL, Vector2 sBR,
+      float u0, float v0, float u1, float v1, float threshold) {
+      const int subSamples = 3; // 3x3 = 9 samples per cell
+      int passing = 0;
+      int total = subSamples * subSamples;
+
+      for (int sy = 0; sy < subSamples; sy++) {
+        for (int sx = 0; sx < subSamples; sx++) {
+          float su = u0 + (u1 - u0) * (sx + 0.5f) / subSamples;
+          float sv = v0 + (v1 - v0) * (sy + 0.5f) / subSamples;
+          var samplePos = Bilerp(sTL, sTR, sBL, sBR, su, sv);
+          float depth = depthCapture.GetDepthAt((int)samplePos.X, (int)samplePos.Y);
+          if (depth <= threshold) passing++;
+        }
+      }
+
+      byte alpha = (byte)(passing * 255 / total);
+      return (uint)(alpha << 24) | 0x00FFFFFF;
     }
 
     /// <summary>
