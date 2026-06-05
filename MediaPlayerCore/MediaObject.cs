@@ -316,6 +316,13 @@ namespace MediaPlayerCore {
       }
       _disposed = true;
       _parent.OnCleanupTime -= _parent_OnCleanupTime;
+      
+      Stop();
+      try { _vlcPlayer?.Dispose(); } catch { }
+      _vlcPlayer = null;
+      try { libVLC?.Dispose(); } catch { }
+      libVLC = null;
+
       if (_vlcMappedViewAccessor != null) {
           _vlcMappedViewAccessor.Dispose();
           _vlcMappedViewAccessor = null;
@@ -325,11 +332,6 @@ namespace MediaPlayerCore {
           _vlcMappedFile = null;
       }
       _vlcBuffer = IntPtr.Zero;
-      Stop();
-      try { _vlcPlayer?.Dispose(); } catch { }
-      _vlcPlayer = null;
-      try { libVLC?.Dispose(); } catch { }
-      libVLC = null;
     }
   }
 }
