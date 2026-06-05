@@ -107,6 +107,7 @@ namespace XivMediaPlayer.Server.Controllers
             {
                 existing.CurrentUrl = state.CurrentUrl;
                 existing.TimecodeMs = state.TimecodeMs;
+                existing.IsPlaying = state.IsPlaying;
                 existing.TimestampUtc = state.TimestampUtc;
                 existing.PlaylistJson = state.PlaylistJson;
                 existing.OwnerId = state.OwnerId;

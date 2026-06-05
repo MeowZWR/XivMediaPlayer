@@ -18,6 +18,7 @@ namespace XivMediaPlayer.Windows {
     private Vector2? initialSize;
     IDalamudTextureWrap textureWrap;
     MediaManager _mediaManager;
+    private Plugin _plugin;
     private IDalamudPluginInterface _pluginInterface;
     private ITextureProvider _textureProvider;
     private IPluginLog _pluginLog;
@@ -37,11 +38,12 @@ namespace XivMediaPlayer.Windows {
     private bool taskAlreadyRunning;
     private bool _disposed;
 
-    public VideoWindow(IDalamudPluginInterface pluginInterface, ITextureProvider textureProvider, IPluginLog pluginLog) :
+    public VideoWindow(Plugin plugin, IDalamudPluginInterface pluginInterface, ITextureProvider textureProvider, IPluginLog pluginLog) :
       base("Media Player", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar, false) {
       windowSize = Size = new Vector2(640, 360);
       this.SizeCondition = ImGuiCond.Always;
       initialSize = Size;
+      _plugin = plugin;
       _pluginInterface = pluginInterface;
       _textureProvider = textureProvider;
       _pluginLog = pluginLog;

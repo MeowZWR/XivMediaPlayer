@@ -31,6 +31,7 @@ namespace XivMediaPlayer.Networking.Models
         public string LocationKey { get; set; } = string.Empty;
         public string CurrentUrl { get; set; } = string.Empty;
         public long TimecodeMs { get; set; }
+        public bool IsPlaying { get; set; } = true;
         public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
         public string PlaylistJson { get; set; } = "[]";
         public string OwnerId { get; set; } = string.Empty;

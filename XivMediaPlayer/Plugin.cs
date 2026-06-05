@@ -86,8 +86,12 @@ namespace XivMediaPlayer
         public Dalamud.Plugin.Services.IPluginLog PluginLog => _pluginLog;
         public Dalamud.Plugin.Services.IChatGui Chat => _chat;
 
-        // Clipboard cookie watcher
+        private bool _isDisposing;
+
         private DateTime _lastClipboardCheck = DateTime.MinValue;
+        private DateTime _lastServerSyncPush = DateTime.MinValue;
+        private DateTime _lastServerSyncFetch = DateTime.MinValue;
+
         private int _lastCookieHash;
         private bool _hasBeenInitialized;
 
@@ -157,7 +161,7 @@ namespace XivMediaPlayer
 
             // Create windows
             _windowSystem = new WindowSystem("XivMediaPlayer");
-            _videoWindow = new VideoWindow(_pluginInterface, _textureProvider, _pluginLog);
+            _videoWindow = new VideoWindow(this, _pluginInterface, _textureProvider, _pluginLog);
             _settingsWindow = new SettingsWindow(this, FixWindowsVolume);
             _browserWindow = new MediaBrowserWindow();
             _screenSettingsWindow = new ScreenSettingsWindow(
@@ -259,7 +263,7 @@ namespace XivMediaPlayer
                         RestoreScreenForCurrentLocation();
                         
                         // Automatically fetch TV placement and media state from the server if already in a house
-                        Task.Run(async () => await FetchServerDataForCurrentLocationAsync());
+                        _ = FetchServerDataForCurrentLocationAsync();
                     }
                 } catch (Exception e)
                 {
@@ -287,6 +291,31 @@ namespace XivMediaPlayer
                     }
                 }
                 _wasHousingMenuOpen = isHousingMenuOpen;
+            }
+
+            // Sync Polling Loop
+            if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
+            {
+                bool isOwner = CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId;
+                
+                // Owner pushes every 5 seconds (only if playing media)
+                if (isOwner && _mediaManager?.ActiveStream != null)
+                {
+                    if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
+                    {
+                        _lastServerSyncPush = DateTime.UtcNow;
+                        _ = PushMediaToServerAsync();
+                    }
+                }
+                // Visitors fetch every 10 seconds
+                else if (!isOwner)
+                {
+                    if ((DateTime.UtcNow - _lastServerSyncFetch).TotalSeconds >= 10)
+                    {
+                        _lastServerSyncFetch = DateTime.UtcNow;
+                        _ = FetchMediaFromServerAsync();
+                    }
+                }
             }
 
             // Clipboard cookie watcher — check every 5 seconds
@@ -962,6 +991,7 @@ namespace XivMediaPlayer
                 LocationKey = key,
                 CurrentUrl = !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : activeStream.SoundPath,
                 TimecodeMs = activeStream.Time,
+                IsPlaying = activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing,
                 OwnerId = _config.OwnerId,
                 PlaylistJson = System.Text.Json.JsonSerializer.Serialize(_mediaQueue.ToArray()),
                 BypassLock = IsHousingMenuOpen
@@ -987,9 +1017,9 @@ namespace XivMediaPlayer
             var sync = await ServerClient.GetMediaStateAsync(key);
             if (sync == null || string.IsNullOrEmpty(sync.CurrentUrl)) return;
 
-            // Calculate precise timecode based on server UTC stamp
+            // Calculate precise timecode based on server UTC stamp, but ONLY if the video is currently playing!
             var serverOffsetMs = (DateTime.UtcNow - sync.TimestampUtc).TotalMilliseconds;
-            var targetTimeMs = sync.TimecodeMs + (long)serverOffsetMs;
+            var targetTimeMs = sync.IsPlaying ? sync.TimecodeMs + (long)serverOffsetMs : sync.TimecodeMs;
 
             // Update local config
             var state = new RoomMediaState
@@ -1005,17 +1035,39 @@ namespace XivMediaPlayer
             var activeStream = _mediaManager?.ActiveStream;
             bool isDifferentUrl = activeStream == null || (!string.IsNullOrEmpty(_lastStreamURL) && _lastStreamURL != sync.CurrentUrl);
             bool isOutofSync = activeStream != null && Math.Abs(activeStream.Time - targetTimeMs) > 5000;
+            bool localIsPlaying = activeStream != null && activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
 
-            if (isDifferentUrl || isOutofSync)
+            if (isDifferentUrl)
             {
-                _pluginLog.Information($"[Social] Syncing media from server: {sync.CurrentUrl} at {targetTimeMs}ms");
+                _pluginLog.Information($"[Social] Syncing NEW media from server: {sync.CurrentUrl} at {targetTimeMs}ms (Playing: {sync.IsPlaying})");
                 
                 _mediaQueue.Clear();
                 foreach (var url in state.Playlist) _mediaQueue.Enqueue(url);
 
                 if (_playerObject != null)
                 {
+                    // Starts the stream. If sync.IsPlaying is false, we should pause it immediately after it loads...
+                    // But yt-dlp might take a while, so we just let it start and the next poll will pause it.
                     PlayViaYtDlp(state.CurrentUrl, _playerObject, (int)targetTimeMs, isAutoSync: true);
+                }
+            } 
+            else if (activeStream != null)
+            {
+                if (isOutofSync)
+                {
+                    _pluginLog.Information($"[Social] Adjusting timecode to sync with server: {targetTimeMs}ms");
+                    activeStream.Time = (long)targetTimeMs;
+                }
+
+                if (sync.IsPlaying && !localIsPlaying)
+                {
+                    _pluginLog.Information($"[Social] Server says play, but we are paused. Resuming!");
+                    activeStream.Pause(); // Pause() actually toggles play/pause in LibVLC
+                }
+                else if (!sync.IsPlaying && localIsPlaying)
+                {
+                    _pluginLog.Information($"[Social] Server says paused, but we are playing. Pausing!");
+                    activeStream.Pause(); // Pause() actually toggles play/pause in LibVLC
                 }
             }
         }
