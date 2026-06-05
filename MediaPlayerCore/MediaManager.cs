@@ -7,7 +7,8 @@ namespace MediaPlayerCore {
   public class MediaManager : IDisposable {
     byte[] _lastFrame;
     private bool _invalidated = false;
-    ConcurrentDictionary<string, MediaObject> _playbackStreams = new ConcurrentDictionary<string, MediaObject>();
+    private ConcurrentDictionary<string, MediaObject> _playbackStreams = new ConcurrentDictionary<string, MediaObject>();
+    private List<MediaObject> _deadStreams = new List<MediaObject>();
 
     public event EventHandler<MediaError> OnErrorReceived;
     public event EventHandler OnCleanupTime;
@@ -49,16 +50,6 @@ namespace MediaPlayerCore {
           OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
           if (!string.IsNullOrEmpty(audioPath)) {
             if (audioPath.StartsWith("http") || audioPath.StartsWith("rtmp")) {
-              var streamsToStop = _playbackStreams.Values.ToList();
-              _playbackStreams.Clear();
-
-              Task.Run(() => {
-                foreach (var sound in streamsToStop) {
-                  sound.Invalidated = true;
-                  sound?.Stop();
-                }
-              });
-
               ConfigureStream(playerObject, audioPath, startTimeMs, httpHeaders);
             }
           }
@@ -91,6 +82,7 @@ namespace MediaPlayerCore {
       lock (_playbackStreams) {
           streams = _playbackStreams.Values.ToArray();
           _playbackStreams.Clear();
+          streams = streams.Concat(_deadStreams).ToArray();
       }
       // VLC's Stop() is synchronous and blocks — run on background thread
       Task.Run(() => {
@@ -121,32 +113,26 @@ namespace MediaPlayerCore {
     public void ConfigureStream(IMediaGameObject playerObject, string audioPath, int startTimeMs, Dictionary<string, string>? httpHeaders = null) {
       if (playerObject != null) {
         try {
-          MediaObject newStream;
+          MediaObject stream;
+          bool isNew = false;
           lock (_playbackStreams) {
-              if (_playbackStreams.TryGetValue(playerObject.Name, out var oldStream)) {
-                Task.Run(() => {
-                  try {
-                    oldStream?.Dispose();
-                  } catch (Exception e) {
-                    OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
-                  }
-                });
+              if (!_playbackStreams.TryGetValue(playerObject.Name, out stream)) {
+                  stream = new MediaObject(this, playerObject, _camera, SoundType.Livestream, audioPath, _libVLCPath, false);
+                  _playbackStreams[playerObject.Name] = stream;
+                  isNew = true;
               }
-
-              newStream = new MediaObject(
-                this, playerObject, _camera,
-                SoundType.Livestream, audioPath, _libVLCPath, false);
-              
-              _playbackStreams[playerObject.Name] = newStream;
           }
 
-          lock (newStream) {
-            float volume = _livestreamVolume;
-            newStream.OnErrorReceived += MediaManager_OnErrorReceived;
-            newStream.PlaybackFinished += (s, e) => {
-               OnPlaybackFinished?.Invoke(this, e);
-            };
-            newStream.Play(audioPath, volume, startTimeMs, httpHeaders);
+          if (isNew) {
+            lock (stream) {
+              stream.OnErrorReceived += MediaManager_OnErrorReceived;
+              stream.PlaybackFinished += (s, e) => {
+                 OnPlaybackFinished?.Invoke(this, e);
+              };
+              stream.Play(audioPath, _livestreamVolume, startTimeMs, httpHeaders);
+            }
+          } else {
+             stream.ChangeVideoStream(audioPath, LastFrameWidth, startTimeMs, httpHeaders);
           }
         } catch (Exception e) {
           OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
@@ -219,14 +205,16 @@ namespace MediaPlayerCore {
     public void CleanSounds() {
       try {
         lock (_playbackStreams) {
-            foreach (var sound in _playbackStreams) {
-              if (sound.Value != null) {
-                sound.Value.Invalidated = true;
-                sound.Value?.Dispose();
-                sound.Value.OnErrorReceived -= MediaManager_OnErrorReceived;
+            var allStreamsToDispose = _playbackStreams.Values.Concat(_deadStreams).ToArray();
+            foreach (var sound in allStreamsToDispose) {
+              if (sound != null) {
+                sound.Invalidated = true;
+                sound.Dispose();
+                sound.OnErrorReceived -= MediaManager_OnErrorReceived;
               }
             }
             _playbackStreams?.Clear();
+            _deadStreams.Clear();
         }
         _lastFrame = null;
         OnCleanupTime?.Invoke(this, EventArgs.Empty);

@@ -51,6 +51,7 @@ namespace MediaPlayerCore {
     private float _baseVolume = 1;
     private bool _vlcWasAbleToStart;
     private bool _disposed;
+    private readonly object _disposeLock = new object();
 
     public MediaObject(MediaManager parent, IMediaGameObject playerObject, IMediaGameObject camera,
       SoundType soundType, string soundPath, string libVLCPath, bool spatialAllowed) {
@@ -192,25 +193,28 @@ namespace MediaPlayerCore {
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
               Debug.WriteLine($"[MediaObject] Media parsed. Duration: {media.Duration}ms");
 
-              if (_disposed) {
-                 media.Dispose();
-                 return;
+              lock (_disposeLock) {
+                if (_disposed) {
+                   media.Dispose();
+                   return;
+                }
+
+                _vlcPlayer = new MediaPlayer(media);
+                _vlcPlayer.SetAudioOutput("directsound");
+                _vlcPlayer.Stopped += delegate { _parent.LastFrame = new byte[0]; };
+                _vlcPlayer.EndReached += delegate {
+                  PlaybackFinished?.Invoke(this, "OK");
+                };
+                _vlcPlayer.EncounteredError += (s, e) => {
+                  Debug.WriteLine("[MediaObject] VLC EncounteredError event fired!");
+                  OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC player encountered an error during playback.") });
+                };
+                if (mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.EndsWith(".mp4") || mediaPath.EndsWith(".avi")) {
+                  _vlcPlayer.SetVideoFormat("RV32", _width, _height, _pitch);
+                  _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
+                }
               }
 
-              _vlcPlayer = new MediaPlayer(media);
-              _vlcPlayer.SetAudioOutput("directsound");
-              _vlcPlayer.Stopped += delegate { _parent.LastFrame = new byte[0]; };
-              _vlcPlayer.EndReached += delegate {
-                PlaybackFinished?.Invoke(this, "OK");
-              };
-              _vlcPlayer.EncounteredError += (s, e) => {
-                Debug.WriteLine("[MediaObject] VLC EncounteredError event fired!");
-                OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC player encountered an error during playback.") });
-              };
-              if (mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.EndsWith(".mp4") || mediaPath.EndsWith(".avi")) {
-                _vlcPlayer.SetVideoFormat("RV32", _width, _height, _pitch);
-                _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
-              }
               _baseVolume = volume;
               Volume = volume;
               
@@ -251,21 +255,51 @@ namespace MediaPlayerCore {
       });
     }
 
-    public void ChangeVideoStream(string soundPath, float width) {
+    public void ChangeVideoStream(string soundPath, float width, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null) {
       Task.Run(async delegate {
         try {
           if (_vlcWasAbleToStart) {
+            if (httpHeaders != null && httpHeaders.TryGetValue("Referer", out string referer)) {
+                // Cannot change LibVLC arguments after instantiation.
+                // We'd have to recreate LibVLC. For now, just ignore.
+            }
+
             var media = new Media(libVLC, soundPath, soundPath.StartsWith("http") || soundPath.StartsWith("rtmp")
                      ? FromType.FromLocation : FromType.FromPath);
+            
+            if (startTimeMs > 0) {
+                media.AddOption($":start-time={startTimeMs / 1000.0}");
+            }
+
             await media.Parse(soundPath.StartsWith("http") || soundPath.StartsWith("rtmp")
               ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
             
-            if (_disposed) {
-                media.Dispose();
-                return;
+            lock (_disposeLock) {
+                if (_disposed) {
+                    media.Dispose();
+                    return;
+                }
+                _vlcPlayer.Media = media;
             }
 
-            _vlcPlayer.Media = media;
+            long exactSeekMs = startTimeMs;
+            EventHandler<EventArgs> playingHandler = null;
+            playingHandler = (s, e) => {
+                if (exactSeekMs > 0) {
+                    Task.Run(async () => {
+                        await Task.Delay(100);
+                        if (_vlcPlayer != null && !_disposed) {
+                            _vlcPlayer.Time = exactSeekMs;
+                        }
+                        exactSeekMs = 0;
+                    });
+                }
+                if (_vlcPlayer != null) {
+                    _vlcPlayer.Playing -= playingHandler;
+                }
+            };
+            _vlcPlayer.Playing += playingHandler;
+
             _vlcPlayer.Play();
           }
         } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
@@ -311,27 +345,29 @@ namespace MediaPlayerCore {
     }
 
     public void Dispose() {
-      if (_disposed) {
-        return;
-      }
-      _disposed = true;
-      _parent.OnCleanupTime -= _parent_OnCleanupTime;
-      
-      Stop();
-      try { _vlcPlayer?.Dispose(); } catch { }
-      _vlcPlayer = null;
-      try { libVLC?.Dispose(); } catch { }
-      libVLC = null;
+      lock (_disposeLock) {
+          if (_disposed) {
+            return;
+          }
+          _disposed = true;
+          _parent.OnCleanupTime -= _parent_OnCleanupTime;
+          
+          Stop();
+          try { _vlcPlayer?.Dispose(); } catch { }
+          _vlcPlayer = null;
+          try { libVLC?.Dispose(); } catch { }
+          libVLC = null;
 
-      if (_vlcMappedViewAccessor != null) {
-          _vlcMappedViewAccessor.Dispose();
-          _vlcMappedViewAccessor = null;
+          if (_vlcMappedViewAccessor != null) {
+              _vlcMappedViewAccessor.Dispose();
+              _vlcMappedViewAccessor = null;
+          }
+          if (_vlcMappedFile != null) {
+              _vlcMappedFile.Dispose();
+              _vlcMappedFile = null;
+          }
+          _vlcBuffer = IntPtr.Zero;
       }
-      if (_vlcMappedFile != null) {
-          _vlcMappedFile.Dispose();
-          _vlcMappedFile = null;
-      }
-      _vlcBuffer = IntPtr.Zero;
     }
   }
 }

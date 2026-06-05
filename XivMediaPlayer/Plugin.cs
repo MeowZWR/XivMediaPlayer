@@ -606,13 +606,19 @@ namespace XivMediaPlayer
             _streamSetCooldown.Start();
         }
 
+        private bool _isResolvingMedia = false;
+
         private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
+            if (_isResolvingMedia) return;
+
             if (!isAutoSync && CurrentTvPlacement?.IsLocked == true && CurrentTvPlacement?.OwnerId != _config.OwnerId && !IsHousingMenuOpen)
             {
                 _chat.PrintError("[Media Player] Cannot play: The TV in this room is locked by its owner.");
                 return;
             }
+
+            _isResolvingMedia = true;
 
             Task.Run(async () =>
             {
@@ -678,9 +684,10 @@ namespace XivMediaPlayer
                     {
                         _ = PushMediaToServerAsync();
                     }
-                } catch (Exception ex)
+                }
+                finally
                 {
-                    _pluginLog.Error(ex, "Playback failed");
+                    _isResolvingMedia = false;
                 }
             });
         }
