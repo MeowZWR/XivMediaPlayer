@@ -618,6 +618,8 @@ namespace XivMediaPlayer
             {
                 try
                 {
+                    _lastStreamURL = url; // Save the original requested URL so PushMediaToServerAsync pushes it instead of the raw .m3u8
+
                     // Try to get metadata for a nice chat message
                     var metadataTask = _ytDlpManager.GetMetadata(url);
                     var resolveTask = _ytDlpManager.ResolveStreamUrl(url);
