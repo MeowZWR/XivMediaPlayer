@@ -818,14 +818,19 @@ namespace XivMediaPlayer
                     {
                         var tv = tvs[0];
                         CurrentTvPlacement = tv;
-                        _config.WorldScreen.Enabled = true;
-                        _config.WorldScreen.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
-                        _config.WorldScreen.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
-                        _config.WorldScreen.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
 
-                        // Automatically cache what we pulled from the server into local storage
-                        _config.ScreenPlacements[locationKey] = _config.WorldScreen.Clone();
-                        _config.Save();
+                        // Apply to the ACTIVE renderer transform
+                        if (_worldRenderer != null) {
+                            _worldRenderer.Transform.Enabled = true;
+                            _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
+                            _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
+                            _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
+
+                            // Sync back to config for saving
+                            _config.WorldScreen = _worldRenderer.Transform.Clone();
+                            _config.ScreenPlacements[locationKey] = _worldRenderer.Transform.Clone();
+                            _config.Save();
+                        }
 
                         _pluginLog.Info($"[Social] Loaded public TV placement for room {locationKey}.");
                     }
