@@ -256,6 +256,9 @@ namespace XivMediaPlayer
                     {
                         // Restore saved screen placement for current location on plugin load
                         RestoreScreenForCurrentLocation();
+                        
+                        // Automatically fetch TV placement and media state from the server if already in a house
+                        Task.Run(async () => await FetchServerDataForCurrentLocationAsync());
                     }
                 } catch (Exception e)
                 {
@@ -809,40 +812,45 @@ namespace XivMediaPlayer
                 RestoreScreenForCurrentLocation();
                 RestoreMediaForCurrentLocation();
                 
-                // Fetch public TVs from the server
-                string locationKey = GetLocationKey();
-                if (!string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("house_"))
-                {
-                    var tvs = await ServerClient.GetTvsForRoomAsync(locationKey);
-                    if (tvs.Count > 0)
-                    {
-                        var tv = tvs[0];
-                        CurrentTvPlacement = tv;
-
-                        // Apply to the ACTIVE renderer transform
-                        if (_worldRenderer != null) {
-                            _worldRenderer.Transform.Enabled = true;
-                            _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
-                            _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
-                            _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
-
-                            // Sync back to config for saving
-                            _config.WorldScreen = _worldRenderer.Transform.Clone();
-                            _config.ScreenPlacements[locationKey] = _worldRenderer.Transform.Clone();
-                            _config.Save();
-                        }
-
-                        _pluginLog.Info($"[Social] Loaded public TV placement for room {locationKey}.");
-                    }
-                    else 
-                    {
-                        CurrentTvPlacement = null;
-                    }
-                    
-                    // Automatically sync the media playback from the server upon entering the room
-                    await FetchMediaFromServerAsync();
-                }
+                await FetchServerDataForCurrentLocationAsync();
             });
+        }
+
+        private async Task FetchServerDataForCurrentLocationAsync()
+        {
+            // Fetch public TVs from the server
+            string locationKey = GetLocationKey();
+            if (!string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("house_"))
+            {
+                var tvs = await ServerClient.GetTvsForRoomAsync(locationKey);
+                if (tvs.Count > 0)
+                {
+                    var tv = tvs[0];
+                    CurrentTvPlacement = tv;
+
+                    // Apply to the ACTIVE renderer transform
+                    if (_worldRenderer != null) {
+                        _worldRenderer.Transform.Enabled = true;
+                        _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
+                        _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
+                        _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
+
+                        // Sync back to config for saving
+                        _config.WorldScreen = _worldRenderer.Transform.Clone();
+                        _config.ScreenPlacements[locationKey] = _worldRenderer.Transform.Clone();
+                        _config.Save();
+                    }
+
+                    _pluginLog.Info($"[Social] Loaded public TV placement for room {locationKey}.");
+                }
+                else 
+                {
+                    CurrentTvPlacement = null;
+                }
+                
+                // Automatically sync the media playback from the server upon entering the room
+                await FetchMediaFromServerAsync();
+            }
         }
 
         /// <summary>
