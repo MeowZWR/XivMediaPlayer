@@ -22,7 +22,7 @@ namespace XivMediaPlayer.Windows {
       ImGui.Separator();
 
       float volume = _plugin.Config.LivestreamVolume;
-      if (ImGui.SliderFloat("Stream Volume", ref volume, 0f, 1f)) {
+      if (ImGui.SliderFloat("Stream Volume", ref volume, 0f, 3f)) {
         _plugin.Config.LivestreamVolume = volume;
         if (_plugin.MediaManager != null) {
             _plugin.MediaManager.LiveStreamVolume = volume;

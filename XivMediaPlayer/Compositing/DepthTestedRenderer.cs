@@ -334,7 +334,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       // Draw Volume Slider (thinner bar below the seek bar)
       if (uv.y > 0.95 && uv.y < 0.97 && uv.x > 0.15 && uv.x < 0.72) {
          float volProgress = (uv.x - 0.15) / 0.57;
-         if (volProgress < Volume) {
+         if (volProgress < Volume / 3.0) {
             color.rgb = float3(0.2, 0.6, 0.8); // Blue volume bar
          } else {
             color.rgb = float3(0.3, 0.3, 0.3); // Grey track

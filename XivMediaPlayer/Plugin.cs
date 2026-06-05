@@ -620,9 +620,11 @@ namespace XivMediaPlayer
 
         private bool _isResolvingMedia = false;
         private bool _lastStreamIsLive = false;
+        private bool _isIntentionallyPaused = false;
 
         private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
+            _isIntentionallyPaused = false;
             if (_isResolvingMedia) return;
 
             if (!isAutoSync && CurrentTvPlacement?.IsLocked == true && CurrentTvPlacement?.OwnerId != _config.OwnerId && !IsHousingMenuOpen)
@@ -1031,7 +1033,9 @@ namespace XivMediaPlayer
                 LocationKey = key,
                 CurrentUrl = !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : activeStream?.SoundPath ?? "",
                 TimecodeMs = activeStream?.Time ?? 0,
-                IsPlaying = activeStream?.PlaybackState == NAudio.Wave.PlaybackState.Playing,
+                // Only push "Paused" if the DJ explicitly pressed the pause button!
+                // Otherwise, random network buffering on the DJ's client will accidentally force-pause the entire room!
+                IsPlaying = !_isIntentionallyPaused,
                 OwnerId = _config.OwnerId,
                 PlaylistJson = System.Text.Json.JsonSerializer.Serialize(_mediaQueue.ToArray()),
                 BypassLock = IsHousingMenuOpen
@@ -1346,7 +1350,7 @@ namespace XivMediaPlayer
                                 if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.15f && uv.X < 0.72f) {
                                     if (_mediaManager != null) {
                                         float volProgress = (uv.X - 0.15f) / 0.57f;
-                                        _mediaManager.LiveStreamVolume = Math.Clamp(volProgress, 0f, 1f);
+                                        _mediaManager.LiveStreamVolume = Math.Clamp(volProgress * 3f, 0f, 3f);
                                         _config.LivestreamVolume = _mediaManager.LiveStreamVolume;
                                         _wasVolumeDragged = true;
                                     }
@@ -1364,7 +1368,11 @@ namespace XivMediaPlayer
                                     if (uv.X > 0.05f && uv.X < 0.10f && uv.Y > 0.88f && uv.Y < 0.94f) {
                                         if (activeStream != null) {
                                             _pluginLog.Information("Toggling Play/Pause!");
-                                            activeStream.Pause(); // Toggles play/pause
+                                            _isIntentionallyPaused = !_isIntentionallyPaused;
+                                            if (_isIntentionallyPaused) activeStream.Pause(); 
+                                            else activeStream.Resume();
+                                            // Force an immediate push so the room pauses instantly
+                                            if (CurrentTvPlacement?.OwnerId == _config.OwnerId) _ = PushMediaToServerAsync();
                                         }
                                     } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.72f) {
                                         if (activeStream != null) {

@@ -130,7 +130,7 @@ namespace XivMediaPlayer.Windows {
         if (_mediaManager != null) {
           ImGui.SetNextItemWidth(Size.Value.X - ImGui.CalcTextSize("Volume").X - 20);
           int vol = (int)(_mediaManager.LiveStreamVolume * 100f);
-          if (ImGui.SliderInt("Volume", ref vol, 0, 100)) {
+          if (ImGui.SliderInt("Volume", ref vol, 0, 300)) {
               _mediaManager.LiveStreamVolume = vol / 100f;
           }
         }
