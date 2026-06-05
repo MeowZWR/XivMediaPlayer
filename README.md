@@ -1,0 +1,14 @@
+Adds VRChat-like video players to FFXIV!
+If you've evver played VRChat these video players behave very similar.
+
+<img width="1918" height="1058" alt="image" src="https://github.com/user-attachments/assets/55d07c15-4732-4580-b10a-49de781ecce0" />
+
+To place a screen, enter your housing menu and the video player controls will pop in!
+
+Supports most popular video playback websites that are browser accessible without logging in.
+Youtube, Twitch, Vimeo, RTSP, Image URLS, etc... full supported media site list is [here](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
+
+Simply copy the video URL of your choice, click the paste icon in the video window UI, and the video will play!
+
+For youtube video playback, installing the following browser plugin will let the video player use Youtube fully logged in and prevent rate limits/bot checks.
+https://chromewebstore.google.com/detail/vrcvideocacher-cookies-ex/kfgelknbegappcajiflgfbjbdpbpokge
