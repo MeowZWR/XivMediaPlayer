@@ -125,10 +125,10 @@ namespace MediaPlayerCore {
     public long Length => _vlcPlayer?.Length ?? 0;
 
     public void Pause() {
-      _vlcPlayer?.Pause();
+      _vlcPlayer?.SetPause(true);
     }
     public void Resume() {
-      _vlcPlayer?.Play();
+      _vlcPlayer?.SetPause(false);
     }
     public SoundType SoundType { get => _soundType; set => _soundType = value; }
     public string SoundPath { get => _soundPath; set => _soundPath = value; }

@@ -1285,6 +1285,9 @@ namespace XivMediaPlayer
 
         private void OnLogout(int type, int code)
         {
+            if (_videoWindow != null) _videoWindow.IsOpen = false;
+            if (_screenSettingsWindow != null) _screenSettingsWindow.IsOpen = false;
+            if (_settingsWindow != null) _settingsWindow.IsOpen = false;
             _mediaManager?.CleanSounds();
             ResetStreamValues();
         }
@@ -1403,7 +1406,7 @@ namespace XivMediaPlayer
             _windowSystem.Draw();
 
             // World-space video rendering
-            if (_worldRenderer?.IsActive == true)
+            if (_worldRenderer?.IsActive == true && _clientState.IsLoggedIn)
             {
                 // Only read depth to CPU when occlusion is on
                 if (_depthCapture != null)
@@ -1442,9 +1445,11 @@ namespace XivMediaPlayer
                     bool isPlaying = false;
 
                     var activeStream = _mediaManager?.ActiveStream;
-                    if (activeStream != null && activeStream.Length > 0)
+                    if (activeStream != null)
                     {
-                        progress = activeStream.Time / (float)activeStream.Length;
+                        if (activeStream.Length > 0)
+                            progress = activeStream.Time / (float)activeStream.Length;
+                        
                         isPlaying = activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
                     }
 
@@ -1483,7 +1488,8 @@ namespace XivMediaPlayer
                             }
                             // Handle Play/Pause
                             else if (uv.Y > 0.85f && uv.Y < 0.95f) {
-                                    if (uv.X > 0.05f && uv.X < 0.10f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                    // Slightly widened hitboxes for better UX
+                                    if (uv.X >= 0.04f && uv.X <= 0.11f && uv.Y >= 0.88f && uv.Y <= 0.94f) {
                                         if (activeStream != null) {
                                             _pluginLog.Information("Toggling Play/Pause!");
                                             _isIntentionallyPaused = !_isIntentionallyPaused;
@@ -1492,7 +1498,7 @@ namespace XivMediaPlayer
                                             // Force an immediate push. If the TV is locked, the server will reject it and automatically snap them back!
                                             _ = PushMediaToServerAsync();
                                         }
-                                    } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.72f) {
+                                    } else if (uv.Y >= 0.88f && uv.Y <= 0.94f && uv.X >= 0.14f && uv.X <= 0.73f) {
                                         if (activeStream != null) {
                                             float seekProgress = (uv.X - 0.15f) / 0.57f;
                                             _pluginLog.Information($"Seeking to {seekProgress * 100}%");
@@ -1500,7 +1506,7 @@ namespace XivMediaPlayer
                                             // Force an immediate push so the room seeks instantly
                                             _ = PushMediaToServerAsync();
                                         }
-                                     } else if (uv.X > 0.74f && uv.X < 0.80f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                     } else if (uv.X >= 0.73f && uv.X <= 0.81f && uv.Y >= 0.88f && uv.Y <= 0.94f) {
                                         // Lock/Unlock toggle
                                         if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId) {
                                             CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
@@ -1520,7 +1526,7 @@ namespace XivMediaPlayer
                                             _screenSettingsWindow.RegisterTvAsync(LocationKey);
                                             _chat.Print("[Media Player] TV registered and Unlocked.");
                                         }
-                                    } else if (uv.X > 0.82f && uv.X < 0.88f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                    } else if (uv.X >= 0.81f && uv.X <= 0.89f && uv.Y >= 0.88f && uv.Y <= 0.94f) {
                                         // Paste and Play instantly
                                         string clipboardText = ImGui.GetClipboardText();
                                         if (!string.IsNullOrEmpty(clipboardText) && _playerObject != null) {
@@ -1530,7 +1536,7 @@ namespace XivMediaPlayer
                                             // Force an immediate push to take over the TV
                                             _ = PushMediaToServerAsync();
                                         }
-                                    } else if (uv.X > 0.90f && uv.X < 0.96f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                    } else if (uv.X >= 0.89f && uv.X <= 0.97f && uv.Y >= 0.88f && uv.Y <= 0.94f) {
                                         // Paste to Queue
                                         string clipboardText = ImGui.GetClipboardText();
                                         if (!string.IsNullOrEmpty(clipboardText)) {

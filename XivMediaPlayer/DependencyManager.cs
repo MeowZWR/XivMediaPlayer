@@ -129,10 +129,18 @@ namespace XivMediaPlayer
                     // Clean up old folders if they exist
                     string cefDir = Path.Combine(DependenciesDir, "cef");
                     string vlcDir = Path.Combine(DependenciesDir, "libvlc");
-                    if (Directory.Exists(cefDir)) Directory.Delete(cefDir, true);
-                    if (Directory.Exists(vlcDir)) Directory.Delete(vlcDir, true);
+                    
+                    try {
+                        if (Directory.Exists(cefDir)) Directory.Delete(cefDir, true);
+                        if (Directory.Exists(vlcDir)) Directory.Delete(vlcDir, true);
 
-                    ZipFile.ExtractToDirectory(zipPath, DependenciesDir, true);
+                        ZipFile.ExtractToDirectory(zipPath, DependenciesDir, true);
+                    } catch (Exception e) when (e is UnauthorizedAccessException || e is IOException) {
+                        // DLLs are locked because they are already loaded into the game process memory.
+                        // (Usually happens if the user reloaded the plugin via /xlplugins)
+                        // We can safely silently ignore this because it means the files are already successfully installed!
+                        _pluginLog.Warning("Dependencies are currently locked by the process. Skipping extraction and assuming existing files are valid.");
+                    }
                 });
 
                 _pluginLog.Information("Extraction complete.");
