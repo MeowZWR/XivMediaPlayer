@@ -18,7 +18,8 @@ namespace MediaPlayerCore {
     private MediaPlayer _vlcPlayer;
     private MediaManager _parent;
 
-
+    private MemoryMappedFile _vlcMappedFile;
+    private MemoryMappedViewAccessor _vlcMappedViewAccessor;
     private IntPtr _vlcBuffer = IntPtr.Zero;
     public event EventHandler<MediaError> OnErrorReceived;
     public event EventHandler<string> PlaybackStopped;
@@ -62,7 +63,9 @@ namespace MediaPlayerCore {
       _spatialAllowed = spatialAllowed;
       _pitch = Align(_width * _bytePerPixel);
       _lines = Align(_height);
-      _vlcBuffer = Marshal.AllocHGlobal((int)(_pitch * _lines));
+      _vlcMappedFile = MemoryMappedFile.CreateNew(null, _pitch * _lines);
+      _vlcMappedViewAccessor = _vlcMappedFile.CreateViewAccessor();
+      _vlcBuffer = _vlcMappedViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle();
       _parent.OnCleanupTime += _parent_OnCleanupTime;
     }
 
@@ -313,10 +316,15 @@ namespace MediaPlayerCore {
       }
       _disposed = true;
       _parent.OnCleanupTime -= _parent_OnCleanupTime;
-      if (_vlcBuffer != IntPtr.Zero) {
-          Marshal.FreeHGlobal(_vlcBuffer);
-          _vlcBuffer = IntPtr.Zero;
+      if (_vlcMappedViewAccessor != null) {
+          _vlcMappedViewAccessor.Dispose();
+          _vlcMappedViewAccessor = null;
       }
+      if (_vlcMappedFile != null) {
+          _vlcMappedFile.Dispose();
+          _vlcMappedFile = null;
+      }
+      _vlcBuffer = IntPtr.Zero;
       Stop();
       try { _vlcPlayer?.Dispose(); } catch { }
       _vlcPlayer = null;
