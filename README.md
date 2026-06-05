@@ -12,3 +12,8 @@ Simply copy the video URL of your choice, click the paste icon in the video wind
 
 For youtube video playback, installing the following browser plugin will let the video player use Youtube fully logged in and prevent rate limits/bot checks.
 https://chromewebstore.google.com/detail/vrcvideocacher-cookies-ex/kfgelknbegappcajiflgfbjbdpbpokge
+
+Repo Link
+```
+https://raw.githubusercontent.com/Sebane1/XivMediaPlayer/refs/heads/main/repo.json
+```
