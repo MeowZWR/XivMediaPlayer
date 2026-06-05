@@ -981,8 +981,8 @@ namespace XivMediaPlayer
                     var tv = tvs[0];
                     CurrentTvPlacement = tv;
 
-                    // Apply to the ACTIVE renderer transform
-                    if (_worldRenderer != null) {
+                    // Apply to the ACTIVE renderer transform ONLY if we aren't actively editing it
+                    if (_worldRenderer != null && !IsHousingMenuOpen) {
                         _worldRenderer.Transform.Enabled = true;
                         _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
                         _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);

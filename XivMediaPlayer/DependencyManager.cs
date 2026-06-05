@@ -43,7 +43,7 @@ namespace XivMediaPlayer
         private void CheckDependencies()
         {
             string cefPath = Path.Combine(DependenciesDir, "cef", "libcef.dll");
-            string vlcPath = Path.Combine(DependenciesDir, "libvlc", "libvlc.dll");
+            string vlcPath = Path.Combine(DependenciesDir, "libvlc", "win-x64", "libvlc.dll");
 
             if (File.Exists(cefPath) && File.Exists(vlcPath))
             {
