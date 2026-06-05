@@ -272,15 +272,17 @@ namespace XivMediaPlayer.Windows {
       } else {
           ImGui.Text($"Location Key: {locationKey}");
           if (_plugin.CurrentTvPlacement == null || _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
-              if (ImGui.Button("Register TV to Room")) {
-                  RegisterTvAsync(locationKey);
-              }
-              bool isLocked = _plugin.CurrentTvPlacement?.IsLocked ?? false;
+              bool isLocked = _plugin.CurrentTvPlacement?.IsLocked ?? true;
               if (ImGui.Checkbox("Lock TV to Owner Only", ref isLocked)) {
                   if (_plugin.CurrentTvPlacement != null) {
                       _plugin.CurrentTvPlacement.IsLocked = isLocked;
-                      RegisterTvAsync(locationKey);
+                  } else {
+                      _plugin.CurrentTvPlacement = new Networking.Models.TvPlacement {
+                          OwnerId = _plugin.Config.OwnerId,
+                          IsLocked = isLocked
+                      };
                   }
+                  RegisterTvAsync(locationKey);
               }
           } else {
               if (_plugin.IsHousingMenuOpen) {
@@ -340,7 +342,7 @@ namespace XivMediaPlayer.Windows {
       return false;
     }
 
-    private async void RegisterTvAsync(string locationKey) {
+    public async void RegisterTvAsync(string locationKey) {
       if (!_enabled) {
         _statusMessage = "World screen is not enabled!";
         _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
@@ -360,7 +362,7 @@ namespace XivMediaPlayer.Windows {
         ScaleX = _scale.X,
         ScaleY = _scale.Y,
         OwnerId = _plugin.Config.OwnerId,
-        IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? false,
+        IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? true,
         BypassLock = _plugin.IsHousingMenuOpen
       };
 
@@ -371,6 +373,7 @@ namespace XivMediaPlayer.Windows {
       {
         var result = await _plugin.ServerClient.RegisterTvAsync(locationKey, placement);
         if (result != null) {
+          _plugin.CurrentTvPlacement = placement;
           _statusMessage = "Successfully registered TV for all visitors!";
           _statusColor = new Vector4(0.3f, 1f, 0.3f, 1);
         } else {

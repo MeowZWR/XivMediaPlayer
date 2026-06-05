@@ -130,14 +130,12 @@ namespace MediaPlayerCore {
     public MediaManager Parent { get => _parent; set => _parent = value; }
 
     public void Stop() {
-      Volume = 0;
       PlaybackStopped?.Invoke(this, "OK");
       if (_vlcPlayer != null) {
         try {
           _vlcPlayer?.Stop();
         } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
       }
-      Volume = 0;
       Invalidated = true;
     }
 
@@ -185,8 +183,13 @@ namespace MediaPlayerCore {
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
               Debug.WriteLine($"[MediaObject] Media parsed. Duration: {media.Duration}ms");
 
+              if (_disposed) {
+                 media.Dispose();
+                 return;
+              }
+
               _vlcPlayer = new MediaPlayer(media);
-              _vlcPlayer.SetAudioOutput("waveout");
+              _vlcPlayer.SetAudioOutput("directsound");
               _vlcPlayer.Stopped += delegate { _parent.LastFrame = new byte[0]; };
               _vlcPlayer.EndReached += delegate {
                 PlaybackFinished?.Invoke(this, "OK");
@@ -247,6 +250,12 @@ namespace MediaPlayerCore {
                      ? FromType.FromLocation : FromType.FromPath);
             await media.Parse(soundPath.StartsWith("http") || soundPath.StartsWith("rtmp")
               ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
+            
+            if (_disposed) {
+                media.Dispose();
+                return;
+            }
+
             _vlcPlayer.Media = media;
             _vlcPlayer.Play();
           }
@@ -307,7 +316,6 @@ namespace MediaPlayerCore {
       _disposed = true;
       _parent.OnCleanupTime -= _parent_OnCleanupTime;
       Stop();
-      Volume = 0;
       try { _vlcPlayer?.Dispose(); } catch { }
       _vlcPlayer = null;
       try { libVLC?.Dispose(); } catch { }

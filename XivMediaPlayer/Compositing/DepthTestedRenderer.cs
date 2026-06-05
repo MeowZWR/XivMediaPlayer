@@ -53,7 +53,7 @@ namespace XivMediaPlayer.Compositing {
       public float DynamicMinDepth;
       public float DynamicMaxDepth;
       public float HasBackBuffer;
-      public float _pad3;
+      public float IsLockedTV;
     }
 
     private const string ShaderCode = @"
@@ -72,6 +72,7 @@ cbuffer Constants : register(b0) {
   float DynamicMinDepth;
   float DynamicMaxDepth;
   float HasBackBuffer;
+  float IsLockedTV;
 };
 
 Texture2D VideoTexture : register(t0);
@@ -235,8 +236,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
       
       // Draw Seek Bar track and progress fill
-      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.15 && uv.x < 0.80) {
-        float barProgress = (uv.x - 0.15) / 0.65;
+      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.15 && uv.x < 0.72) {
+        float barProgress = (uv.x - 0.15) / 0.57;
         if (barProgress < Progress) {
            color.rgb = float3(0.8, 0.2, 0.2); // FFXIV-style red progress
         } else {
@@ -257,6 +258,36 @@ float4 PS(VS_OUT input) : SV_TARGET {
             if (px < 1.0 - abs(py - 0.5) * 2.0) {
                color.rgb = float3(1, 1, 1);
             }
+         }
+      }
+      
+      // Draw Lock Icon
+      if (uv.x > 0.74 && uv.x < 0.80 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.74) / 0.06;
+         float py = (uv.y - 0.88) / 0.06;
+         
+         // Draw Padlock body
+         if (px > 0.2 && px < 0.8 && py > 0.4 && py < 0.9) {
+             if (IsLockedTV > 0.5) {
+                 color.rgb = float3(0.9, 0.7, 0.2); // Golden lock
+             } else {
+                 color.rgb = float3(0.6, 0.6, 0.6); // Grey unlocked
+             }
+             // Keyhole
+             if (px > 0.45 && px < 0.55 && py > 0.6 && py < 0.8) {
+                 color.rgb = float3(0.1, 0.1, 0.1);
+             }
+         }
+         // Draw Padlock shackle
+         if (py > 0.1 && py <= 0.4) {
+             // For unlocked, only draw the left side of the shackle!
+             if (IsLockedTV < 0.5 && px > 0.5) {
+                 // Skip drawing right side of shackle if unlocked
+             } else if (px > 0.3 && px < 0.7 && py < 0.2) {
+                 color.rgb = float3(0.8, 0.8, 0.8);
+             } else if ((px > 0.3 && px < 0.4) || (px > 0.6 && px < 0.7)) {
+                 color.rgb = float3(0.8, 0.8, 0.8);
+             }
          }
       }
       
@@ -399,7 +430,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       Vector4 cornerDepths,
       int screenWidth, int screenHeight,
       ID3D11ShaderResourceView backBufferSRV,
-      Vector2? hoverUV, float progress, bool isPlaying,
+      Vector2? hoverUV, float progress, bool isPlaying, bool isLocked,
       float minDepth, float maxDepth) {
 
       if (!_initialized || _disposed || videoTextureSRV == IntPtr.Zero || depthSRV == null) return false;
@@ -426,7 +457,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           IsPlaying = isPlaying ? 1.0f : 0.0f,
           DynamicMinDepth = minDepth,
           DynamicMaxDepth = maxDepth,
-          HasBackBuffer = backBufferSRV != null ? 1.0f : 0.0f
+          HasBackBuffer = backBufferSRV != null ? 1.0f : 0.0f,
+          IsLockedTV = isLocked ? 1.0f : 0.0f
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

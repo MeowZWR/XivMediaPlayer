@@ -52,12 +52,14 @@ namespace XivMediaPlayer
         private readonly SettingsWindow _settingsWindow;
         private readonly MediaBrowserWindow _browserWindow;
         private readonly ScreenSettingsWindow _screenSettingsWindow;
+        internal ScreenSettingsWindow ScreenSettingsWindow => _screenSettingsWindow;
         private WorldVideoRenderer _worldRenderer;
         private DepthPreviewWindow _depthPreviewWindow;
         private DepthBufferCapture _depthCapture;
         private UILayerCapture _uiCapture;
 
         private MediaManager _mediaManager;
+        internal MediaManager MediaManager => _mediaManager;
         private readonly YtDlpManager _ytDlpManager;
 
         private string _lastLocationKey = "";
@@ -96,7 +98,7 @@ namespace XivMediaPlayer
         private string _statusMessage = string.Empty;
 
         // Current room TV state
-        public Networking.Models.TvPlacement? CurrentTvPlacement { get; private set; }
+        public Networking.Models.TvPlacement? CurrentTvPlacement { get; internal set; }
 
         private bool _wasLeftMousePressed = false;
 
@@ -154,7 +156,7 @@ namespace XivMediaPlayer
             // Create windows
             _windowSystem = new WindowSystem("XivMediaPlayer");
             _videoWindow = new VideoWindow(_pluginInterface, _textureProvider, _pluginLog);
-            _settingsWindow = new SettingsWindow(_config, FixWindowsVolume);
+            _settingsWindow = new SettingsWindow(this, FixWindowsVolume);
             _browserWindow = new MediaBrowserWindow();
             _screenSettingsWindow = new ScreenSettingsWindow(
               this,
@@ -273,6 +275,11 @@ namespace XivMediaPlayer
                 else if (!isHousingMenuOpen && _wasHousingMenuOpen)
                 {
                     _screenSettingsWindow.IsOpen = false;
+                    
+                    // Auto-save and register TV when closing the menu
+                    if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_")) {
+                        _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                    }
                 }
                 _wasHousingMenuOpen = isHousingMenuOpen;
             }
@@ -1218,11 +1225,31 @@ namespace XivMediaPlayer
                                             _pluginLog.Information("Toggling Play/Pause!");
                                             activeStream.Pause(); // Toggles play/pause
                                         }
-                                    } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.75f) {
+                                    } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.72f) {
                                         if (activeStream != null) {
-                                            float seekProgress = (uv.X - 0.15f) / 0.60f;
+                                            float seekProgress = (uv.X - 0.15f) / 0.57f;
                                             _pluginLog.Information($"Seeking to {seekProgress * 100}%");
                                             activeStream.Time = (long)(seekProgress * activeStream.Length);
+                                        }
+                                     } else if (uv.X > 0.74f && uv.X < 0.80f && uv.Y > 0.88f && uv.Y < 0.94f) {
+                                        // Lock/Unlock toggle
+                                        if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId) {
+                                            CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
+                                            _pluginLog.Information($"Toggled TV lock to: {CurrentTvPlacement.IsLocked}");
+                                            if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_")) {
+                                                _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                                                _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked to Owner" : "Unlocked")}.");
+                                            }
+                                        } else if (CurrentTvPlacement != null) {
+                                            _chat.Print("[Media Player] You do not own this TV.");
+                                        } else {
+                                            // Create dummy placement and register
+                                            CurrentTvPlacement = new Networking.Models.TvPlacement {
+                                                OwnerId = _config.OwnerId,
+                                                IsLocked = false // Default true, so toggle unlocks it
+                                            };
+                                            _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                                            _chat.Print("[Media Player] TV registered and Unlocked.");
                                         }
                                     } else if (uv.X > 0.82f && uv.X < 0.88f && uv.Y > 0.88f && uv.Y < 0.94f) {
                                         // Paste and Play instantly
@@ -1254,7 +1281,8 @@ namespace XivMediaPlayer
                         }
 
 
-                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying);
+                    bool isLocked = CurrentTvPlacement?.IsLocked ?? true;
+                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked);
                 }
             }
         }
