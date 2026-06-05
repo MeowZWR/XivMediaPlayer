@@ -54,6 +54,10 @@ namespace XivMediaPlayer.Compositing {
       public float DynamicMaxDepth;
       public float HasBackBuffer;
       public float IsLockedTV;
+      public float Volume;
+      public float _pad2;
+      public float _pad3;
+      public float _pad4;
     }
 
     private const string ShaderCode = @"
@@ -73,6 +77,8 @@ cbuffer Constants : register(b0) {
   float DynamicMaxDepth;
   float HasBackBuffer;
   float IsLockedTV;
+  float Volume;
+  float3 _padEnd;
 };
 
 Texture2D VideoTexture : register(t0);
@@ -324,6 +330,16 @@ float4 PS(VS_OUT input) : SV_TARGET {
              color.rgb = float3(0.2, 0.8, 0.3); // Green plus
          }
       }
+      
+      // Draw Volume Slider (thinner bar below the seek bar)
+      if (uv.y > 0.95 && uv.y < 0.97 && uv.x > 0.15 && uv.x < 0.72) {
+         float volProgress = (uv.x - 0.15) / 0.57;
+         if (volProgress < Volume) {
+            color.rgb = float3(0.2, 0.6, 0.8); // Blue volume bar
+         } else {
+            color.rgb = float3(0.3, 0.3, 0.3); // Grey track
+         }
+      }
     }
   }
   
@@ -431,7 +447,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       int screenWidth, int screenHeight,
       ID3D11ShaderResourceView backBufferSRV,
       Vector2? hoverUV, float progress, bool isPlaying, bool isLocked,
-      float minDepth, float maxDepth) {
+      float minDepth, float maxDepth, float volume) {
 
       if (!_initialized || _disposed || videoTextureSRV == IntPtr.Zero || depthSRV == null) return false;
 
@@ -458,7 +474,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           DynamicMinDepth = minDepth,
           DynamicMaxDepth = maxDepth,
           HasBackBuffer = backBufferSRV != null ? 1.0f : 0.0f,
-          IsLockedTV = isLocked ? 1.0f : 0.0f
+          IsLockedTV = isLocked ? 1.0f : 0.0f,
+          Volume = volume
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

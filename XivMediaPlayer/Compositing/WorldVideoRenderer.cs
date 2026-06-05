@@ -72,12 +72,12 @@ namespace XivMediaPlayer.Compositing {
       Vector3? cameraForward = null,
       UILayerCapture uiCapture = null,
       float nearPlane = 0.1f, float farPlane = 10000f,
-      Vector2? hoverUV = null, float progress = 0f, bool isPlaying = false, bool isLocked = true) {
+      Vector2? hoverUV = null, float progress = 0f, bool isPlaying = false, bool isLocked = true, float volume = 1f) {
       if (_disposed || !IsActive || textureWrap == null) return;
 
       if (_useDepthOcclusion && depthCapture != null && cameraPos.HasValue && cameraForward.HasValue) {
         RenderWithOcclusion(textureWrap, depthCapture, cameraPos.Value,
-          cameraForward.Value, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked);
+          cameraForward.Value, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume);
       } else {
         RenderScreenSpace(textureWrap);
       }
@@ -88,13 +88,32 @@ namespace XivMediaPlayer.Compositing {
     /// </summary>
     public string DepthDebugInfo { get; private set; }
 
+    private (Vector2 tl, Vector2 tr, Vector2 br, Vector2 bl)? _lastCorners;
+
+    private void StabilizeCorners(ref Vector2 tl, ref Vector2 tr, ref Vector2 br, ref Vector2 bl) {
+      if (_lastCorners.HasValue) {
+        var last = _lastCorners.Value;
+        float diff = Vector2.Distance(tl, last.tl) + Vector2.Distance(tr, last.tr) + Vector2.Distance(br, last.br) + Vector2.Distance(bl, last.bl);
+        if (diff < 4.0f) {
+          tl = last.tl;
+          tr = last.tr;
+          br = last.br;
+          bl = last.bl;
+        } else {
+          _lastCorners = (tl, tr, br, bl);
+        }
+      } else {
+        _lastCorners = (tl, tr, br, bl);
+      }
+    }
+
     /// <summary>
     /// GPU-accelerated per-pixel depth occlusion. Uses WorldToScreen for positioning
     /// and view-space Z (dot with camera forward) for depth thresholds.
     /// </summary>
     private void RenderWithOcclusion(IDalamudTextureWrap textureWrap, DepthBufferCapture depthCapture,
       Vector3 cameraPos, Vector3 cameraForward, UILayerCapture uiCapture,
-      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, bool isLocked) {
+      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, bool isLocked, float volume) {
       var (tl, tr, br, bl) = _transform.Corners;
 
       // WorldToScreen is the source of truth for screen positions
@@ -102,6 +121,8 @@ namespace XivMediaPlayer.Compositing {
       WorldToScreenClamped(tr, out var sTR, out _);
       WorldToScreenClamped(br, out var sBR, out _);
       WorldToScreenClamped(bl, out var sBL, out _);
+
+      StabilizeCorners(ref sTL, ref sTR, ref sBR, ref sBL);
 
       // Compute per-corner depth using view-space Z (distance along camera forward)
       // This matches what the depth buffer stores, unlike Euclidean distance
@@ -188,7 +209,7 @@ namespace XivMediaPlayer.Compositing {
           screenW, screenH,
           uiCapture?.BackBufferSRV,
           hoverUV, progress, isPlaying, isLocked,
-          minDepth, maxDepth);
+          minDepth, maxDepth, volume);
 
         if (success && _depthRenderer.OutputSRV != null) {
           var outputPtr = _depthRenderer.OutputSRV.NativePointer;
@@ -258,6 +279,8 @@ namespace XivMediaPlayer.Compositing {
       WorldToScreenClamped(tr, out var sTR, out _);
       WorldToScreenClamped(br, out var sBR, out _);
       WorldToScreenClamped(bl, out var sBL, out _);
+
+      StabilizeCorners(ref sTL, ref sTR, ref sBR, ref sBL);
 
       var drawList = ImGui.GetBackgroundDrawList();
 

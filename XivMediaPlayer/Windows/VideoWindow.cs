@@ -117,11 +117,22 @@ namespace XivMediaPlayer.Windows {
         betweenAreas = !Conditions.Instance()->BetweenAreas;
       }
       if (IsOpen && betweenAreas && !_disposed) {
-        Size = new Vector2(ImGui.GetWindowSize().X, ImGui.GetWindowSize().X * 0.5625f);
+        float uiHeight = ImGui.GetTextLineHeightWithSpacing() + 8; // Extra padding for the slider
+        Size = new Vector2(ImGui.GetWindowSize().X, ImGui.GetWindowSize().X * 0.5625f + uiHeight);
         SizeConstraints = new WindowSizeConstraints() { MaximumSize = ImGui.GetMainViewport().Size, MinimumSize = new Vector2(360, 480) };
+        
         if (_frameToLoad != null) {
           ImGui.Image(_frameToLoad.Handle, new Vector2(Size.Value.X, Size.Value.X * 0.5625f));
         }
+
+        if (_mediaManager != null) {
+          ImGui.SetNextItemWidth(Size.Value.X - ImGui.CalcTextSize("Volume").X - 20);
+          int vol = (int)(_mediaManager.LiveStreamVolume * 100f);
+          if (ImGui.SliderInt("Volume", ref vol, 0, 100)) {
+              _mediaManager.LiveStreamVolume = vol / 100f;
+          }
+        }
+
         if (eventTriggerCooldown.ElapsedMilliseconds > 10000) {
           CheckWindowSize(true);
           eventTriggerCooldown.Restart();

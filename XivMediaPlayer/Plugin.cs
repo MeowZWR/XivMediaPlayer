@@ -101,6 +101,7 @@ namespace XivMediaPlayer
         public Networking.Models.TvPlacement? CurrentTvPlacement { get; internal set; }
 
         private bool _wasLeftMousePressed = false;
+        private bool _wasVolumeDragged = false;
 
         public Plugin(
           IDalamudPluginInterface pluginInterface,
@@ -1215,7 +1216,25 @@ namespace XivMediaPlayer
                             // Handle clicks on media controls
                             bool isLeftMousePressed = (GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
                             bool isMouseClicked = isLeftMousePressed && !_wasLeftMousePressed;
+                            bool isMouseReleased = !isLeftMousePressed && _wasLeftMousePressed;
                             _wasLeftMousePressed = isLeftMousePressed;
+
+                            if (isLeftMousePressed) {
+                                // Handle Volume Slider drag
+                                if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.15f && uv.X < 0.72f) {
+                                    if (_mediaManager != null) {
+                                        float volProgress = (uv.X - 0.15f) / 0.57f;
+                                        _mediaManager.LiveStreamVolume = Math.Clamp(volProgress, 0f, 1f);
+                                        _config.LivestreamVolume = _mediaManager.LiveStreamVolume;
+                                        _wasVolumeDragged = true;
+                                    }
+                                }
+                            }
+
+                            if (isMouseReleased && _wasVolumeDragged) {
+                                _config.Save();
+                                _wasVolumeDragged = false;
+                            }
 
                             if (isMouseClicked) {
                                 _pluginLog.Information($"Media Control Clicked at UV: {uv.X:F2}, {uv.Y:F2}");
@@ -1282,10 +1301,13 @@ namespace XivMediaPlayer
 
 
                     bool isLocked = CurrentTvPlacement?.IsLocked ?? true;
-                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked);
+                    float volume = _mediaManager != null ? _mediaManager.LiveStreamVolume : 1f;
+                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume);
                 }
             }
         }
+
+        private System.Numerics.Matrix4x4? _lastStabilizedVP;
 
         /// <summary>
         /// Computes the game's combined View * Projection matrix from the active camera.
@@ -1311,7 +1333,33 @@ namespace XivMediaPlayer
                   FFXIVClientStructs.FFXIV.Common.Math.Matrix4x4,
                   System.Numerics.Matrix4x4>(ref rawProj);
 
-                return System.Numerics.Matrix4x4.Multiply(view, proj);
+                var vp = System.Numerics.Matrix4x4.Multiply(view, proj);
+
+                if (_lastStabilizedVP.HasValue)
+                {
+                    float diff = 0;
+                    diff += Math.Abs(vp.M11 - _lastStabilizedVP.Value.M11);
+                    diff += Math.Abs(vp.M12 - _lastStabilizedVP.Value.M12);
+                    diff += Math.Abs(vp.M13 - _lastStabilizedVP.Value.M13);
+                    diff += Math.Abs(vp.M21 - _lastStabilizedVP.Value.M21);
+                    diff += Math.Abs(vp.M22 - _lastStabilizedVP.Value.M22);
+                    diff += Math.Abs(vp.M23 - _lastStabilizedVP.Value.M23);
+                    diff += Math.Abs(vp.M31 - _lastStabilizedVP.Value.M31);
+                    diff += Math.Abs(vp.M32 - _lastStabilizedVP.Value.M32);
+                    diff += Math.Abs(vp.M33 - _lastStabilizedVP.Value.M33);
+                    diff += Math.Abs(vp.M41 - _lastStabilizedVP.Value.M41);
+                    diff += Math.Abs(vp.M42 - _lastStabilizedVP.Value.M42);
+                    diff += Math.Abs(vp.M43 - _lastStabilizedVP.Value.M43);
+
+                    // Stabilize the combined ViewProjection matrix to filter out both
+                    // camera float drift AND TAA/DLSS/FSR projection sub-pixel jitter.
+                    if (diff < 0.1f) {
+                        vp = _lastStabilizedVP.Value;
+                    }
+                }
+                _lastStabilizedVP = vp;
+
+                return vp;
             } catch
             {
                 return null;
