@@ -18,8 +18,8 @@ namespace MediaPlayerCore {
     private MediaPlayer _vlcPlayer;
     private MediaManager _parent;
 
-    private static MemoryMappedFile _currentMappedFile;
-    private static MemoryMappedViewAccessor _currentMappedViewAccessor;
+
+    private IntPtr _vlcBuffer = IntPtr.Zero;
     public event EventHandler<MediaError> OnErrorReceived;
     public event EventHandler<string> PlaybackStopped;
     public event EventHandler<string> PlaybackFinished;
@@ -62,6 +62,7 @@ namespace MediaPlayerCore {
       _spatialAllowed = spatialAllowed;
       _pitch = Align(_width * _bytePerPixel);
       _lines = Align(_height);
+      _vlcBuffer = Marshal.AllocHGlobal((int)(_pitch * _lines));
       _parent.OnCleanupTime += _parent_OnCleanupTime;
     }
 
@@ -276,9 +277,9 @@ namespace MediaPlayerCore {
 
     private IntPtr Lock(IntPtr opaque, IntPtr planes) {
       try {
-        _currentMappedFile = MemoryMappedFile.CreateNew(null, _pitch * _lines);
-        _currentMappedViewAccessor = _currentMappedFile.CreateViewAccessor();
-        Marshal.WriteIntPtr(planes, _currentMappedViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle());
+        if (_vlcBuffer != IntPtr.Zero) {
+            Marshal.WriteIntPtr(planes, _vlcBuffer);
+        }
         return IntPtr.Zero;
       } catch {
         return IntPtr.Zero;
@@ -290,24 +291,18 @@ namespace MediaPlayerCore {
     }
 
     private void Display(IntPtr opaque, IntPtr picture) {
-      if (!Invalidated) {
+      if (!Invalidated && _vlcBuffer != IntPtr.Zero) {
         try {
-          using (var sourceStream = _currentMappedFile.CreateViewStream()) {
             lock (_parent.LastFrame) {
               int totalBytes = (int)(_pitch * _lines);
               if (_parent.LastFrame.Length != totalBytes) {
                   _parent.LastFrame = new byte[totalBytes];
               }
-              sourceStream.Read(_parent.LastFrame, 0, totalBytes);
+              Marshal.Copy(_vlcBuffer, _parent.LastFrame, 0, totalBytes);
               _parent.LastFrameWidth = (int)(_pitch / _bytePerPixel);
               _parent.LastFrameHeight = (int)_lines;
               _parent.LastFrameCount++;
             }
-          }
-          _currentMappedViewAccessor.Dispose();
-          _currentMappedFile.Dispose();
-          _currentMappedFile = null;
-          _currentMappedViewAccessor = null;
         } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
       }
     }
@@ -318,6 +313,10 @@ namespace MediaPlayerCore {
       }
       _disposed = true;
       _parent.OnCleanupTime -= _parent_OnCleanupTime;
+      if (_vlcBuffer != IntPtr.Zero) {
+          Marshal.FreeHGlobal(_vlcBuffer);
+          _vlcBuffer = IntPtr.Zero;
+      }
       Stop();
       try { _vlcPlayer?.Dispose(); } catch { }
       _vlcPlayer = null;
