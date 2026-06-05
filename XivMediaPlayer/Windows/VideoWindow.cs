@@ -84,22 +84,25 @@ namespace XivMediaPlayer.Windows {
       try {
         if (!taskAlreadyRunning) {
           _ = Task.Run(async () => {
-            taskAlreadyRunning = true;
-            ReadOnlyMemory<byte> bytes = new byte[0];
-            lock (_mediaManager.LastFrame) {
-              bytes = _mediaManager.LastFrame;
-            }
-
-            if (bytes.Length > 0) {
-              if (_lastLoadedFrame != _mediaManager.LastFrame) {
-                var newTexture = await _textureProvider.CreateFromImageAsync(bytes);
-                var oldTexture = _frameToLoad;
-                _frameToLoad = newTexture;
-                _lastLoadedFrame = _mediaManager.LastFrame;
-                oldTexture?.Dispose();
+            try {
+              taskAlreadyRunning = true;
+              ReadOnlyMemory<byte> bytes = new byte[0];
+              lock (_mediaManager.LastFrame) {
+                bytes = _mediaManager.LastFrame;
               }
+
+              if (bytes.Length > 0) {
+                if (_lastLoadedFrame != _mediaManager.LastFrame) {
+                  var newTexture = await _textureProvider.CreateFromImageAsync(bytes);
+                  var oldTexture = _frameToLoad;
+                  _frameToLoad = newTexture;
+                  _lastLoadedFrame = _mediaManager.LastFrame;
+                  oldTexture?.Dispose();
+                }
+              }
+            } finally {
+              taskAlreadyRunning = false;
             }
-            taskAlreadyRunning = false;
           });
         }
       } catch (Exception e) {

@@ -133,10 +133,6 @@ float4 PS(VS_OUT input) : SV_TARGET {
   float2 pixelPos = input.pos.xy;
   float2 uv = InverseBilinear(pixelPos, CornerTL, CornerTR, CornerBR, CornerBL);
 
-  if (uv.x == -1.0 && uv.y == -1.0) {
-    return float4(0, 0, 0, 0);
-  }
-
   bool isInside = (uv.x >= 0 && uv.x <= 1 && uv.y >= 0 && uv.y <= 1);
   float2 screenUV = pixelPos / ScreenSize;
   float gameDepth = DepthTexture.Sample(DepthSampler, screenUV).r;
@@ -159,16 +155,28 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float depthMask = 1.0;
       if (gameDepth < 0.0001) depthMask = 0; // Ignore skybox
       
-      // Calculate distance from the TV (where uv is 0..1):
-      float2 distUV = max(float2(0, 0), max(float2(0, 0) - uv, uv - float2(1, 1)));
-      float dist = length(distUV);
+      // Calculate TV dimensions in screen pixels
+      float tvWidthPixels = length(CornerTR - CornerTL);
+      float tvHeightPixels = length(CornerBL - CornerTL);
+      float tvPixelSize = max(tvWidthPixels, tvHeightPixels);
+      
+      // Calculate distance from the center of the TV in true screen pixels!
+      // By using true screen distance, we completely bypass UV space perspective distortion and the mathematical vanishing point.
+      // This guarantees a perfectly smooth radial glow everywhere on screen.
+      float2 tvCenter = (CornerTL + CornerTR + CornerBL + CornerBR) * 0.25;
+      float distInPixels = distance(pixelPos, tvCenter);
+      
+      // Subtract half the TV size so the glow starts fading from the edges, not the center
+      distInPixels = max(0.0, distInPixels - tvPixelSize * 0.5);
       
       // Removing the 2D in-front shadow blocker!
       // Because we use Color Dodge, the light naturally wraps around 3D objects and beautifully illuminates them.
       // Trying to fake shadows with a 2D screen-space cutout creates blocky rectangular lines on characters!
-      // Physical light dissipation!
-      // Light loses energy over distance. If we don't fade it, it casts infinitely across the whole room.
-      float distanceFade = saturate(1.0 - dist * 0.4); // Adjust multiplier to change how far the light reaches
+      
+      // Physical light dissipation based on screen pixels!
+      // This ensures the light reaches the same distance regardless of perspective.
+      float maxGlowRadiusPixels = max(200.0, tvPixelSize * 1.5);
+      float distanceFade = saturate(1.0 - (distInPixels / maxGlowRadiusPixels)); 
       depthMask *= pow(distanceFade, 2.5); // Non-linear falloff for realism
       
       if (depthMask > 0.001) {

@@ -115,12 +115,14 @@ namespace MediaPlayerCore {
     public void ConfigureStream(IMediaGameObject playerObject, string audioPath, int startTimeMs, Dictionary<string, string>? httpHeaders = null) {
       if (playerObject != null) {
         try {
-          if (_playbackStreams.ContainsKey(playerObject.Name)) {
-            try {
-              _playbackStreams[playerObject.Name]?.Dispose();
-            } catch (Exception e) {
-              OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
-            }
+          if (_playbackStreams.TryGetValue(playerObject.Name, out var oldStream)) {
+            Task.Run(() => {
+              try {
+                oldStream?.Dispose();
+              } catch (Exception e) {
+                OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
+              }
+            });
           }
 
           _playbackStreams[playerObject.Name] = new MediaObject(
