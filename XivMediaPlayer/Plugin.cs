@@ -306,7 +306,8 @@ namespace XivMediaPlayer
                 bool isMediaOwner = _currentMediaOwnerId == _config.OwnerId;
                 
                 // The current DJ pushes every 5 seconds (only if playing media or currently loading one)
-                if (isMediaOwner && (_mediaManager?.ActiveStream != null || !string.IsNullOrEmpty(_lastStreamURL)))
+                // If they intentionally paused, they stop pushing so the DataAgeMs can grow!
+                if (isMediaOwner && ((_mediaManager?.ActiveStream != null && !_isIntentionallyPaused) || !string.IsNullOrEmpty(_lastStreamURL)))
                 {
                     if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
                     {
@@ -621,10 +622,12 @@ namespace XivMediaPlayer
         private bool _isResolvingMedia = false;
         private bool _lastStreamIsLive = false;
         private bool _isIntentionallyPaused = false;
+        private DateTime _lastUrlLoadTime = DateTime.MinValue;
 
         private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
             _isIntentionallyPaused = false;
+            _lastUrlLoadTime = DateTime.UtcNow;
             if (_isResolvingMedia) return;
 
             if (!isAutoSync && CurrentTvPlacement?.IsLocked == true && CurrentTvPlacement?.OwnerId != _config.OwnerId && !IsHousingMenuOpen)
@@ -1110,8 +1113,13 @@ namespace XivMediaPlayer
             {
                 if (isOutofSync)
                 {
-                    _pluginLog.Information($"[Social] Adjusting timecode to sync with server. Local Time: {activeStream.Time}ms | Target Time: {targetTimeMs}ms");
-                    activeStream.Time = (long)targetTimeMs;
+                    // If the server is paused, and the data is old, ignore timecode sync!
+                    if (!sync.IsPlaying && sync.DataAgeMs >= 15000 && localIsPlaying) {
+                        _pluginLog.Information("[Social] Ignoring timecode sync because server is paused and data is stale.");
+                    } else {
+                        _pluginLog.Information($"[Social] Adjusting timecode to sync with server. Local Time: {activeStream.Time}ms | Target Time: {targetTimeMs}ms");
+                        activeStream.Time = (long)targetTimeMs;
+                    }
                 }
 
                 // Do not sync play/pause state for livestreams, as pausing a livestream in VLC breaks it
@@ -1125,8 +1133,18 @@ namespace XivMediaPlayer
                     }
                     else if (!sync.IsPlaying && localIsPlaying)
                     {
-                        _pluginLog.Information($"[Social] Server says paused, but we are playing. Pausing!");
-                        activeStream.Pause(); 
+                        // "If a pause state didn't happen withing a certain time frame, we no longer care."
+                        // However, if we just entered the room (loaded the URL less than 20 seconds ago), we MUST respect the pause
+                        // even if the DJ paused it 5 minutes ago!
+                        bool isNewlyLoaded = (DateTime.UtcNow - _lastUrlLoadTime).TotalSeconds < 20;
+
+                        // Only force pause if the pause command was pushed less than 15 seconds ago OR we just loaded the stream.
+                        if (sync.DataAgeMs < 15000 || isNewlyLoaded) {
+                            _pluginLog.Information($"[Social] Server says paused (NewlyLoaded: {isNewlyLoaded}). Pausing!");
+                            activeStream.Pause(); 
+                        } else {
+                            _pluginLog.Information($"[Social] Server says paused, but it is {sync.DataAgeMs}ms old. Ignoring!");
+                        }
                     }
                 }
             }
@@ -1371,14 +1389,16 @@ namespace XivMediaPlayer
                                             _isIntentionallyPaused = !_isIntentionallyPaused;
                                             if (_isIntentionallyPaused) activeStream.Pause(); 
                                             else activeStream.Resume();
-                                            // Force an immediate push so the room pauses instantly
-                                            if (CurrentTvPlacement?.OwnerId == _config.OwnerId) _ = PushMediaToServerAsync();
+                                            // Force an immediate push. If the TV is locked, the server will reject it and automatically snap them back!
+                                            _ = PushMediaToServerAsync();
                                         }
                                     } else if (uv.Y > 0.90f && uv.Y < 0.92f && uv.X > 0.15f && uv.X < 0.72f) {
                                         if (activeStream != null) {
                                             float seekProgress = (uv.X - 0.15f) / 0.57f;
                                             _pluginLog.Information($"Seeking to {seekProgress * 100}%");
                                             activeStream.Time = (long)(seekProgress * activeStream.Length);
+                                            // Force an immediate push so the room seeks instantly
+                                            _ = PushMediaToServerAsync();
                                         }
                                      } else if (uv.X > 0.74f && uv.X < 0.80f && uv.Y > 0.88f && uv.Y < 0.94f) {
                                         // Lock/Unlock toggle
@@ -1407,6 +1427,8 @@ namespace XivMediaPlayer
                                             _pluginLog.Information("Pasted and Playing: " + clipboardText);
                                             _chat.Print("[Media Player] Loading URL from clipboard...");
                                             PlayViaYtDlp(clipboardText, _playerObject);
+                                            // Force an immediate push to take over the TV
+                                            _ = PushMediaToServerAsync();
                                         }
                                     } else if (uv.X > 0.90f && uv.X < 0.96f && uv.Y > 0.88f && uv.Y < 0.94f) {
                                         // Paste to Queue
@@ -1421,6 +1443,7 @@ namespace XivMediaPlayer
                                                 if (_playerObject != null) {
                                                     string nextUrl = _mediaQueue.Dequeue();
                                                     PlayViaYtDlp(nextUrl, _playerObject);
+                                                    _ = PushMediaToServerAsync();
                                                 }
                                             }
                                         }
