@@ -12,6 +12,7 @@ namespace XivMediaPlayer.Networking
     {
         private readonly HttpClient _httpClient;
         private readonly string _baseUrl;
+        public string BaseUrl => _baseUrl;
         private readonly IPluginLog _log;
 
         public ServerClient(string baseUrl, IPluginLog log)

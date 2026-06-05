@@ -154,8 +154,12 @@ namespace XivMediaPlayer
 
             ServerClient = new Networking.ServerClient(_config.ServerUrl, _pluginLog);
             _config.OnConfigurationChanged += (s, e) => {
-                ServerClient?.Dispose();
-                ServerClient = new Networking.ServerClient(_config.ServerUrl, _pluginLog);
+                // Only recreate ServerClient if the ServerUrl actually changed!
+                // Otherwise we constantly dispose the HttpClient while requests are in flight!
+                if (ServerClient.BaseUrl != _config.ServerUrl) {
+                    ServerClient?.Dispose();
+                    ServerClient = new Networking.ServerClient(_config.ServerUrl, _pluginLog);
+                }
             };
 
             _uiCapture = new UILayerCapture();
@@ -306,8 +310,14 @@ namespace XivMediaPlayer
                     if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
                     {
                         _lastServerSyncPush = DateTime.UtcNow;
+                        _pluginLog.Information($"[Social] Executing PushMediaToServerAsync. ActiveStream Time: {_mediaManager.ActiveStream.Time}");
                         _ = PushMediaToServerAsync();
                     }
+                }
+                else if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
+                {
+                    _lastServerSyncPush = DateTime.UtcNow;
+                    _pluginLog.Information($"[Social] Skipping Push. isMediaOwner={isMediaOwner} ({_currentMediaOwnerId} vs {_config.OwnerId}), ActiveStream={_mediaManager?.ActiveStream != null}");
                 }
 
                 // EVERYONE fetches every 10 seconds. 
@@ -1029,6 +1039,11 @@ namespace XivMediaPlayer
             if (sync == null || string.IsNullOrEmpty(sync.CurrentUrl)) return;
             
             _currentMediaOwnerId = sync.OwnerId;
+
+            // If we are still the media owner, do NOT override our local playback state with the server's state!
+            // We dictate the server's state, not the other way around. 
+            // If we override our local state, any local unpause we did in the last 5 seconds will be instantly overridden by our own older server state!
+            if (_currentMediaOwnerId == _config.OwnerId) return;
 
             // Use the DataAgeMs calculated purely by the server to completely eliminate client clock drift issues!
             // We ONLY add the age if the video is currently playing.
