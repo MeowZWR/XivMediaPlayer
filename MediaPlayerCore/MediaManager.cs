@@ -87,13 +87,16 @@ namespace MediaPlayerCore {
 
     public void StopStream() {
       // Copy references before clearing to avoid collection modification issues
-      var streams = _playbackStreams.Values.ToArray();
-      _playbackStreams.Clear();
+      MediaObject[] streams;
+      lock (_playbackStreams) {
+          streams = _playbackStreams.Values.ToArray();
+          _playbackStreams.Clear();
+      }
       // VLC's Stop() is synchronous and blocks — run on background thread
       Task.Run(() => {
         foreach (var stream in streams) {
           try {
-            stream?.Stop();
+            stream?.Dispose();
           } catch { }
         }
       });
@@ -118,27 +121,32 @@ namespace MediaPlayerCore {
     public void ConfigureStream(IMediaGameObject playerObject, string audioPath, int startTimeMs, Dictionary<string, string>? httpHeaders = null) {
       if (playerObject != null) {
         try {
-          if (_playbackStreams.TryGetValue(playerObject.Name, out var oldStream)) {
-            Task.Run(() => {
-              try {
-                oldStream?.Dispose();
-              } catch (Exception e) {
-                OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
+          MediaObject newStream;
+          lock (_playbackStreams) {
+              if (_playbackStreams.TryGetValue(playerObject.Name, out var oldStream)) {
+                Task.Run(() => {
+                  try {
+                    oldStream?.Dispose();
+                  } catch (Exception e) {
+                    OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
+                  }
+                });
               }
-            });
+
+              newStream = new MediaObject(
+                this, playerObject, _camera,
+                SoundType.Livestream, audioPath, _libVLCPath, false);
+              
+              _playbackStreams[playerObject.Name] = newStream;
           }
 
-          _playbackStreams[playerObject.Name] = new MediaObject(
-            this, playerObject, _camera,
-            SoundType.Livestream, audioPath, _libVLCPath, false);
-
-          lock (_playbackStreams[playerObject.Name]) {
+          lock (newStream) {
             float volume = _livestreamVolume;
-            _playbackStreams[playerObject.Name].OnErrorReceived += MediaManager_OnErrorReceived;
-            _playbackStreams[playerObject.Name].PlaybackFinished += (s, e) => {
+            newStream.OnErrorReceived += MediaManager_OnErrorReceived;
+            newStream.PlaybackFinished += (s, e) => {
                OnPlaybackFinished?.Invoke(this, e);
             };
-            _playbackStreams[playerObject.Name].Play(audioPath, volume, startTimeMs, httpHeaders);
+            newStream.Play(audioPath, volume, startTimeMs, httpHeaders);
           }
         } catch (Exception e) {
           OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
@@ -210,15 +218,17 @@ namespace MediaPlayerCore {
 
     public void CleanSounds() {
       try {
-        foreach (var sound in _playbackStreams) {
-          if (sound.Value != null) {
-            sound.Value.Invalidated = true;
-            sound.Value?.Dispose();
-            sound.Value.OnErrorReceived -= MediaManager_OnErrorReceived;
-          }
+        lock (_playbackStreams) {
+            foreach (var sound in _playbackStreams) {
+              if (sound.Value != null) {
+                sound.Value.Invalidated = true;
+                sound.Value?.Dispose();
+                sound.Value.OnErrorReceived -= MediaManager_OnErrorReceived;
+              }
+            }
+            _playbackStreams?.Clear();
         }
         _lastFrame = null;
-        _playbackStreams?.Clear();
         OnCleanupTime?.Invoke(this, EventArgs.Empty);
       } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
     }
