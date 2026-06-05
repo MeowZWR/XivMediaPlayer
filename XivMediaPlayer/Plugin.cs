@@ -136,6 +136,20 @@ namespace XivMediaPlayer
             _objectTable = objectTable;
             _gameInterop = gameInterop;
 
+            System.Runtime.Loader.AssemblyLoadContext.Default.Resolving += (context, assemblyName) =>
+            {
+                if (assemblyName.Name != null && assemblyName.Name.StartsWith("CefSharp"))
+                {
+                    string pluginDir = System.IO.Path.GetDirectoryName(_pluginInterface.AssemblyLocation.FullName) ?? "";
+                    string cefPath = System.IO.Path.Combine(pluginDir, "cef", assemblyName.Name + ".dll");
+                    if (System.IO.File.Exists(cefPath))
+                    {
+                        return context.LoadFromAssemblyPath(cefPath);
+                    }
+                }
+                return null;
+            };
+
             // Load configuration
             _config = (Configuration)_pluginInterface.GetPluginConfig()
                  ?? new Configuration();
@@ -668,13 +682,62 @@ namespace XivMediaPlayer
                         _pluginLog.Warning(resolveEx, "[yt-dlp] Failed to resolve stream URL.");
                     }
 
-                    var metadata = await metadataTask;
+                    MediaPlayerCore.YtDlp.YtDlpMetadata? metadata = null;
+                    try
+                    {
+                        metadata = await metadataTask;
+                    } catch (Exception metadataEx)
+                    {
+                        _pluginLog.Warning(metadataEx, "[yt-dlp] Failed to get metadata.");
+                    }
 
                     if (string.IsNullOrEmpty(streamUrl))
                     {
-                        _chat.PrintError("[Media Player] Failed to resolve URL via yt-dlp. Trying direct playback...");
-                        TuneIntoStream(url, audioGameObject, startTimeMs, metadata?.HttpHeaders);
-                        return;
+                        // Fallback to CefSharp for heavily protected sites
+                        _chat.Print("[Media Player] yt-dlp failed. Falling back to embedded browser resolver...");
+                        
+                        MediaPlayerCore.Resolvers.CefSharpResolverResult? cefResult = null;
+                        try
+                        {
+                            string pluginDir = System.IO.Path.GetDirectoryName(_pluginInterface.AssemblyLocation.FullName);
+                            MediaPlayerCore.Resolvers.CefSharpResolver.Initialize(pluginDir);
+                            cefResult = await MediaPlayerCore.Resolvers.CefSharpResolver.ResolveStreamUrlAsync(url);
+                        }
+                        catch (Exception ex)
+                        {
+                            _pluginLog.Warning(ex, "[Media Player] CefSharp resolver crashed.");
+                        }
+
+                        if (cefResult != null && !string.IsNullOrEmpty(cefResult.Url))
+                        {
+                            streamUrl = cefResult.Url;
+                            _chat.Print("[Media Player] Embedded browser successfully found stream URL.");
+                            
+                            // Merge headers
+                            if (metadata == null) metadata = new MediaPlayerCore.YtDlp.YtDlpMetadata();
+                            if (metadata.HttpHeaders == null) metadata.HttpHeaders = new Dictionary<string, string>();
+                            foreach (var kvp in cefResult.Headers)
+                            {
+                                metadata.HttpHeaders[kvp.Key] = kvp.Value;
+                            }
+
+                            // Proxy the stream so VLC can bypass Cloudflare using our extracted Cookies and Headers
+                            try
+                            {
+                                streamUrl = MediaPlayerCore.StreamProxy.Instance.RegisterStream(cefResult.Url, metadata.HttpHeaders, cefResult.M3u8Content);
+                                _pluginLog.Info($"[Media Player] Proxying stream URL: {streamUrl}");
+                            }
+                            catch (Exception proxyEx)
+                            {
+                                _pluginLog.Warning(proxyEx, "[Media Player] Failed to proxy stream URL, falling back to direct.");
+                            }
+                        }
+                        else
+                        {
+                            _chat.PrintError("[Media Player] Failed to resolve URL natively. Trying direct playback...");
+                            TuneIntoStream(url, audioGameObject, startTimeMs, metadata?.HttpHeaders);
+                            return;
+                        }
                     }
                     string title = metadata?.Title ?? "Unknown";
                     string uploader = metadata?.Uploader ?? "";
@@ -1683,6 +1746,7 @@ namespace XivMediaPlayer
             ServerClient?.Dispose();
             _mediaManager?.Dispose();
             _ytDlpManager?.Dispose();
+            MediaPlayerCore.StreamProxy.Instance.Dispose();
             _windowSystem?.RemoveAllWindows();
         }
 

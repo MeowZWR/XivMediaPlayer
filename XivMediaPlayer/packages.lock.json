@@ -44,6 +44,27 @@
           "Vortice.DXGI": "3.5.0"
         }
       },
+      "CefSharp.Common.NETCore": {
+        "type": "Transitive",
+        "resolved": "148.0.90",
+        "contentHash": "Au7BZhWuKFBK/I4mj7FLQb+OtiqKhomjWhizY+cSSdxedkRcNZ3h+9/6wyuvR5+caOwHmtbChb/dGYe7nLXw+g==",
+        "dependencies": {
+          "chromiumembeddedframework.runtime": "[148.0.9]"
+        }
+      },
+      "CefSharp.OffScreen.NETCore": {
+        "type": "Transitive",
+        "resolved": "148.0.90",
+        "contentHash": "yqoLNReghNE63hp+QGeqxx/BAdEIv6Y+dw66Z+BdBgXNf8Qjj3YIbJzRBr3Ct4Fh8YX9/+7D7Dt+0z7iA2WqlQ==",
+        "dependencies": {
+          "CefSharp.Common.NETCore": "[148.0.90]"
+        }
+      },
+      "chromiumembeddedframework.runtime": {
+        "type": "Transitive",
+        "resolved": "148.0.9",
+        "contentHash": "7lhX4E7AbHfKkgaXgN6uuUIivEq+q5z+Wt3XN8ISOuqZidAqUhO3zAzwsx2uIx29qvWQGEjTTnuLXaBx8d1QLQ=="
+      },
       "LibVLCSharp": {
         "type": "Transitive",
         "resolved": "3.9.0",
@@ -171,6 +192,7 @@
         "resolved": "2.2.1",
         "contentHash": "hQglyOT5iT3XuGpBP8ZG0+aoqwRfidHjTNehpoWwX0g6KJEgtH2VaqM2nuJ2mheKZa/IBqB4YQTZVvrIapzfOA==",
         "dependencies": {
+          "Microsoft.Win32.Registry": "4.7.0",
           "NAudio.Core": "2.2.1"
         }
       },
@@ -208,6 +230,7 @@
         "resolved": "2.2.1",
         "contentHash": "xFHRFwH4x6aq3IxRbewvO33ugJRvZFEOfO62i7uQJRUNW2cnu6BeBTHUS0JD5KBucZbHZaYqxQG8dwZ47ezQuQ==",
         "dependencies": {
+          "Microsoft.Win32.Registry": "4.7.0",
           "NAudio.Core": "2.2.1"
         }
       },
@@ -266,6 +289,7 @@
       "mediaplayercore": {
         "type": "Project",
         "dependencies": {
+          "CefSharp.OffScreen.NETCore": "[148.0.90, )",
           "LibVLCSharp": "[3.9.0, )",
           "NAudio": "[2.2.1, )",
           "NAudio.Core": "[2.2.1, )",
@@ -275,6 +299,29 @@
           "SixLabors.ImageSharp": "[3.1.7, )",
           "VideoLAN.LibVLC.Windows": "[3.0.18, )"
         }
+      }
+    },
+    "net10.0-windows7.0/win-x64": {
+      "CefSharp.Common.NETCore": {
+        "type": "Transitive",
+        "resolved": "148.0.90",
+        "contentHash": "Au7BZhWuKFBK/I4mj7FLQb+OtiqKhomjWhizY+cSSdxedkRcNZ3h+9/6wyuvR5+caOwHmtbChb/dGYe7nLXw+g==",
+        "dependencies": {
+          "chromiumembeddedframework.runtime": "[148.0.9]"
+        }
+      },
+      "chromiumembeddedframework.runtime": {
+        "type": "Transitive",
+        "resolved": "148.0.9",
+        "contentHash": "7lhX4E7AbHfKkgaXgN6uuUIivEq+q5z+Wt3XN8ISOuqZidAqUhO3zAzwsx2uIx29qvWQGEjTTnuLXaBx8d1QLQ==",
+        "dependencies": {
+          "chromiumembeddedframework.runtime.win-x64": "148.0.9"
+        }
+      },
+      "chromiumembeddedframework.runtime.win-x64": {
+        "type": "Transitive",
+        "resolved": "148.0.9",
+        "contentHash": "LB4O7yKJs3FFjs+8ILSzB4wT72gbE1Xi8bj8aFay3Fjfqxqpkt/25h3usq8D9buZm5x/c/p6n9Zhh82V7Lld/w=="
       }
     }
   }

@@ -10,6 +10,9 @@
   <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
   <PlatformTarget>x64</PlatformTarget>
+  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  <CefSharpAnyCpuSupport>true</CefSharpAnyCpuSupport>
   <AnalysisLevel>5.0</AnalysisLevel>
   <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
  </PropertyGroup>
@@ -37,4 +40,35 @@
   <PackageReference Include="Vortice.Direct3D11" Version="3.5.0" />
  </ItemGroup>
 
+  <PropertyGroup>
+    <OutputPath>bin\x64\Debug\</OutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+  <Target Name="CopyCefRuntimes" AfterTargets="Build">
+    <PropertyGroup>
+      <NugetPackagesDir>$(NuGetPackageRoot)</NugetPackagesDir>
+      <CefDestDir>$(TargetDir)cef\</CefDestDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- Copy native runtimes from nuget package directly, since they are unmanaged and might not be in TargetDir -->
+      <CefNativeFiles Include="$(NugetPackagesDir)\chromiumembeddedframework.runtime.win-x64\148.0.9\runtimes\win-x64\native\*.*" />
+      <CefLocales Include="$(NugetPackagesDir)\chromiumembeddedframework.runtime.win-x64\148.0.9\CEF\win-x64\locales\*.*" />
+      <CefBrowserSub Include="$(NugetPackagesDir)\cefsharp.common.netcore\148.0.90\runtimes\win-x64\native\*.*" />
+    </ItemGroup>
+    
+    <Copy SourceFiles="@(CefNativeFiles)" DestinationFolder="$(CefDestDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CefLocales)" DestinationFolder="$(CefDestDir)locales\" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(CefBrowserSub)" DestinationFolder="$(CefDestDir)" SkipUnchangedFiles="true" />
+
+    <!-- Move CefSharp managed wrappers and Core.Runtime from root output to cef\ to prevent Dalamud from loading them -->
+    <ItemGroup>
+      <CefDllsToMove Include="$(TargetDir)CefSharp*.dll" />
+      <CefDllsToMove Include="$(TargetDir)CefSharp.BrowserSubprocess.exe" />
+      <CefDllsToMove Include="$(TargetDir)CefSharp.BrowserSubprocess.runtimeconfig.json" />
+      <CefDllsToMove Include="$(TargetDir)Ijwhost.dll" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(CefDllsToMove)" DestinationFolder="$(CefDestDir)" SkipUnchangedFiles="true" />
+    <Delete Files="@(CefDllsToMove)" />
+  </Target>
 </Project>
