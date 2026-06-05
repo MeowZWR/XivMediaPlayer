@@ -108,8 +108,8 @@ namespace XivMediaPlayer
         // Current room TV state
         public Networking.Models.TvPlacement? CurrentTvPlacement { get; internal set; }
 
+        // Input tracking
         private bool _wasLeftMousePressed = false;
-        private bool _wasVolumeDragged = false;
 
         public Plugin(
           IDalamudPluginInterface pluginInterface,
@@ -1353,36 +1353,32 @@ namespace XivMediaPlayer
                     _gameGui.WorldToScreen(bl, out var sBL);
 
                     var uv = MathUtils.InverseBilinear(mousePos, sTL, sTR, sBR, sBL);
-                        if (uv.X >= 0 && uv.X <= 1 && uv.Y >= 0 && uv.Y <= 1)
-                        {
-                            hoverUV = uv;
 
-                            // Handle clicks on media controls
-                            bool isLeftMousePressed = (GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
-                            bool isMouseClicked = isLeftMousePressed && !_wasLeftMousePressed;
-                            bool isMouseReleased = !isLeftMousePressed && _wasLeftMousePressed;
-                            _wasLeftMousePressed = isLeftMousePressed;
+                    // We must calculate mouse state unconditionally every frame so that holding the mouse
+                    // and dragging it OVER the window doesn't falsely trigger a "Click" event!
+                    bool isLeftMousePressed = (GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
+                    bool isMouseClicked = isLeftMousePressed && !_wasLeftMousePressed;
+                    bool isMouseReleased = !isLeftMousePressed && _wasLeftMousePressed;
+                    _wasLeftMousePressed = isLeftMousePressed;
 
-                            if (isLeftMousePressed) {
-                                // Handle Volume Slider drag
-                                if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.15f && uv.X < 0.72f) {
-                                    if (_mediaManager != null) {
-                                        float volProgress = (uv.X - 0.15f) / 0.57f;
-                                        _mediaManager.LiveStreamVolume = Math.Clamp(volProgress * 3f, 0f, 3f);
-                                        _config.LivestreamVolume = _mediaManager.LiveStreamVolume;
-                                        _wasVolumeDragged = true;
-                                    }
+                    if (uv.X >= 0 && uv.X <= 1 && uv.Y >= 0 && uv.Y <= 1)
+                    {
+                        hoverUV = uv;
+
+                        if (isMouseClicked) {
+                            _pluginLog.Information($"Media Control Clicked at UV: {uv.X:F2}, {uv.Y:F2}");
+                            
+                            // Handle Volume Slider Click
+                            if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.15f && uv.X < 0.72f) {
+                                if (_mediaManager != null) {
+                                    float volProgress = (uv.X - 0.15f) / 0.57f;
+                                    _mediaManager.LiveStreamVolume = Math.Clamp(volProgress * 3f, 0f, 3f);
+                                    _config.LivestreamVolume = _mediaManager.LiveStreamVolume;
+                                    _config.Save();
                                 }
                             }
-
-                            if (isMouseReleased && _wasVolumeDragged) {
-                                _config.Save();
-                                _wasVolumeDragged = false;
-                            }
-
-                            if (isMouseClicked) {
-                                _pluginLog.Information($"Media Control Clicked at UV: {uv.X:F2}, {uv.Y:F2}");
-                                if (uv.Y > 0.85f) {
+                            // Handle Play/Pause
+                            else if (uv.Y > 0.85f && uv.Y < 0.95f) {
                                     if (uv.X > 0.05f && uv.X < 0.10f && uv.Y > 0.88f && uv.Y < 0.94f) {
                                         if (activeStream != null) {
                                             _pluginLog.Information("Toggling Play/Pause!");
