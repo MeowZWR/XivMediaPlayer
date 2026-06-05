@@ -56,6 +56,8 @@ namespace XivMediaPlayer
         private WorldVideoRenderer _worldRenderer;
         internal WorldVideoRenderer WorldRenderer => _worldRenderer;
         private DepthPreviewWindow _depthPreviewWindow;
+
+        private string _currentMediaOwnerId = string.Empty;
         private DepthBufferCapture _depthCapture;
         private UILayerCapture _uiCapture;
 
@@ -296,10 +298,10 @@ namespace XivMediaPlayer
             // Sync Polling Loop
             if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
             {
-                bool isOwner = CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId;
+                bool isMediaOwner = _currentMediaOwnerId == _config.OwnerId;
                 
-                // Owner pushes every 5 seconds (only if playing media)
-                if (isOwner && _mediaManager?.ActiveStream != null)
+                // The current DJ pushes every 5 seconds (only if playing media)
+                if (isMediaOwner && _mediaManager?.ActiveStream != null)
                 {
                     if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
                     {
@@ -307,14 +309,13 @@ namespace XivMediaPlayer
                         _ = PushMediaToServerAsync();
                     }
                 }
-                // Visitors fetch every 10 seconds
-                else if (!isOwner)
+
+                // EVERYONE fetches every 10 seconds. 
+                // This allows the DJ handoff to occur if someone else changes the video.
+                if ((DateTime.UtcNow - _lastServerSyncFetch).TotalSeconds >= 10)
                 {
-                    if ((DateTime.UtcNow - _lastServerSyncFetch).TotalSeconds >= 10)
-                    {
-                        _lastServerSyncFetch = DateTime.UtcNow;
-                        _ = FetchServerDataForCurrentLocationAsync();
-                    }
+                    _lastServerSyncFetch = DateTime.UtcNow;
+                    _ = FetchServerDataForCurrentLocationAsync();
                 }
             }
 
@@ -1009,6 +1010,7 @@ namespace XivMediaPlayer
             try 
             {
                 await ServerClient.UpdateMediaStateAsync(key, sync);
+                _currentMediaOwnerId = _config.OwnerId;
             } 
             catch (UnauthorizedAccessException) 
             {
@@ -1025,10 +1027,14 @@ namespace XivMediaPlayer
 
             var sync = await ServerClient.GetMediaStateAsync(key);
             if (sync == null || string.IsNullOrEmpty(sync.CurrentUrl)) return;
+            
+            _currentMediaOwnerId = sync.OwnerId;
 
             // Use the DataAgeMs calculated purely by the server to completely eliminate client clock drift issues!
             // We ONLY add the age if the video is currently playing.
             var targetTimeMs = sync.IsPlaying ? sync.TimecodeMs + (long)sync.DataAgeMs : sync.TimecodeMs;
+            
+            _pluginLog.Information($"[Social] Fetched media sync: Server TimecodeMs={sync.TimecodeMs}, DataAgeMs={sync.DataAgeMs}. Calculated TargetTimeMs={targetTimeMs}.");
 
             // Update local config
             var state = new RoomMediaState
@@ -1065,7 +1071,7 @@ namespace XivMediaPlayer
             {
                 if (isOutofSync)
                 {
-                    _pluginLog.Information($"[Social] Adjusting timecode to sync with server: {targetTimeMs}ms");
+                    _pluginLog.Information($"[Social] Adjusting timecode to sync with server. Local Time: {activeStream.Time}ms | Target Time: {targetTimeMs}ms");
                     activeStream.Time = (long)targetTimeMs;
                 }
 
