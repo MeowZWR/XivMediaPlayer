@@ -410,6 +410,8 @@ namespace XivMediaPlayer
             _playerCamera = new MediaCameraObject(_camera);
             _mediaManager = new MediaManager(_playerObject, _playerCamera, _dependencyManager.DependenciesDir);
             _mediaManager.OnErrorReceived += OnMediaError;
+            _mediaManager.OnNewMediaTriggered += _mediaManager_OnNewMediaTriggered;
+            _mediaManager.OnPlaybackFinished += _mediaManager_OnPlaybackFinished;
             _mediaManager.LiveStreamVolume = _config.LivestreamVolume;
             _videoWindow.MediaManager = _mediaManager;
             _pluginLog.Info("[Media Player] Media manager initialized successfully.");
@@ -1352,9 +1354,6 @@ namespace XivMediaPlayer
                 {
                     tempPlayer.Volume = 1;
                 }
-
-                _mediaManager.OnNewMediaTriggered += _mediaManager_OnNewMediaTriggered;
-                _mediaManager.OnPlaybackFinished += _mediaManager_OnPlaybackFinished;
             } catch (Exception e)
             {
                 _pluginLog.Warning(e, "[Media Player] Failed to fix Windows volume");
