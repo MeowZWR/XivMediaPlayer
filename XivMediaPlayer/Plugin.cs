@@ -1728,99 +1728,92 @@ namespace XivMediaPlayer
                                     _config.Save();
                                 }
                             }
-                            // Handle Play/Pause
+                            // Handle Transport Controls (Y between 0.85 and 0.95)
                             else if (uv.Y > 0.85f && uv.Y < 0.95f)
                             {
-                                // Slightly widened hitboxes for better UX
-                                if (uv.X >= 0.04f && uv.X <= 0.11f && uv.Y >= 0.88f && uv.Y <= 0.94f)
+                                // Prev (0.02 - 0.06)
+                                if (uv.X >= 0.02f && uv.X <= 0.06f)
                                 {
-                                    if (activeStream != null)
-                                    {
-                                        _pluginLog.Information("Toggling Play/Pause!");
-                                        _isIntentionallyPaused = !_isIntentionallyPaused;
-                                        if (_isIntentionallyPaused) activeStream.Pause();
-                                        else activeStream.Resume();
-                                        // Force an immediate push. If the TV is locked, the server will reject it and automatically snap them back!
-                                        _isLocalDj = true;
-                                        _ = PushMediaToServerAsync(isBackgroundSync: false);
-                                    }
+                                    PlayPrevious();
                                 }
-                                else if (uv.Y >= 0.88f && uv.Y <= 0.94f && uv.X >= 0.14f && uv.X <= 0.73f)
+                                // Rewind (0.07 - 0.11)
+                                else if (uv.X >= 0.07f && uv.X <= 0.11f)
+                                {
+                                    SeekRelative(-_config.SeekIncrementSeconds);
+                                }
+                                // Play/Pause (0.12 - 0.16)
+                                else if (uv.X >= 0.12f && uv.X <= 0.16f)
+                                {
+                                    TogglePlayPause();
+                                }
+                                // Fast Forward (0.17 - 0.21)
+                                else if (uv.X >= 0.17f && uv.X <= 0.21f)
+                                {
+                                    SeekRelative(_config.SeekIncrementSeconds);
+                                }
+                                // Next (0.22 - 0.26)
+                                else if (uv.X >= 0.22f && uv.X <= 0.26f)
+                                {
+                                    PlayNext();
+                                }
+                                // Seek Bar (0.28 - 0.58)
+                                else if (uv.X >= 0.28f && uv.X <= 0.58f)
                                 {
                                     if (activeStream != null)
                                     {
-                                        float seekProgress = (uv.X - 0.15f) / 0.57f;
-                                        _pluginLog.Information($"Seeking to {seekProgress * 100}%");
+                                        float seekProgress = (uv.X - 0.28f) / 0.30f;
                                         activeStream.Time = (long)(seekProgress * activeStream.Length);
                                         _isLocalDj = true;
                                         _ = PushMediaToServerAsync(isBackgroundSync: false);
                                     }
                                 }
-                                else if (uv.X >= 0.73f && uv.X <= 0.81f && uv.Y >= 0.88f && uv.Y <= 0.94f)
+                                // Lock (0.80 - 0.84)
+                                else if (uv.X >= 0.80f && uv.X <= 0.84f)
                                 {
-                                    // Lock/Unlock toggle
                                     if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
                                     {
                                         CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
-                                        _pluginLog.Information($"Toggled TV lock to: {CurrentTvPlacement.IsLocked}");
                                         if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
                                         {
                                             _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                            _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked to Owner" : "Unlocked")}.");
+                                            _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked" : "Unlocked")}.");
                                         }
                                     }
-                                    else if (CurrentTvPlacement != null)
+                                    else if (CurrentTvPlacement == null)
                                     {
-                                        _chat.Print("[Media Player] You do not own this TV.");
-                                    }
-                                    else
-                                    {
-                                        // Create dummy placement and register
-                                        CurrentTvPlacement = new Networking.Models.TvPlacement
-                                        {
-                                            OwnerId = _config.OwnerId,
-                                            IsLocked = false // Default true, so toggle unlocks it
-                                        };
+                                        CurrentTvPlacement = new Networking.Models.TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
                                         _screenSettingsWindow.RegisterTvAsync(LocationKey);
                                         _chat.Print("[Media Player] TV registered and Unlocked.");
                                     }
+                                    else { _chat.Print("[Media Player] You do not own this TV."); }
                                 }
-                                else if (uv.X >= 0.81f && uv.X <= 0.89f && uv.Y >= 0.88f && uv.Y <= 0.94f)
+                                // Paste (0.85 - 0.89)
+                                else if (uv.X >= 0.85f && uv.X <= 0.89f)
                                 {
-                                    // Paste and Play instantly
-                                    string clipboardText = ImGui.GetClipboardText();
-                                    if (!string.IsNullOrEmpty(clipboardText) && _playerObject != null)
+                                    string clip = ImGui.GetClipboardText();
+                                    if (!string.IsNullOrEmpty(clip) && _playerObject != null)
                                     {
-                                        _pluginLog.Information("Pasted and Playing: " + clipboardText);
                                         _chat.Print("[Media Player] Loading URL from clipboard...");
-                                        PlayViaYtDlp(clipboardText, _playerObject);
+                                        PlayViaYtDlp(clip, _playerObject);
                                     }
                                 }
-                                else if (uv.X >= 0.89f && uv.X <= 0.97f && uv.Y >= 0.88f && uv.Y <= 0.94f)
+                                // Queue (0.90 - 0.94)
+                                else if (uv.X >= 0.90f && uv.X <= 0.94f)
                                 {
-                                    // Paste to Queue
-                                    string clipboardText = ImGui.GetClipboardText();
-                                    if (!string.IsNullOrEmpty(clipboardText))
+                                    string clip = ImGui.GetClipboardText();
+                                    if (!string.IsNullOrEmpty(clip))
                                     {
-                                        _pluginLog.Information("Queued URL: " + clipboardText);
-                                        _mediaQueue.Enqueue(clipboardText);
-                                        _chat.Print($"[Media Player] Added to Queue ({_mediaQueue.Count} items): {clipboardText}");
-
-                                        // If nothing is playing, start it immediately
+                                        _mediaQueue.Enqueue(clip);
+                                        _chat.Print($"[Media Player] Queued ({_mediaQueue.Count}): {clip}");
                                         if (activeStream == null || activeStream.PlaybackState == NAudio.Wave.PlaybackState.Stopped)
-                                        {
-                                            if (_playerObject != null)
-                                            {
-                                                string nextUrl = _mediaQueue.Dequeue();
-                                                PlayViaYtDlp(nextUrl, _playerObject);
-                                            }
-                                        }
-                                        else
-                                        {
-                                            // Sync the updated queue state to the server!
-                                            _ = PushMediaToServerAsync(isBackgroundSync: false);
-                                        }
+                                            if (_playerObject != null) PlayViaYtDlp(_mediaQueue.Dequeue(), _playerObject);
+                                        else _ = PushMediaToServerAsync(false);
                                     }
+                                }
+                                // Kill (0.95 - 0.99)
+                                else if (uv.X >= 0.95f && uv.X <= 0.99f)
+                                {
+                                    KillAndRestart();
                                 }
                             }
                         }

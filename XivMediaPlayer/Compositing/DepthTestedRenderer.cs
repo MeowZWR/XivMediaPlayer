@@ -286,103 +286,107 @@ float4 PS(VS_OUT input) : SV_TARGET {
       // Draw bottom bar background (semi-transparent black)
       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
       
-      // Draw Seek Bar track and progress fill
-      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.15 && uv.x < 0.72) {
-        float barProgress = (uv.x - 0.15) / 0.57;
-        if (barProgress < Progress) {
-           color.rgb = float3(0.8, 0.2, 0.2); // FFXIV-style red progress
-        } else {
-           color.rgb = float3(0.3, 0.3, 0.3); // Grey track
-        }
+      // Prev (0.02 - 0.06) - Vertical line + Left triangle
+      if (uv.x > 0.02 && uv.x < 0.06 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.02) / 0.04;
+         float py = (uv.y - 0.88) / 0.06;
+         if (px < 0.2) color.rgb = float3(1, 1, 1);
+         else if (px > 0.3 && px > abs(py - 0.5) * 2.0) color.rgb = float3(1, 1, 1);
       }
       
-      // Draw Play/Pause icon at bottom left
-      if (uv.x > 0.05 && uv.x < 0.10 && uv.y > 0.88 && uv.y < 0.94) {
+      // Rewind (0.07 - 0.11) - Two left triangles
+      if (uv.x > 0.07 && uv.x < 0.11 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.07) / 0.04;
+         float py = (uv.y - 0.88) / 0.06;
+         float px1 = frac(px * 2.0); // splits into two halves (0 to 1 twice)
+         if (px1 > abs(py - 0.5) * 2.0) color.rgb = float3(1, 1, 1);
+      }
+
+      // Play/Pause (0.12 - 0.16)
+      if (uv.x > 0.12 && uv.x < 0.16 && uv.y > 0.88 && uv.y < 0.94) {
          if (IsPlaying > 0.5) {
-            float px = (uv.x - 0.05) / 0.05;
-            if ((px > 0.2 && px < 0.4) || (px > 0.6 && px < 0.8)) {
-               color.rgb = float3(1, 1, 1);
-            }
+            float px = (uv.x - 0.12) / 0.04;
+            if ((px > 0.2 && px < 0.4) || (px > 0.6 && px < 0.8)) color.rgb = float3(1, 1, 1);
          } else {
-            float px = (uv.x - 0.05) / 0.05;
+            float px = (uv.x - 0.12) / 0.04;
             float py = (uv.y - 0.88) / 0.06;
-            if (px < 1.0 - abs(py - 0.5) * 2.0) {
-               color.rgb = float3(1, 1, 1);
-            }
+            if (px < 1.0 - abs(py - 0.5) * 2.0) color.rgb = float3(1, 1, 1);
          }
       }
-      
-      // Draw Lock Icon
-      if (uv.x > 0.74 && uv.x < 0.80 && uv.y > 0.88 && uv.y < 0.94) {
-         float px = (uv.x - 0.74) / 0.06;
+
+      // Fast Forward (0.17 - 0.21) - Two right triangles
+      if (uv.x > 0.17 && uv.x < 0.21 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.17) / 0.04;
          float py = (uv.y - 0.88) / 0.06;
-         
-         // Draw Padlock body
+         float px1 = frac(px * 2.0);
+         if (px1 < 1.0 - abs(py - 0.5) * 2.0) color.rgb = float3(1, 1, 1);
+      }
+      
+      // Next (0.22 - 0.26) - Right triangle + Vertical line
+      if (uv.x > 0.22 && uv.x < 0.26 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.22) / 0.04;
+         float py = (uv.y - 0.88) / 0.06;
+         if (px > 0.8) color.rgb = float3(1, 1, 1);
+         else if (px < 0.7 && px < 1.0 - abs(py - 0.5) * 2.0) color.rgb = float3(1, 1, 1);
+      }
+      
+      // Seek Bar & Volume Track Backgrounds
+      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.28 && uv.x < 0.58) {
+         float barProgress = (uv.x - 0.28) / 0.30;
+         if (barProgress < Progress) color.rgb = float3(0.8, 0.2, 0.2); // Red progress
+         else color.rgb = float3(0.3, 0.3, 0.3); // Grey track
+      }
+      if (uv.y > 0.95 && uv.y < 0.97 && uv.x > 0.28 && uv.x < 0.58) {
+         float volProgress = (uv.x - 0.28) / 0.30;
+         if (volProgress < Volume / 3.0) color.rgb = float3(0.2, 0.6, 0.8); // Blue volume bar
+         else color.rgb = float3(0.3, 0.3, 0.3); // Grey track
+      }
+      
+      // Lock Icon (0.80 - 0.84)
+      if (uv.x > 0.80 && uv.x < 0.84 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.80) / 0.04;
+         float py = (uv.y - 0.88) / 0.06;
          if (px > 0.2 && px < 0.8 && py > 0.4 && py < 0.9) {
-             if (IsLockedTV > 0.5) {
-                 color.rgb = float3(0.9, 0.7, 0.2); // Golden lock
-             } else {
-                 color.rgb = float3(0.6, 0.6, 0.6); // Grey unlocked
-             }
-             // Keyhole
-             if (px > 0.45 && px < 0.55 && py > 0.6 && py < 0.8) {
-                 color.rgb = float3(0.1, 0.1, 0.1);
-             }
+             if (IsLockedTV > 0.5) color.rgb = float3(0.9, 0.7, 0.2);
+             else color.rgb = float3(0.6, 0.6, 0.6);
+             if (px > 0.45 && px < 0.55 && py > 0.6 && py < 0.8) color.rgb = float3(0.1, 0.1, 0.1);
          }
-         // Draw Padlock shackle
          if (py > 0.1 && py <= 0.4) {
-             // For unlocked, only draw the left side of the shackle!
-             if (IsLockedTV < 0.5 && px > 0.5) {
-                 // Skip drawing right side of shackle if unlocked
-             } else if (px > 0.3 && px < 0.7 && py < 0.2) {
-                 color.rgb = float3(0.8, 0.8, 0.8);
-             } else if ((px > 0.3 && px < 0.4) || (px > 0.6 && px < 0.7)) {
-                 color.rgb = float3(0.8, 0.8, 0.8);
-             }
+             if (IsLockedTV < 0.5 && px > 0.5) { }
+             else if (px > 0.3 && px < 0.7 && py < 0.2) color.rgb = float3(0.8, 0.8, 0.8);
+             else if ((px > 0.3 && px < 0.4) || (px > 0.6 && px < 0.7)) color.rgb = float3(0.8, 0.8, 0.8);
          }
       }
       
-      // Draw Paste Icon (Clipboard shape) at right
-      if (uv.x > 0.82 && uv.x < 0.88 && uv.y > 0.88 && uv.y < 0.94) {
-         float px = (uv.x - 0.82) / 0.06;
+      // Paste Icon (0.85 - 0.89)
+      if (uv.x > 0.85 && uv.x < 0.89 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.85) / 0.04;
          float py = (uv.y - 0.88) / 0.06;
-         // Draw clipboard board
          if (px > 0.2 && px < 0.8 && py > 0.1 && py < 0.9) {
-             // Draw clip at top
-             if (py < 0.3 && px > 0.4 && px < 0.6) {
-                 color.rgb = float3(0.9, 0.9, 0.9);
-             } else if (py > 0.3) {
-                 // Draw paper lines
-                 if ((py > 0.45 && py < 0.55) || (py > 0.65 && py < 0.75)) {
-                     color.rgb = float3(0.5, 0.5, 0.5); // Text lines
-                 } else {
-                     color.rgb = float3(0.8, 0.8, 0.8); // Paper
-                 }
-             } else {
-                 color.rgb = float3(0.4, 0.3, 0.2); // Board
-             }
+             if (py < 0.3 && px > 0.4 && px < 0.6) color.rgb = float3(0.9, 0.9, 0.9);
+             else if (py > 0.3) {
+                 if ((py > 0.45 && py < 0.55) || (py > 0.65 && py < 0.75)) color.rgb = float3(0.5, 0.5, 0.5);
+                 else color.rgb = float3(0.8, 0.8, 0.8);
+             } else color.rgb = float3(0.4, 0.3, 0.2);
          }
       }
       
-      // Draw Queue Icon (Plus + Paper) at far right
-      if (uv.x > 0.90 && uv.x < 0.96 && uv.y > 0.88 && uv.y < 0.94) {
-         float px = (uv.x - 0.90) / 0.06;
+      // Queue Icon (0.90 - 0.94)
+      if (uv.x > 0.90 && uv.x < 0.94 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.90) / 0.04;
          float py = (uv.y - 0.88) / 0.06;
-         
-         // Draw plus sign
-         if ((px > 0.4 && px < 0.6 && py > 0.2 && py < 0.8) ||
-             (py > 0.4 && py < 0.6 && px > 0.2 && px < 0.8)) {
-             color.rgb = float3(0.2, 0.8, 0.3); // Green plus
-         }
+         if ((px > 0.4 && px < 0.6 && py > 0.2 && py < 0.8) || (py > 0.4 && py < 0.6 && px > 0.2 && px < 0.8)) color.rgb = float3(0.2, 0.8, 0.3);
       }
       
-      // Draw Volume Slider (thinner bar below the seek bar)
-      if (uv.y > 0.95 && uv.y < 0.97 && uv.x > 0.15 && uv.x < 0.72) {
-         float volProgress = (uv.x - 0.15) / 0.57;
-         if (volProgress < Volume / 3.0) {
-            color.rgb = float3(0.2, 0.6, 0.8); // Blue volume bar
-         } else {
-            color.rgb = float3(0.3, 0.3, 0.3); // Grey track
+      // Kill Icon (0.95 - 0.99) - Red X
+      if (uv.x > 0.95 && uv.x < 0.99 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.95) / 0.04;
+         float py = (uv.y - 0.88) / 0.06;
+         // Draw X by checking distance to diagonals
+         float d1 = abs(px - py);
+         float d2 = abs(px - (1.0 - py));
+         if (d1 < 0.15 || d2 < 0.15) {
+             color.rgb = float3(0.9, 0.2, 0.2);
          }
       }
     }
