@@ -1411,6 +1411,10 @@ namespace XivMediaPlayer
             // Ensure we ONLY retry if VLC actually threw a FATAL error, completely ignoring internal VLC logger spam
             if (e.Exception?.Message?.Contains("Failed to create demuxer") == true) return;
 
+            // If the player is actually successfully playing right now, then this is just a minor background stream error
+            // (e.g. dropping a secondary audio track) and not a fatal playback crash. Ignore it.
+            if (_mediaManager?.ActiveStream?.PlaybackState == NAudio.Wave.PlaybackState.Playing) return;
+
             if (!string.IsNullOrEmpty(_lastStreamURL) && _lastStreamObject != null)
             {
                 if ((DateTime.UtcNow - _lastUrlLoadTime).TotalSeconds < 10)
