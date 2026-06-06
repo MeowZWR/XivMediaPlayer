@@ -46,6 +46,11 @@ namespace XivMediaPlayer {
     // Unique identity for the local user to establish TV ownership
     public string OwnerId { get; set; } = Guid.NewGuid().ToString();
 
+    // Playback controls
+    public int SeekIncrementSeconds { get; set; } = 10;
+    public bool LoopEnabled { get; set; } = false;
+    public bool ShuffleEnabled { get; set; } = false;
+
     #endregion
 
     [NonSerialized]

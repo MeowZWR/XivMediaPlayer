@@ -22,6 +22,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace XivMediaPlayer
 {
@@ -72,6 +73,10 @@ namespace XivMediaPlayer
         private IMediaGameObject? _playerObject;
         private IMediaGameObject? _lastStreamObject;
         private Queue<string> _mediaQueue = new Queue<string>();
+        private Stack<string> _mediaHistory = new Stack<string>();
+        private float _preMuteVolume = 0.5f;
+        private bool _isMuted = false;
+        private Random _shuffleRandom = new Random();
         private MediaCameraObject _playerCamera;
         private unsafe Camera* _camera;
 
@@ -936,9 +941,37 @@ namespace XivMediaPlayer
         {
             if (!_isLocalDj) return;
 
+            // Loop: replay the same track from the beginning
+            if (_config.LoopEnabled && !string.IsNullOrEmpty(_lastStreamURL) && _playerObject != null)
+            {
+                _chat.Print("[Media Player] Looping current track...");
+                PlayViaYtDlp(_lastStreamURL, _playerObject, 0);
+                return;
+            }
+
+            // Advance queue (with shuffle support)
             if (_mediaQueue.Count > 0 && _playerObject != null)
             {
-                string nextUrl = _mediaQueue.Dequeue();
+                // Push current to history
+                if (!string.IsNullOrEmpty(_lastStreamURL))
+                {
+                    _mediaHistory.Push(_lastStreamURL);
+                }
+
+                string nextUrl;
+                if (_config.ShuffleEnabled && _mediaQueue.Count > 1)
+                {
+                    var list = _mediaQueue.ToList();
+                    int idx = _shuffleRandom.Next(list.Count);
+                    nextUrl = list[idx];
+                    list.RemoveAt(idx);
+                    _mediaQueue = new Queue<string>(list);
+                }
+                else
+                {
+                    nextUrl = _mediaQueue.Dequeue();
+                }
+
                 _chat.Print($"[Media Player] Playing Next in Queue: {nextUrl}");
                 PlayViaYtDlp(nextUrl, _playerObject);
             }
@@ -2011,6 +2044,195 @@ namespace XivMediaPlayer
                 _chat.PrintError("[Media Player] Camera not available.");
             }
         }
+        #region Playback Controls
+
+        /// <summary>
+        /// Seeks the current stream forward or backward by the given number of seconds.
+        /// </summary>
+        public void SeekRelative(int seconds)
+        {
+            var activeStream = _mediaManager?.ActiveStream;
+            if (activeStream == null || activeStream.Length <= 0) return;
+
+            long newTime = activeStream.Time + (seconds * 1000L);
+            newTime = Math.Clamp(newTime, 0, activeStream.Length);
+            activeStream.Time = newTime;
+
+            if (_isLocalDj)
+            {
+                _ = PushMediaToServerAsync(isBackgroundSync: false);
+            }
+        }
+
+        /// <summary>
+        /// Toggles play/pause on the current stream.
+        /// </summary>
+        public void TogglePlayPause()
+        {
+            var activeStream = _mediaManager?.ActiveStream;
+            if (activeStream == null) return;
+
+            if (activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing)
+            {
+                activeStream.Pause();
+                _isIntentionallyPaused = true;
+            }
+            else
+            {
+                activeStream.Resume();
+                _isIntentionallyPaused = false;
+            }
+
+            if (_isLocalDj)
+            {
+                _ = PushMediaToServerAsync(isBackgroundSync: false);
+            }
+        }
+
+        /// <summary>
+        /// Returns true if the stream is currently intentionally paused by the user.
+        /// </summary>
+        public bool IsIntentionallyPaused => _isIntentionallyPaused;
+
+        /// <summary>
+        /// Plays the next track from the media queue.
+        /// If shuffle is enabled, picks a random track from the queue.
+        /// </summary>
+        public void PlayNext()
+        {
+            if (_mediaQueue.Count == 0 || _playerObject == null) return;
+
+            // Push current URL to history before advancing
+            if (!string.IsNullOrEmpty(_lastStreamURL))
+            {
+                _mediaHistory.Push(_lastStreamURL);
+            }
+
+            string nextUrl;
+            if (_config.ShuffleEnabled && _mediaQueue.Count > 1)
+            {
+                // Convert to list, pick random, reconstruct queue without that item
+                var list = _mediaQueue.ToList();
+                int idx = _shuffleRandom.Next(list.Count);
+                nextUrl = list[idx];
+                list.RemoveAt(idx);
+                _mediaQueue = new Queue<string>(list);
+            }
+            else
+            {
+                nextUrl = _mediaQueue.Dequeue();
+            }
+
+            _chat.Print($"[Media Player] Playing next: {nextUrl}");
+            PlayViaYtDlp(nextUrl, _playerObject);
+        }
+
+        /// <summary>
+        /// Plays the previous track from the media history stack.
+        /// Pushes the current track back onto the front of the queue.
+        /// </summary>
+        public void PlayPrevious()
+        {
+            if (_mediaHistory.Count == 0 || _playerObject == null) return;
+
+            // Push current URL back to front of queue
+            if (!string.IsNullOrEmpty(_lastStreamURL))
+            {
+                var list = _mediaQueue.ToList();
+                list.Insert(0, _lastStreamURL);
+                _mediaQueue = new Queue<string>(list);
+            }
+
+            string prevUrl = _mediaHistory.Pop();
+            _chat.Print($"[Media Player] Playing previous: {prevUrl}");
+            PlayViaYtDlp(prevUrl, _playerObject);
+        }
+
+        /// <summary>
+        /// Toggles mute on/off. Stores the pre-mute volume and restores it when unmuting.
+        /// </summary>
+        public void ToggleMute()
+        {
+            if (_mediaManager == null) return;
+
+            if (_isMuted)
+            {
+                _mediaManager.LiveStreamVolume = _preMuteVolume;
+                _config.LivestreamVolume = _preMuteVolume;
+                _isMuted = false;
+            }
+            else
+            {
+                _preMuteVolume = _mediaManager.LiveStreamVolume;
+                _mediaManager.LiveStreamVolume = 0;
+                _isMuted = true;
+            }
+        }
+
+        /// <summary>
+        /// Whether the media player is currently muted.
+        /// </summary>
+        public bool IsMuted => _isMuted;
+
+        /// <summary>
+        /// Re-resolves and replays the current media URL at the current timecode.
+        /// Useful when the 2D/3D screen fails to load.
+        /// </summary>
+        public void RefreshCurrentMedia()
+        {
+            if (string.IsNullOrEmpty(_lastStreamURL) || _playerObject == null) return;
+
+            var activeStream = _mediaManager?.ActiveStream;
+            int currentTimeMs = activeStream != null ? (int)activeStream.Time : 0;
+
+            _chat.Print("[Media Player] Refreshing media...");
+            _mediaManager?.StopStream();
+            PlayViaYtDlp(_lastStreamURL, _playerObject, currentTimeMs);
+        }
+
+        /// <summary>
+        /// Kills the media manager and restarts it, then resumes the current media.
+        /// Recovers from locked-up VLC states.
+        /// </summary>
+        public void KillAndRestart()
+        {
+            _chat.Print("[Media Player] Killing media pipeline and restarting...");
+
+            // Save what we were playing
+            string savedUrl = _lastStreamURL;
+            var activeStream = _mediaManager?.ActiveStream;
+            int savedTimeMs = activeStream != null ? (int)activeStream.Time : 0;
+
+            // Tear down
+            _mediaManager?.Dispose();
+            _mediaManager = null;
+            _videoWindow.MediaManager = null;
+
+            // Reinitialize
+            try
+            {
+                InitializeMediaManager();
+            }
+            catch (Exception e)
+            {
+                _pluginLog.Warning(e, "[Media Player] Failed to reinitialize MediaManager during kill.");
+                _chat.PrintError("[Media Player] Failed to restart media pipeline.");
+                return;
+            }
+
+            // Resume playback
+            if (!string.IsNullOrEmpty(savedUrl) && _playerObject != null)
+            {
+                _chat.Print("[Media Player] Resuming playback...");
+                PlayViaYtDlp(savedUrl, _playerObject, savedTimeMs);
+            }
+            else
+            {
+                _chat.Print("[Media Player] Media pipeline restarted.");
+            }
+        }
+
+        #endregion
 
         public void Dispose()
         {

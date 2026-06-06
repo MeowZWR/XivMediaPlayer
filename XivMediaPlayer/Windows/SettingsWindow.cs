@@ -69,6 +69,21 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
       ImGui.Spacing();
 
+      // Playback
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Playback");
+      ImGui.Separator();
+
+      int seekIncrement = _plugin.Config.SeekIncrementSeconds;
+      if (ImGui.SliderInt("Seek Increment (seconds)", ref seekIncrement, 1, 60)) {
+        _plugin.Config.SeekIncrementSeconds = seekIncrement;
+        _plugin.Config.Save();
+      }
+      ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
+        "How many seconds the << and >> buttons skip.");
+
+      ImGui.Spacing();
+      ImGui.Spacing();
+
       // yt-dlp quality
       ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "yt-dlp");
       ImGui.Separator();
