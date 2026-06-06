@@ -111,6 +111,7 @@ namespace XivMediaPlayer
         private static extern short GetAsyncKeyState(int vKey);
 
         private Stopwatch _streamSetCooldown = new Stopwatch();
+        private Stopwatch _screensaverTimer = new Stopwatch();
 
         private string _statusMessage = string.Empty;
 
@@ -1691,6 +1692,16 @@ namespace XivMediaPlayer
 
                         isPlaying = activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
                     }
+                    
+                    if (isPlaying) {
+                        _screensaverTimer.Stop();
+                        _screensaverTimer.Reset();
+                    } else {
+                        if (!_screensaverTimer.IsRunning) _screensaverTimer.Start();
+                    }
+                    
+                    float showScreensaver = _screensaverTimer.ElapsedMilliseconds > 5000 ? 1.0f : 0.0f;
+                    float timeSeconds = Environment.TickCount64 / 1000.0f;
 
                     var mousePos = ImGui.GetIO().MousePos;
                     var (tl, tr, br, bl) = _worldRenderer.Transform.Corners;
@@ -1846,7 +1857,7 @@ namespace XivMediaPlayer
 
                     bool isLocked = CurrentTvPlacement?.IsLocked ?? true;
                     float volume = _mediaManager != null ? _mediaManager.LiveStreamVolume : 1f;
-                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume, _titleTextureManager?.TextureHandle ?? IntPtr.Zero, _config.LoopEnabled, _config.ShuffleEnabled);
+                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume, _titleTextureManager?.TextureHandle ?? IntPtr.Zero, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver);
                 }
             }
         }

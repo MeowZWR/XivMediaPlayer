@@ -73,7 +73,7 @@ namespace XivMediaPlayer.Compositing {
       UILayerCapture uiCapture = null,
       float nearPlane = 0.1f, float farPlane = 10000f,
       Vector2? hoverUV = null, float progress = 0f, bool isPlaying = false, bool isLocked = true, float volume = 1f, IntPtr titleSrvPtr = default,
-      bool isLooping = false, bool isShuffle = false) {
+      bool isLooping = false, bool isShuffle = false, float time = 0f, float showScreensaver = 0f) {
       if (_disposed || !IsActive || textureWrap == null) return;
 
       if (cameraPos.HasValue && cameraForward.HasValue) {
@@ -96,7 +96,7 @@ namespace XivMediaPlayer.Compositing {
 
       if (_useDepthOcclusion && depthCapture != null && cameraPos.HasValue && cameraForward.HasValue) {
         RenderWithOcclusion(textureWrap, depthCapture, cameraPos.Value,
-          cameraForward.Value, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume, titleSrvPtr, isLooping, isShuffle);
+          cameraForward.Value, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver);
       } else {
         RenderScreenSpace(textureWrap);
       }
@@ -132,7 +132,7 @@ namespace XivMediaPlayer.Compositing {
     /// </summary>
     private void RenderWithOcclusion(IDalamudTextureWrap textureWrap, DepthBufferCapture depthCapture,
       Vector3 cameraPos, Vector3 cameraForward, UILayerCapture uiCapture,
-      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, bool isLocked, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle) {
+      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, bool isLocked, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver) {
       var (tl, tr, br, bl) = _transform.Corners;
 
       // WorldToScreen is the source of truth for screen positions
@@ -230,7 +230,7 @@ namespace XivMediaPlayer.Compositing {
           hoverUV, progress, isPlaying, isLocked,
           minDepth, maxDepth, volume,
           depthCapture.RenderWidth, depthCapture.RenderHeight,
-          uiCapture?.LastAddonRects, titleSrvPtr, isLooping, isShuffle);
+          uiCapture?.LastAddonRects, titleSrvPtr, isLooping, isShuffle, time, showScreensaver);
 
         if (success && _depthRenderer.OutputSRV != null) {
           var outputPtr = _depthRenderer.OutputSRV.NativePointer;

@@ -60,8 +60,8 @@ namespace XivMediaPlayer.Compositing {
       public float HasTitleTexture;
       public float IsLooping;
       public float IsShuffle;
-      public float _pad2;
-      public float _pad3;
+      public float Time;
+      public float ShowScreensaver;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -95,8 +95,8 @@ cbuffer Constants : register(b0) {
   float HasTitleTexture;
   float IsLooping;
   float IsShuffle;
-  float _pad2;
-  float _pad3;
+  float Time;
+  float ShowScreensaver;
 };
 
 cbuffer UIConsts : register(b1) {
@@ -286,6 +286,70 @@ float4 PS(VS_OUT input) : SV_TARGET {
       
       // Smoothly blend out the video behind UI drop shadows and gradients
       color.a *= saturate(1.0 - bbAlpha);
+      // XMP Screensaver
+      if (ShowScreensaver > 0.5 && isInside && !occluded) {
+          color.rgb *= 0.2; // Dim background
+          float aspect = 16.0 / 9.0;
+          if (RenderResolution.y > 0) aspect = RenderResolution.x / RenderResolution.y;
+          
+          float speedX = 0.1;
+          float speedY = 0.075;
+          float bx = Time * speedX;
+          float by = Time * speedY;
+          
+          float logoSize = 0.15;
+          float logoW = logoSize * 3.0 / aspect;
+          float logoH = logoSize * 1.0;
+          
+          float rangeX = 1.0 - logoW;
+          float rangeY = 1.0 - logoH;
+          
+          float posX = (logoW / 2.0) + abs(fmod(bx, 2.0) - 1.0) * rangeX;
+          float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
+          
+          float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
+          
+          bool draw = false;
+          if (p.x > -1.6 && p.x < 1.6 && p.y > -0.6 && p.y < 0.6) {
+              // X
+              if (p.x > -1.4 && p.x < -0.6 && p.y > -0.5 && p.y < 0.5) {
+                  float dx1 = abs((p.x + 1.0) - p.y * 0.8);
+                  float dx2 = abs((p.x + 1.0) + p.y * 0.8);
+                  if (dx1 < 0.08 || dx2 < 0.08) draw = true;
+              }
+              // M
+              if (p.x > -0.4 && p.x < 0.4 && p.y > -0.5 && p.y < 0.5) {
+                  if (abs(p.x + 0.35) < 0.08) draw = true;
+                  if (abs(p.x - 0.35) < 0.08) draw = true;
+                  float dm1 = abs(p.x - (p.y * 0.35 - 0.175));
+                  float dm2 = abs(p.x - (-p.y * 0.35 + 0.175));
+                  if (p.x < 0.0 && dm1 < 0.06) draw = true;
+                  if (p.x > 0.0 && dm2 < 0.06) draw = true;
+              }
+              // P
+              if (p.x > 0.6 && p.x < 1.6 && p.y > -0.6 && p.y < 0.6) {
+                  if (abs(p.x - 0.7) < 0.08 && p.y > -0.5 && p.y < 0.5) draw = true;
+                  if (p.x >= 0.7 && p.x <= 1.15) {
+                      if (abs(p.y - (-0.42)) < 0.08) draw = true;
+                      if (abs(p.y - (-0.08)) < 0.08) draw = true;
+                  }
+                  if (p.x > 1.15 && p.y < 0.0 && abs(distance(p, float2(1.15, -0.25)) - 0.17) < 0.08) draw = true;
+              }
+          }
+          
+          if (draw) {
+              int colorIdx = (int(floor(bx)) + int(floor(by))) % 6;
+              float3 logoColor = float3(1, 1, 1);
+              if (colorIdx == 0) logoColor = float3(1.0, 0.3, 0.3);
+              else if (colorIdx == 1) logoColor = float3(0.3, 1.0, 0.3);
+              else if (colorIdx == 2) logoColor = float3(0.3, 0.6, 1.0);
+              else if (colorIdx == 3) logoColor = float3(1.0, 1.0, 0.3);
+              else if (colorIdx == 4) logoColor = float3(1.0, 0.3, 1.0);
+              else if (colorIdx == 5) logoColor = float3(0.3, 1.0, 1.0);
+              
+              color.rgb = logoColor;
+          }
+      }
   }
   
   // Media Controls UI overlay
@@ -581,7 +645,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float minDepth, float maxDepth, float volume,
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
-      bool isLooping = false, bool isShuffle = false) {
+      bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -613,7 +677,9 @@ float4 PS(VS_OUT input) : SV_TARGET {
           RenderResolution = new Vector2(renderWidth, renderHeight),
           HasTitleTexture = titleSrvPtr != IntPtr.Zero ? 1.0f : 0.0f,
           IsLooping = isLooping ? 1.0f : 0.0f,
-          IsShuffle = isShuffle ? 1.0f : 0.0f
+          IsShuffle = isShuffle ? 1.0f : 0.0f,
+          Time = time,
+          ShowScreensaver = showScreensaver
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 
