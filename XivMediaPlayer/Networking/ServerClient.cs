@@ -22,6 +22,23 @@ namespace XivMediaPlayer.Networking
             _httpClient = new HttpClient();
         }
 
+        public async Task<long> GetServerTimeAsync()
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync($"{_baseUrl}/api/rooms/time");
+                if (response.IsSuccessStatusCode)
+                {
+                    return await response.Content.ReadFromJsonAsync<long>();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to fetch server time");
+            }
+            return 0;
+        }
+
         public async Task<List<TvPlacement>> GetTvsForRoomAsync(string locationKey)
         {
             try

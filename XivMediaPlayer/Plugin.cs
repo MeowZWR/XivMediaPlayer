@@ -103,6 +103,8 @@ namespace XivMediaPlayer
         private DateTime _lastClipboardCheck = DateTime.MinValue;
         private DateTime _lastServerSyncPush = DateTime.MinValue;
         private DateTime _lastServerSyncFetch = DateTime.MinValue;
+        private long _serverTimeOffsetMs = 0;
+        private bool _hasFetchedServerTime = false;
 
         private int _lastCookieHash;
         private bool _hasBeenInitialized;
@@ -384,6 +386,12 @@ namespace XivMediaPlayer
 
                 // Polling interval.
                 // Facilitates DJ handoff on media change.
+                if (!_hasFetchedServerTime)
+                {
+                    _hasFetchedServerTime = true;
+                    _ = FetchServerTimeAsync();
+                }
+
                 if ((DateTime.UtcNow - _lastServerSyncFetch).TotalSeconds >= 10)
                 {
                     _lastServerSyncFetch = DateTime.UtcNow;
@@ -1318,6 +1326,18 @@ namespace XivMediaPlayer
             }
         }
 
+        private async Task FetchServerTimeAsync()
+        {
+            if (ServerClient == null) return;
+            long st = await ServerClient.GetServerTimeAsync();
+            if (st > 0) {
+                _serverTimeOffsetMs = st - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                _pluginLog.Information($"[Time Sync] Server time offset calculated: {_serverTimeOffsetMs}ms");
+            } else {
+                _hasFetchedServerTime = false;
+            }
+        }
+
         public async Task FetchMediaFromServerAsync()
         {
             var key = GetLocationKey();
@@ -1701,7 +1721,7 @@ namespace XivMediaPlayer
                     }
                     
                     float showScreensaver = _screensaverTimer.ElapsedMilliseconds > 5000 ? 1.0f : 0.0f;
-                    float timeSeconds = Environment.TickCount64 / 1000.0f;
+                    float timeSeconds = (float)(((DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + _serverTimeOffsetMs) / 1000.0) % 864000.0);
 
                     var mousePos = ImGui.GetIO().MousePos;
                     var (tl, tr, br, bl) = _worldRenderer.Transform.Corners;

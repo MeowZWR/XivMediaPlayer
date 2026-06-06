@@ -26,6 +26,12 @@ namespace XivMediaPlayer.Server.Controllers
             return Ok(tvs);
         }
 
+        [HttpGet("time")]
+        public IActionResult GetServerTime()
+        {
+            return Ok(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
+
         [HttpPost("{locationKey}/tvs")]
         public async Task<IActionResult> RegisterTv(string locationKey, [FromBody] TvPlacement placement)
         {
