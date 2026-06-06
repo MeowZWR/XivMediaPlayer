@@ -273,7 +273,7 @@ namespace MediaPlayerCore {
     public void ChangeVideoStream(string soundPath, float width, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null) {
       Task.Run(async delegate {
         try {
-          if (_vlcWasAbleToStart) {
+          if (_vlcPlayer != null) {
             var media = new Media(libVLC, soundPath, soundPath.StartsWith("http") || soundPath.StartsWith("rtmp")
                      ? FromType.FromLocation : FromType.FromPath);
             
@@ -300,6 +300,9 @@ namespace MediaPlayerCore {
                     media.Dispose();
                     return;
                 }
+                
+                // Explicitly stop the previous media before assigning the new one to prevent VLC from deadlocking
+                _vlcPlayer.Stop();
                 _vlcPlayer.Media = media;
             }
 

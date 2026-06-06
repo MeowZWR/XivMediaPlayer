@@ -58,6 +58,7 @@ namespace XivMediaPlayer
         private DepthPreviewWindow _depthPreviewWindow;
 
         private string _currentMediaOwnerId = string.Empty;
+        private bool _isLocalDj = false;
         private DepthBufferCapture _depthCapture;
         private UILayerCapture _uiCapture;
 
@@ -336,7 +337,7 @@ namespace XivMediaPlayer
             // Sync Polling Loop
             if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
             {
-                bool isMediaOwner = _currentMediaOwnerId == _config.OwnerId;
+                bool isMediaOwner = _isLocalDj;
                 
                 // The current DJ pushes every 5 seconds (only if playing media or currently loading one)
                 // If they intentionally paused, they stop pushing so the DataAgeMs can grow!
@@ -673,6 +674,7 @@ namespace XivMediaPlayer
 
             if (!isAutoSync)
             {
+                _isLocalDj = true;
                 _currentMediaOwnerId = _config.OwnerId;
             }
 
@@ -731,6 +733,18 @@ namespace XivMediaPlayer
                         if (cefResult != null && !string.IsNullOrEmpty(cefResult.Url))
                         {
                             streamUrl = cefResult.Url;
+                            metadata = new MediaPlayerCore.YtDlp.YtDlpMetadata { HttpHeaders = cefResult.Headers };
+
+                            // Self-Healing Fallback: If we are a guest and successfully resolved a raw Cef URL,
+                            // push the direct .m3u8 feed back to the server so the host (whose CefSharp is broken) can watch it!
+                            if (!_isLocalDj && url != streamUrl)
+                            {
+                                _pluginLog.Information("[Social] Guest successfully resolved a raw Cef URL to a direct stream. Rescuing the host by pushing the .m3u8 back to the server!");
+                                _lastStreamURL = streamUrl;
+                                _isLocalDj = true;
+                                _ = PushMediaToServerAsync(isBackgroundSync: false);
+                            }
+
                             _chat.Print("[Media Player] Embedded browser successfully found stream URL.");
                             
                             // Merge headers
@@ -848,6 +862,8 @@ namespace XivMediaPlayer
 
         private void _mediaManager_OnPlaybackFinished(object sender, string e)
         {
+            if (!_isLocalDj) return;
+
             if (_mediaQueue.Count > 0 && _playerObject != null)
             {
                 string nextUrl = _mediaQueue.Dequeue();
@@ -1160,17 +1176,26 @@ namespace XivMediaPlayer
             {
                 await ServerClient.UpdateMediaStateAsync(key, sync);
                 _currentMediaOwnerId = _config.OwnerId;
-            } 
-            catch (UnauthorizedAccessException) 
-            {
-                _chat.PrintError("[Media Player] Cannot change video: The TV in this room is locked by its owner.");
-                // Immediately snap back to the host's synced video
-                await FetchMediaFromServerAsync();
+                
+                // If we successfully pushed a foreground sync, we are definitely the DJ now.
+                if (!isBackgroundSync)
+                {
+                    _isLocalDj = true;
+                    _currentMediaOwnerId = _config.OwnerId;
+                }
             }
             catch (InvalidOperationException)
             {
                 // We were deposed as the DJ!
+                _isLocalDj = false;
                 _currentMediaOwnerId = "";
+                await FetchMediaFromServerAsync();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _isLocalDj = false;
+                _currentMediaOwnerId = "";
+                _chat.PrintError("[Media Player] Cannot share media: The TV in this room is locked by its owner.");
                 await FetchMediaFromServerAsync();
             }
         }
@@ -1188,7 +1213,7 @@ namespace XivMediaPlayer
             // If we are still the media owner, do NOT override our local playback state with the server's state!
             // We dictate the server's state, not the other way around. 
             // If we override our local state, any local unpause we did in the last 5 seconds will be instantly overridden by our own older server state!
-            if (_currentMediaOwnerId == _config.OwnerId) return;
+            if (_isLocalDj) return;
 
             // Use the DataAgeMs calculated purely by the server to completely eliminate client clock drift issues!
             // We ONLY add the age if the video is currently playing.
@@ -1531,6 +1556,7 @@ namespace XivMediaPlayer
                                             if (_isIntentionallyPaused) activeStream.Pause(); 
                                             else activeStream.Resume();
                                             // Force an immediate push. If the TV is locked, the server will reject it and automatically snap them back!
+                                            _isLocalDj = true;
                                             _ = PushMediaToServerAsync(isBackgroundSync: false);
                                         }
                                     } else if (uv.Y >= 0.88f && uv.Y <= 0.94f && uv.X >= 0.14f && uv.X <= 0.73f) {
@@ -1538,7 +1564,7 @@ namespace XivMediaPlayer
                                             float seekProgress = (uv.X - 0.15f) / 0.57f;
                                             _pluginLog.Information($"Seeking to {seekProgress * 100}%");
                                             activeStream.Time = (long)(seekProgress * activeStream.Length);
-                                            // Force an immediate push so the room seeks instantly
+                                            _isLocalDj = true;
                                             _ = PushMediaToServerAsync(isBackgroundSync: false);
                                         }
                                      } else if (uv.X >= 0.73f && uv.X <= 0.81f && uv.Y >= 0.88f && uv.Y <= 0.94f) {

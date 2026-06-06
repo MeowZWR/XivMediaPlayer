@@ -118,6 +118,8 @@ namespace XivMediaPlayer.Networking
                     return await response.Content.ReadFromJsonAsync<RoomMediaStateSync>();
                 }
             }
+            catch (InvalidOperationException) { throw; }
+            catch (UnauthorizedAccessException) { throw; }
             catch (Exception ex)
             {
                 _log.Error(ex, $"Failed to update media state for room {locationKey}");

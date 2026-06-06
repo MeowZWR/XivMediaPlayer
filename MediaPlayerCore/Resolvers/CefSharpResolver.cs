@@ -91,7 +91,10 @@ namespace MediaPlayerCore.Resolvers
 
             if (CefSharp.Cef.IsInitialized != true)
             {
-                CefSharp.Cef.Initialize(settings, performDependencyCheck: false, browserProcessHandler: null);
+                if (!CefSharp.Cef.Initialize(settings, performDependencyCheck: false, browserProcessHandler: null))
+                {
+                    throw new InvalidOperationException("CefSharp failed to initialize! Check cef.log for details, or ensure Visual C++ Redistributable is installed.");
+                }
             }
             _initialized = true;
         }
@@ -120,23 +123,23 @@ namespace MediaPlayerCore.Resolvers
             // We must run browser creation on the thread pool, as it might block or require specific threading
             await Task.Run(async () =>
             {
-                using var browser = new ChromiumWebBrowser(url);
-                var handler = new StreamInterceptorRequestHandler(tcs);
-                browser.RequestHandler = handler;
-
-                // Timeout mechanism
-                using var cts = new CancellationTokenSource(timeoutMs);
-                cts.Token.Register(() =>
-                {
-                    if (!tcs.Task.IsCompleted)
-                    {
-                        tcs.TrySetResult(null); // Timeout
-                    }
-                });
-
-                // Wait for the TaskCompletionSource to be set by the RequestHandler
                 try
                 {
+                    using var browser = new ChromiumWebBrowser(url);
+                    var handler = new StreamInterceptorRequestHandler(tcs);
+                    browser.RequestHandler = handler;
+
+                    // Timeout mechanism
+                    using var cts = new CancellationTokenSource(timeoutMs);
+                    cts.Token.Register(() =>
+                    {
+                        if (!tcs.Task.IsCompleted)
+                        {
+                            tcs.TrySetResult(null); // Timeout
+                        }
+                    });
+
+                    // Wait for the TaskCompletionSource to be set by the RequestHandler
                     var res = await tcs.Task;
                     if (res != null)
                     {
