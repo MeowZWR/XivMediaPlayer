@@ -308,33 +308,56 @@ float4 PS(VS_OUT input) : SV_TARGET {
           float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
           
           float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
+          float2 pText = float2(p.x + p.y * 0.35, p.y);
           
           bool draw = false;
-          if (p.x > -1.6 && p.x < 1.6 && p.y > -0.6 && p.y < 0.6) {
+          if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
+              
+              // Top connection line
+              if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
+              
               // X
-              if (p.x > -1.4 && p.x < -0.6 && p.y > -0.5 && p.y < 0.5) {
-                  float dx1 = abs((p.x + 1.0) - p.y * 0.8);
-                  float dx2 = abs((p.x + 1.0) + p.y * 0.8);
-                  if (dx1 < 0.08 || dx2 < 0.08) draw = true;
+              if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
+                  float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
+                  float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
+                  if (dx1 < 0.11 || dx2 < 0.11) draw = true;
               }
+              
               // M
-              if (p.x > -0.4 && p.x < 0.4 && p.y > -0.5 && p.y < 0.5) {
-                  if (abs(p.x + 0.35) < 0.08) draw = true;
-                  if (abs(p.x - 0.35) < 0.08) draw = true;
-                  float dm1 = abs(p.x - (p.y * 0.35 - 0.175));
-                  float dm2 = abs(p.x - (-p.y * 0.35 + 0.175));
-                  if (p.x < 0.0 && dm1 < 0.06) draw = true;
-                  if (p.x > 0.0 && dm2 < 0.06) draw = true;
-              }
-              // P
-              if (p.x > 0.6 && p.x < 1.6 && p.y > -0.6 && p.y < 0.6) {
-                  if (abs(p.x - 0.7) < 0.08 && p.y > -0.5 && p.y < 0.5) draw = true;
-                  if (p.x >= 0.7 && p.x <= 1.15) {
-                      if (abs(p.y - (-0.42)) < 0.08) draw = true;
-                      if (abs(p.y - (-0.08)) < 0.08) draw = true;
+              if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
+                  if (pText.y < 0.2) {
+                      if (abs(pText.x + 0.4) < 0.11) draw = true;
+                      if (abs(pText.x - 0.4) < 0.11) draw = true;
                   }
-                  if (p.x > 1.15 && p.y < 0.0 && abs(distance(p, float2(1.15, -0.25)) - 0.17) < 0.08) draw = true;
+                  float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
+                  float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
+                  if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
+                  if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
               }
+              
+              // P
+              if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.6 && pText.y < 0.2) {
+                  if (abs(pText.x - 0.8) < 0.11) draw = true;
+                  if (pText.x >= 0.8 && pText.x <= 1.25) {
+                      if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
+                  }
+                  if (pText.x > 1.25 && abs(distance(float2(pText.x, pText.y), float2(1.25, -0.32)) - 0.17) < 0.11) draw = true;
+              }
+              
+              // Ellipse (Use original un-slanted p)
+              if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
+                  float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
+                  float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
+                  float distToV = (pText.x < 0.0) ? dm1 : dm2;
+                  
+                  if (distToV > 0.16) {
+                      draw = true;
+                      // Slit for VIDEO parody
+                      if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
+                  }
+              }
+              
+              if (p.y < -0.6) draw = false;
           }
           
           if (draw) {
