@@ -1550,6 +1550,9 @@ namespace XivMediaPlayer
                                                     PlayViaYtDlp(nextUrl, _playerObject);
                                                     _ = PushMediaToServerAsync();
                                                 }
+                                            } else {
+                                                // Sync the updated queue state to the server!
+                                                _ = PushMediaToServerAsync();
                                             }
                                         }
                                     }
