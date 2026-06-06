@@ -107,6 +107,11 @@ namespace XivMediaPlayer.Networking
                 {
                     throw new UnauthorizedAccessException("The TV in this room is locked by its owner.");
                 }
+                
+                if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+                {
+                    throw new InvalidOperationException("You are no longer the media owner.");
+                }
 
                 if (response.IsSuccessStatusCode)
                 {

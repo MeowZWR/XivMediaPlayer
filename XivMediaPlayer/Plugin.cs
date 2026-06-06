@@ -346,7 +346,7 @@ namespace XivMediaPlayer
                     {
                         _lastServerSyncPush = DateTime.UtcNow;
                         _pluginLog.Information($"[Social] Executing PushMediaToServerAsync. ActiveStream Time: {_mediaManager?.ActiveStream?.Time ?? 0}");
-                        _ = PushMediaToServerAsync();
+                        _ = PushMediaToServerAsync(isBackgroundSync: true);
                     }
                 }
                 else if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
@@ -638,7 +638,7 @@ namespace XivMediaPlayer
 
                 if (!isAutoSync)
                 {
-                    _ = PushMediaToServerAsync();
+                    _ = PushMediaToServerAsync(isBackgroundSync: false);
                 }
             });
             _streamWasPlaying = true;
@@ -786,6 +786,11 @@ namespace XivMediaPlayer
                       "\r\nUse \"/media video\" to toggle the video feed." +
                       "\r\nUse \"/media stop\" to stop.");
 
+                    if (!isAutoSync)
+                    {
+                        _ = PushMediaToServerAsync(isBackgroundSync: false);
+                    }
+
                     _streamWasPlaying = true;
                     try
                     {
@@ -797,11 +802,6 @@ namespace XivMediaPlayer
                     _streamSetCooldown.Stop();
                     _streamSetCooldown.Reset();
                     _streamSetCooldown.Start();
-
-                    if (!isAutoSync)
-                    {
-                        _ = PushMediaToServerAsync();
-                    }
                 }
                 finally
                 {
@@ -1131,7 +1131,7 @@ namespace XivMediaPlayer
             _lastLocationKey = key;
         }
 
-        public async Task PushMediaToServerAsync()
+        private async Task PushMediaToServerAsync(bool isBackgroundSync = false)
         {
             var key = GetLocationKey();
             if (string.IsNullOrEmpty(key) || !key.StartsWith("house_")) return;
@@ -1152,7 +1152,8 @@ namespace XivMediaPlayer
                 OwnerId = _config.OwnerId,
                 PlaylistJson = System.Text.Json.JsonSerializer.Serialize(_mediaQueue.ToArray()),
                 BypassLock = IsHousingMenuOpen,
-                DurationMs = _currentMediaDurationMs
+                DurationMs = _currentMediaDurationMs,
+                IsBackgroundSync = isBackgroundSync
             };
 
             try 
@@ -1164,6 +1165,12 @@ namespace XivMediaPlayer
             {
                 _chat.PrintError("[Media Player] Cannot change video: The TV in this room is locked by its owner.");
                 // Immediately snap back to the host's synced video
+                await FetchMediaFromServerAsync();
+            }
+            catch (InvalidOperationException)
+            {
+                // We were deposed as the DJ!
+                _currentMediaOwnerId = "";
                 await FetchMediaFromServerAsync();
             }
         }
@@ -1524,7 +1531,7 @@ namespace XivMediaPlayer
                                             if (_isIntentionallyPaused) activeStream.Pause(); 
                                             else activeStream.Resume();
                                             // Force an immediate push. If the TV is locked, the server will reject it and automatically snap them back!
-                                            _ = PushMediaToServerAsync();
+                                            _ = PushMediaToServerAsync(isBackgroundSync: false);
                                         }
                                     } else if (uv.Y >= 0.88f && uv.Y <= 0.94f && uv.X >= 0.14f && uv.X <= 0.73f) {
                                         if (activeStream != null) {
@@ -1532,7 +1539,7 @@ namespace XivMediaPlayer
                                             _pluginLog.Information($"Seeking to {seekProgress * 100}%");
                                             activeStream.Time = (long)(seekProgress * activeStream.Length);
                                             // Force an immediate push so the room seeks instantly
-                                            _ = PushMediaToServerAsync();
+                                            _ = PushMediaToServerAsync(isBackgroundSync: false);
                                         }
                                      } else if (uv.X >= 0.73f && uv.X <= 0.81f && uv.Y >= 0.88f && uv.Y <= 0.94f) {
                                         // Lock/Unlock toggle
@@ -1561,8 +1568,6 @@ namespace XivMediaPlayer
                                             _pluginLog.Information("Pasted and Playing: " + clipboardText);
                                             _chat.Print("[Media Player] Loading URL from clipboard...");
                                             PlayViaYtDlp(clipboardText, _playerObject);
-                                            // Force an immediate push to take over the TV
-                                            _ = PushMediaToServerAsync();
                                         }
                                     } else if (uv.X >= 0.89f && uv.X <= 0.97f && uv.Y >= 0.88f && uv.Y <= 0.94f) {
                                         // Paste to Queue
@@ -1577,11 +1582,10 @@ namespace XivMediaPlayer
                                                 if (_playerObject != null) {
                                                     string nextUrl = _mediaQueue.Dequeue();
                                                     PlayViaYtDlp(nextUrl, _playerObject);
-                                                    _ = PushMediaToServerAsync();
                                                 }
                                             } else {
                                                 // Sync the updated queue state to the server!
-                                                _ = PushMediaToServerAsync();
+                                                _ = PushMediaToServerAsync(isBackgroundSync: false);
                                             }
                                         }
                                     }

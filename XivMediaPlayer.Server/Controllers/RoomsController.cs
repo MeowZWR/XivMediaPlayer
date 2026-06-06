@@ -144,6 +144,12 @@ namespace XivMediaPlayer.Server.Controllers
             var existing = await _db.RoomMediaStates.FindAsync(locationKey);
             if (existing != null)
             {
+                if (state.IsBackgroundSync && existing.OwnerId != state.OwnerId)
+                {
+                    // Stale background push from a deposed DJ!
+                    return Conflict();
+                }
+
                 existing.CurrentUrl = state.CurrentUrl;
                 existing.TimecodeMs = state.TimecodeMs;
                 existing.IsPlaying = state.IsPlaying;

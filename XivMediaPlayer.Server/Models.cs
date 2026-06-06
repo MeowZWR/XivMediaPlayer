@@ -43,6 +43,9 @@ namespace XivMediaPlayer.Server.Models
         public bool BypassLock { get; set; } = false;
 
         [NotMapped]
+        public bool IsBackgroundSync { get; set; } = false;
+
+        [NotMapped]
         public double DataAgeMs { get; set; } = 0;
 
         public double? DurationMs { get; set; } = null;
