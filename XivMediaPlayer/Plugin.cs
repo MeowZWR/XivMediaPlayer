@@ -773,7 +773,9 @@ namespace XivMediaPlayer
 
                             // Self-Healing Fallback: If we are a guest and successfully resolved a raw Cef URL,
                             // push the direct .m3u8 feed back to the server so the host (whose CefSharp is broken) can watch it!
-                            if (!_isLocalDj && url != streamUrl)
+                            // IMPORTANT: Only rescue the host if the server's timecode is near 0ms (meaning the host is actually stuck loading). 
+                            // If the timecode is already progressing (e.g. 5+ seconds), the host is happily playing the video and we shouldn't ruin their playback by pushing 0ms!
+                            if (!_isLocalDj && url != streamUrl && startTimeMs < 5000)
                             {
                                 _pluginLog.Information("[Social] Guest successfully resolved a raw Cef URL to a direct stream. Rescuing the host by pushing the .m3u8 back to the server!");
                                 _lastStreamURL = streamUrl;
@@ -1173,7 +1175,8 @@ namespace XivMediaPlayer
                 if (!string.IsNullOrEmpty(state.CurrentUrl) && _playerObject != null)
                 {
                     _chat.Print($"[Media Player] Resuming playback in this room...");
-                    PlayViaYtDlp(state.CurrentUrl, _playerObject, (int)state.TimecodeMs);
+                    _lastStreamObject = _playerObject;
+                    PlayViaYtDlp(state.CurrentUrl, _playerObject, (int)state.TimecodeMs, isAutoSync: true);
                 }
             } else 
             {
@@ -1401,12 +1404,11 @@ namespace XivMediaPlayer
             _pluginLog.Warning(e.Exception, e.Exception?.Message);
             
             // Auto-retry VLC playback if it crashes shortly after starting (e.g. dropped TLS connection)
-            // Ensure we ONLY retry if VLC actually died (State == Error or Stopped), not for harmless mid-playback warnings!
+            // Ensure we ONLY retry if VLC actually threw a FATAL error, completely ignoring internal VLC logger spam
+            if (e.Exception?.Message?.StartsWith("VLC [") == true) return;
+
             if (!string.IsNullOrEmpty(_lastStreamURL) && _lastStreamObject != null)
             {
-                var state = ((MediaPlayerCore.MediaObject)_lastStreamObject).VlcState;
-                if (state == LibVLCSharp.Shared.VLCState.Playing) return;
-
                 if ((DateTime.UtcNow - _lastUrlLoadTime).TotalSeconds < 10)
                 {
                     if (_mediaErrorCount < 2)
