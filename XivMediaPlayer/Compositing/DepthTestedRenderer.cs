@@ -43,8 +43,8 @@ namespace XivMediaPlayer.Compositing {
       public Vector2 CornerBR;
       public Vector2 CornerBL;
       public Vector2 ScreenSize;
-      public float _pad0;
-      public float _pad1;
+      public float NearPlane;
+      public float FarPlane;
       public Vector4 CornerDepths; // TL, TR, BR, BL depths
 
       public Vector3 CameraPos;
@@ -96,8 +96,8 @@ cbuffer Constants : register(b0) {
   float2 CornerBR;
   float2 CornerBL;
   float2 ScreenSize;
-  float _pad0;
-  float _pad1;
+  float NearPlane;
+  float FarPlane;
   float4 CornerDepths; // x=TL, y=TR, z=BR, w=BL
 
   float3 CameraPos;
@@ -179,16 +179,17 @@ float4 PS(VS_OUT input) : SV_TARGET {
   float denom = dot(tvNormal, rayDir);
   bool isInside = false;
   float2 uv = float2(-1, -1);
+  float t = -1.0;
 
   if (abs(denom) > 1e-6) {
-      float t = dot(CornerTL3D - rayOrigin, tvNormal) / denom;
+      t = dot(CornerTL3D - rayOrigin, tvNormal) / denom;
       float3 hitPoint = rayOrigin + rayDir * t;
       float3 d = hitPoint - CornerTL3D;
       float u = dot(d, tvRight) / dot(tvRight, tvRight);
       float v = dot(d, tvDown) / dot(tvDown, tvDown);
       
       uv = float2(u, v);
-      isInside = (u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0);
+      isInside = (t > 0.0 && u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0);
   }
   
   // Dynamic Resolution scaling: the depth buffer texture size might be larger than the actual rendered area
@@ -203,10 +204,19 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
   bool occluded = false;
   if (isInside) {
-      float depthTop = lerp(CornerDepths.x, CornerDepths.y, uv.x);
-      float depthBot = lerp(CornerDepths.w, CornerDepths.z, uv.x);
-      float quadDepth = lerp(depthTop, depthBot, uv.y);
-      if (gameDepth > quadDepth) {
+      // Calculate exact view-space Z distance of the intersection point
+      float viewZ = dot(rayDir * t, -CameraForward);
+      
+      // Convert to non-linear reversed-Z depth to match FFXIV's depth buffer
+      float exactDepth = 0.0;
+      if (viewZ > 0.0) {
+          exactDepth = NearPlane * (FarPlane - viewZ) / (viewZ * (FarPlane - NearPlane));
+      }
+      exactDepth = saturate(exactDepth);
+      
+      // Use exact mathematical depth + a tiny bias to perfectly fix Z-fighting 
+      // when the TV is placed completely flush against a wall!
+      if (gameDepth > exactDepth + 0.0001) {
           occluded = true;
       }
   }
@@ -694,6 +704,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       IntPtr videoSrvPtr,
       ID3D11ShaderResourceView depthSrv,
       Vector4 cornerDepths,
+      float nearPlane, float farPlane,
       int screenWidth, int screenHeight,
       ID3D11ShaderResourceView uiLayerSrv,
       Vector2? hoverUV, float progress, bool isPlaying, bool isLocked,
@@ -720,6 +731,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           CornerBR = screenCorners.br,
           CornerBL = screenCorners.bl,
           ScreenSize = new Vector2(screenWidth, screenHeight),
+          NearPlane = nearPlane,
+          FarPlane = farPlane,
           HoverUV = hoverUV ?? new Vector2(-1, -1),
           CornerDepths = cornerDepths,
 

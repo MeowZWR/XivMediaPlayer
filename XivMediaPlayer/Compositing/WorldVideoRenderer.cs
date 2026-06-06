@@ -231,6 +231,7 @@ namespace XivMediaPlayer.Compositing {
           videoSrvPtr,
           depthCapture.CapturedSRV,
           cornerDepths,
+          nearPlane, farPlane,
           screenW, screenH,
           uiCapture?.BackBufferSRV,
           hoverUV, progress, isPlaying, isLocked,
