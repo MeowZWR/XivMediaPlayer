@@ -600,7 +600,7 @@ namespace MediaPlayerCore.YtDlp
         /// </summary>
         private string BuildCommonArgs()
         {
-            string args = $"--impersonate chrome --js-runtimes \"deno:{DenoPath.Replace(".zip", ".exe")}\" --socket-timeout 15 ";
+            string args = $"--impersonate chrome --js-runtimes \"deno:{DenoPath.Replace(".zip", ".exe")}\" --socket-timeout 30 ";
 
             // Cookie injection
             if (!string.IsNullOrEmpty(CookieBrowser))

@@ -146,9 +146,20 @@ namespace MediaPlayerCore
                     }
                     else
                     {
-                        var response = await session.Client.GetAsync(m3u8Url);
-                        text = await response.Content.ReadAsStringAsync();
-                        System.Diagnostics.Debug.WriteLine($"[StreamProxy] Fetched m3u8. Status: {response.StatusCode}. Content starts with: {(text.Length > 50 ? text.Substring(0, 50) : text).Replace("\n", "")}");
+                        try 
+                        {
+                            var response = await session.Client.GetAsync(m3u8Url);
+                            response.EnsureSuccessStatusCode();
+                            text = await response.Content.ReadAsStringAsync();
+                            System.Diagnostics.Debug.WriteLine($"[StreamProxy] Fetched m3u8. Status: {response.StatusCode}. Content starts with: {(text.Length > 50 ? text.Substring(0, 50) : text).Replace("\n", "")}");
+                        } 
+                        catch (Exception netEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[StreamProxy] CRITICAL: Failed to download m3u8 from {m3u8Url}. Your internet connection timed out or the server blocked you. Exception: {netEx.Message}");
+                            res.StatusCode = 502; // Bad Gateway
+                            res.Close();
+                            return;
+                        }
                     }
 
                     // Rewrite URLs

@@ -656,6 +656,7 @@ namespace XivMediaPlayer
         }
 
         private bool _isResolvingMedia = false;
+        private Guid _currentResolutionId = Guid.Empty;
         private bool _lastStreamIsLive = false;
         private bool _isIntentionallyPaused = false;
         private DateTime _lastUrlLoadTime = DateTime.MinValue;
@@ -664,7 +665,10 @@ namespace XivMediaPlayer
         {
             _isIntentionallyPaused = false;
             _lastUrlLoadTime = DateTime.UtcNow;
-            if (_isResolvingMedia) return;
+            
+            // If it's an auto-sync and we're already resolving something, ignore it to prevent spam.
+            // But if it's a manual play, we ALLOW it to interrupt the current resolution!
+            if (isAutoSync && _isResolvingMedia) return;
 
             if (!isAutoSync && CurrentTvPlacement?.IsLocked == true && CurrentTvPlacement?.OwnerId != _config.OwnerId && !IsHousingMenuOpen)
             {
@@ -678,6 +682,34 @@ namespace XivMediaPlayer
                 _currentMediaOwnerId = _config.OwnerId;
             }
 
+            Guid resolutionId = Guid.NewGuid();
+            _currentResolutionId = resolutionId;
+
+            // Direct playback for raw feeds (ignore query strings)
+            string urlWithoutQuery = url.Split('?')[0];
+            if (urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase) || 
+                urlWithoutQuery.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)) 
+            {
+                _lastStreamURL = url;
+                _lastStreamIsLive = urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase);
+                _lastStreamObject = audioGameObject;
+                _streamURLs = new string[] { url };
+                _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
+                
+                _mediaManager.PlayStream(audioGameObject, url, startTimeMs, null);
+                
+                _currentMediaDurationMs = null;
+                _currentStreamer = "Direct Stream";
+                
+                _chat.Print($"[Media Player] Playing direct stream!\r\nUse \"/media video\" to toggle the video feed.\r\nUse \"/media stop\" to stop.");
+                
+                if (!isAutoSync) _ = PushMediaToServerAsync(isBackgroundSync: false);
+                _streamWasPlaying = true;
+                try { MuteBgm(); } catch (Exception e) { _pluginLog.Warning(e, e.Message); }
+                _isResolvingMedia = false;
+                return;
+            }
+
             _isResolvingMedia = true;
 
             Task.Run(async () =>
@@ -687,6 +719,7 @@ namespace XivMediaPlayer
                     _chat.Print("[Media Player] Waiting for yt-dlp download/update to finish...");
                     await _ytDlpInitTask;
                 }
+                if (resolutionId != _currentResolutionId) return;
 
                 try
                 {
@@ -700,6 +733,7 @@ namespace XivMediaPlayer
                     try
                     {
                         streamUrl = await resolveTask;
+                        if (resolutionId != _currentResolutionId) return;
                     } catch (Exception resolveEx)
                     {
                         _pluginLog.Warning(resolveEx, "[yt-dlp] Failed to resolve stream URL.");
@@ -786,7 +820,9 @@ namespace XivMediaPlayer
                     _streamURLs = new string[] { streamUrl };
                     _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
 
+                    if (resolutionId != _currentResolutionId) return;
                     _mediaManager.PlayStream(audioGameObject, streamUrl, startTimeMs, metadata?.HttpHeaders);
+                    if (resolutionId != _currentResolutionId) return;
                     _lastStreamURL = url;
                     _currentMediaDurationMs = metadata?.Duration * 1000.0;
                     _currentStreamer = !string.IsNullOrEmpty(uploader) ? uploader : title;
