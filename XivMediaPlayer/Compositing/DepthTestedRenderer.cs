@@ -336,12 +336,18 @@ float4 PS(VS_OUT input) : SV_TARGET {
               }
               
               // P
-              if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.6 && pText.y < 0.2) {
+              if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
                   if (abs(pText.x - 0.8) < 0.11) draw = true;
                   if (pText.x >= 0.8 && pText.x <= 1.25) {
                       if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
                   }
-                  if (pText.x > 1.25 && abs(distance(float2(pText.x, pText.y), float2(1.25, -0.32)) - 0.17) < 0.11) draw = true;
+                  if (pText.x > 1.25) {
+                      if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
+                          if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
+                              draw = true;
+                          }
+                      }
+                  }
               }
               
               // Ellipse (Use original un-slanted p)
