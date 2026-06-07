@@ -109,6 +109,8 @@ namespace XivMediaPlayer
         private long _serverTimeOffsetMs = 0;
         private bool _hasFetchedServerTime = false;
         private int _cachedRealPlayerCount = 0;
+        private System.Numerics.Vector3? _cachedLocalPlayerPosition = null;
+        private uint _cachedLocalPlayerWorldId = 0;
 
         private int _lastCookieHash;
         private bool _hasBeenInitialized;
@@ -302,6 +304,11 @@ namespace XivMediaPlayer
 
             _playerObject?.Update();
             _playerCamera?.Update();
+
+            // Cache local player data for background threads to avoid "Not on main thread!" exceptions
+            var localPlayer = _objectTable[0] as Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter;
+            _cachedLocalPlayerPosition = localPlayer?.Position;
+            _cachedLocalPlayerWorldId = localPlayer?.CurrentWorld.RowId ?? 0;
 
             // Cache real player count safely on the main thread for background sync tasks
             int realPlayerCount = 0;
@@ -1235,7 +1242,7 @@ namespace XivMediaPlayer
                     // If multiple TVs are found, select the one closest to the player
                     if (tvs.Count > 1)
                     {
-                        var playerPos = GetLocalPlayer()?.Position;
+                        var playerPos = _cachedLocalPlayerPosition;
                         if (playerPos != null)
                         {
                             tvs = tvs.OrderBy(t => System.Numerics.Vector3.Distance(playerPos.Value, new System.Numerics.Vector3(t.PositionX, t.PositionY, t.PositionZ))).ToList();
@@ -1598,7 +1605,7 @@ namespace XivMediaPlayer
             }
             else if (key.StartsWith("zone_"))
             {
-                var playerPos = GetLocalPlayer()?.Position;
+                var playerPos = _cachedLocalPlayerPosition;
                 if (playerPos != null && key.Contains("_grid_"))
                 {
                     string baseKey = key.Substring(0, key.IndexOf("_grid_"));
@@ -1628,20 +1635,7 @@ namespace XivMediaPlayer
                 var territoryId = _clientState.TerritoryType;
                 if (territoryId == 0) return null;
 
-                ushort worldId = 0;
-                try
-                {
-                    var charMgr = FFXIVClientStructs.FFXIV.Client.Game.Character.CharacterManager.Instance();
-                    if (charMgr != null)
-                    {
-                        var localChar = charMgr->LookupBattleCharaByEntityId(_objectTable[0]?.EntityId ?? 0);
-                        if (localChar != null)
-                        {
-                            worldId = localChar->CurrentWorld;
-                        }
-                    }
-                }
-                catch { }
+                ushort worldId = (ushort)_cachedLocalPlayerWorldId;
 
                 var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
                 short ward = housingMgr != null ? housingMgr->GetCurrentWard() : (short)-1;
@@ -1653,7 +1647,7 @@ namespace XivMediaPlayer
                     return $"house_{worldId}_{territoryId}_{ward}_{plot}_{room}";
                 }
 
-                var playerPos = GetLocalPlayer()?.Position;
+                var playerPos = _cachedLocalPlayerPosition;
                 if (playerPos != null)
                 {
                     int gridX = (int)Math.Floor(playerPos.Value.X / 50.0f);
