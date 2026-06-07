@@ -728,7 +728,8 @@ namespace XivMediaPlayer
                 _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
                 if (_streamURLs.Length > 0)
                 {
-                    _mediaManager.PlayStream(audioGameObject, _streamURLs[(int)_videoWindow.FeedType], startTimeMs, httpHeaders);
+                    string playUrl = ((int)_videoWindow.FeedType < _streamURLs.Length) ? _streamURLs[(int)_videoWindow.FeedType] : _streamURLs[0];
+                    _mediaManager.PlayStream(audioGameObject, playUrl, startTimeMs, httpHeaders);
                     _lastStreamURL = cleanedURL;
                     _currentStreamer = "Stream";
                     _chat.Print(@"[Media Player] Playing stream!" +
@@ -885,6 +886,11 @@ namespace XivMediaPlayer
                     catch (Exception resolveEx)
                     {
                         _pluginLog.Warning(resolveEx, "[yt-dlp] Failed to resolve stream URL.");
+                        if (resolveEx.ToString().Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _chat.PrintError("[Media Player] YouTube blocked the request (bot check). Please configure cookies via VRCVideoCacher or cookies.txt to play YouTube videos!");
+                            return;
+                        }
                     }
 
                     MediaPlayerCore.YtDlp.YtDlpMetadata? metadata = null;
@@ -895,6 +901,11 @@ namespace XivMediaPlayer
                     catch (Exception metadataEx)
                     {
                         _pluginLog.Warning(metadataEx, "[yt-dlp] Failed to get metadata.");
+                        if (metadataEx.ToString().Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _chat.PrintError("[Media Player] YouTube blocked the request (bot check). Please configure cookies via VRCVideoCacher or cookies.txt to play YouTube videos!");
+                            return;
+                        }
                     }
 
                     if (string.IsNullOrEmpty(streamUrl))
