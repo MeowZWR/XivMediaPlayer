@@ -544,7 +544,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       }
       
       // Lock Icon (0.80 - 0.84)
-      if (uv.x > 0.80 && uv.x < 0.84 && uv.y > 0.88 && uv.y < 0.94) {
+      if (IsLockedTV >= 0.0 && uv.x > 0.80 && uv.x < 0.84 && uv.y > 0.88 && uv.y < 0.94) {
          float px = (uv.x - 0.80) / 0.04;
          float py = (uv.y - 0.88) / 0.06;
          if (px > 0.2 && px < 0.8 && py > 0.4 && py < 0.9) {
@@ -707,7 +707,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float nearPlane, float farPlane,
       int screenWidth, int screenHeight,
       ID3D11ShaderResourceView uiLayerSrv,
-      Vector2? hoverUV, float progress, bool isPlaying, bool isLocked,
+      Vector2? hoverUV, float progress, bool isPlaying, float lockState,
       float minDepth, float maxDepth, float volume,
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
@@ -752,7 +752,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           DynamicMinDepth = minDepth,
           DynamicMaxDepth = maxDepth,
           HasBackBuffer = uiLayerSrv != null ? 1.0f : 0.0f,
-          IsLockedTV = isLocked ? 1.0f : 0.0f,
+          IsLockedTV = lockState,
           Volume = volume,
           RenderResolution = new Vector2(renderWidth, renderHeight),
           HasTitleTexture = titleSrvPtr != IntPtr.Zero ? 1.0f : 0.0f,

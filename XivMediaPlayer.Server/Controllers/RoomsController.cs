@@ -41,10 +41,23 @@ namespace XivMediaPlayer.Server.Controllers
             var existing = await _db.TvPlacements.FirstOrDefaultAsync(t => t.LocationKey == locationKey);
             if (existing != null)
             {
-                if (existing.IsLocked && existing.OwnerId != placement.OwnerId && !placement.BypassLock)
+                bool isForfeited = false;
+                if (locationKey.StartsWith("zone_"))
+                {
+                    var lastFetch = _lastFetchTimes.TryGetValue(locationKey, out var lf) ? lf : DateTime.MinValue;
+                    if ((DateTime.UtcNow - lastFetch).TotalMinutes >= 2)
+                    {
+                        isForfeited = true;
+                    }
+                }
+
+                if (!isForfeited && existing.IsLocked && existing.OwnerId != placement.OwnerId && !placement.BypassLock)
                 {
                     return Forbid();
                 }
+
+                if (isForfeited) existing.IsLocked = false; // Reset lock if it was abandoned
+
 
                 // Update existing TV
                 existing.PositionX = placement.PositionX;
@@ -178,6 +191,33 @@ namespace XivMediaPlayer.Server.Controllers
 
             await _db.SaveChangesAsync();
             return Ok(state);
+        }
+        [HttpPost("batch/tvs")]
+        public async Task<IActionResult> GetTvsBatch([FromBody] List<string> locationKeys)
+        {
+            if (locationKeys == null || !locationKeys.Any()) return BadRequest();
+            var tvs = await _db.TvPlacements
+                .Where(t => locationKeys.Contains(t.LocationKey))
+                .ToListAsync();
+            return Ok(tvs);
+        }
+
+        [HttpPost("batch/media")]
+        public async Task<IActionResult> GetMediaStatesBatch([FromBody] List<string> locationKeys)
+        {
+            if (locationKeys == null || !locationKeys.Any()) return BadRequest();
+            var states = await _db.RoomMediaStates
+                .Where(s => locationKeys.Contains(s.LocationKey))
+                .ToListAsync();
+                
+            foreach (var state in states)
+            {
+                state.DataAgeMs = (DateTime.UtcNow - state.TimestampUtc).TotalMilliseconds;
+                var lastFetch = _lastFetchTimes.TryGetValue(state.LocationKey, out var lf) ? lf : DateTime.MinValue;
+                state.IdleTimeMs = lastFetch == DateTime.MinValue ? double.MaxValue : (DateTime.UtcNow - lastFetch).TotalMilliseconds;
+                _lastFetchTimes[state.LocationKey] = DateTime.UtcNow;
+            }
+            return Ok(states);
         }
     }
 }

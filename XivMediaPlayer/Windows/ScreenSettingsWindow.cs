@@ -73,12 +73,20 @@ namespace XivMediaPlayer.Windows {
     }
 
     public override void Draw() {
-      // Check if housing menu is open
+      string locKey = _plugin.LocationKey;
+      bool isOutdoors = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("zone_");
       bool hasHousingMenuOpen = _plugin.IsHousingMenuOpen;
+      bool hasPrivileges = isOutdoors || hasHousingMenuOpen;
 
-      if (!hasHousingMenuOpen) {
+      if (!hasPrivileges) {
           ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Housing Menu Required");
           ImGui.TextWrapped("To place or sync a screen, please open the 'Indoor Furnishings' menu in-game.");
+          return;
+      }
+
+      if (isOutdoors && !_plugin.Config.EnableOutdoorPublicScreens) {
+          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Outdoor Screens Disabled");
+          ImGui.TextWrapped("You must enable 'Enable Outdoor Public Screens' in the main settings menu to place TVs outdoors.");
           return;
       }
 
@@ -87,7 +95,6 @@ namespace XivMediaPlayer.Windows {
         _transform.Enabled = _enabled;
         
         // Auto-delete from server if turning off and we own it
-        string locKey = _plugin.LocationKey;
         if (!_enabled && !string.IsNullOrEmpty(locKey) && locKey.StartsWith("house_") &&
             _plugin.CurrentTvPlacement != null && _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
             DeleteTvAsync(locKey);
@@ -271,38 +278,42 @@ namespace XivMediaPlayer.Windows {
       ImGui.TextWrapped("Saving above only saves locally. To make the TV visible to other players, you must sync it to the room.");
       
       string locationKey = _plugin.LocationKey;
-      if (string.IsNullOrEmpty(locationKey) || !locationKey.StartsWith("house_")) {
-          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "You must be inside a housing area to sync TVs.");
+      bool isOutdoorsSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("zone_");
+      
+      if (string.IsNullOrEmpty(locationKey) || (!locationKey.StartsWith("house_") && !locationKey.StartsWith("zone_"))) {
+          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "You must be inside a housing area or valid outdoor zone to sync TVs.");
       } else {
           ImGui.Text($"Location Key: {locationKey}");
           if (_plugin.CurrentTvPlacement == null || _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
-              bool isLocked = _plugin.CurrentTvPlacement?.IsLocked ?? true;
-              if (ImGui.Checkbox("Lock TV to Owner Only", ref isLocked)) {
-                  if (_plugin.CurrentTvPlacement != null) {
-                      _plugin.CurrentTvPlacement.IsLocked = isLocked;
-                  } else {
-                      _plugin.CurrentTvPlacement = new Networking.Models.TvPlacement {
-                          OwnerId = _plugin.Config.OwnerId,
-                          IsLocked = isLocked
-                      };
+              bool isLocked = _plugin.CurrentTvPlacement?.IsLocked ?? !isOutdoorsSync;
+              if (!isOutdoorsSync) {
+                  if (ImGui.Checkbox("Lock TV to Owner Only", ref isLocked)) {
+                      if (_plugin.CurrentTvPlacement != null) {
+                          _plugin.CurrentTvPlacement.IsLocked = isLocked;
+                      } else {
+                          _plugin.CurrentTvPlacement = new Networking.Models.TvPlacement {
+                              OwnerId = _plugin.Config.OwnerId,
+                              IsLocked = isLocked
+                          };
+                      }
+                      RegisterTvAsync(locationKey);
                   }
-                  RegisterTvAsync(locationKey);
               }
               
               ImGui.Spacing();
-              if (ImGui.Button("Sync Placements to Room")) {
+              if (ImGui.Button("Sync Placements to Area")) {
                   RegisterTvAsync(locationKey);
               }
               ImGui.SameLine();
-              if (ImGui.Button("Remove TV from Room")) {
+              if (ImGui.Button("Remove TV from Area")) {
                   DeleteTvAsync(locationKey);
               }
           } else {
-              if (_plugin.IsHousingMenuOpen) {
+              if (_plugin.IsHousingMenuOpen || isOutdoorsSync) {
                   if (ImGui.Button("Take Ownership of TV")) {
                       RegisterTvAsync(locationKey);
                   }
-                  ImGui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f), "You can override this locked TV because you have housing privileges.");
+                  ImGui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f), "You can override this locked TV because you have privileges here.");
               } else {
                   if (_plugin.CurrentTvPlacement.IsLocked) {
                       ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "This TV is locked by its owner.");
@@ -323,7 +334,8 @@ namespace XivMediaPlayer.Windows {
         _statusColor = new Vector4(1, 1, 1, 1);
         
         try {
-            bool success = await _plugin.ServerClient.DeleteTvAsync(locationKey, _plugin.CurrentTvPlacement.Id, _plugin.Config.OwnerId, _plugin.IsHousingMenuOpen);
+            bool isOutdoorsSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("zone_");
+            bool success = await _plugin.ServerClient.DeleteTvAsync(locationKey, _plugin.CurrentTvPlacement.Id, _plugin.Config.OwnerId, _plugin.IsHousingMenuOpen || isOutdoorsSync);
             if (success) {
                 _plugin.CurrentTvPlacement = null;
                 _plugin.Config.ScreenPlacements.Remove(locationKey);
@@ -413,8 +425,8 @@ namespace XivMediaPlayer.Windows {
         ScaleX = _scale.X,
         ScaleY = _scale.Y,
         OwnerId = _plugin.Config.OwnerId,
-        IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? true,
-        BypassLock = _plugin.IsHousingMenuOpen
+        IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? !locationKey.StartsWith("zone_"),
+        BypassLock = _plugin.IsHousingMenuOpen || locationKey.StartsWith("zone_")
       };
 
       SyncToTransform();

@@ -69,6 +69,33 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
       ImGui.Spacing();
 
+      // Outdoor TVs
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Outdoor TVs");
+      ImGui.Separator();
+
+      bool enableOutdoor = _plugin.Config.EnableOutdoorPublicScreens;
+      if (ImGui.Checkbox("Enable Public Outdoor Screens", ref enableOutdoor)) {
+        _plugin.Config.EnableOutdoorPublicScreens = enableOutdoor;
+        _plugin.Config.Save();
+      }
+
+      bool safeMode = _plugin.Config.OnlySafeDomainsPublicScreens;
+      if (ImGui.Checkbox("Safe Mode (Only allow safe domains outside)", ref safeMode)) {
+        _plugin.Config.OnlySafeDomainsPublicScreens = safeMode;
+        _plugin.Config.Save();
+      }
+      ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
+        "Blocks unverified URLs on outdoor screens to prevent abuse.");
+
+      bool showGrid = _plugin.Config.ShowOutdoorGridDebug;
+      if (ImGui.Checkbox("Show Outdoor Grid Overlay (Debug)", ref showGrid)) {
+        _plugin.Config.ShowOutdoorGridDebug = showGrid;
+        _plugin.Config.Save();
+      }
+
+      ImGui.Spacing();
+      ImGui.Spacing();
+
       // Playback
       ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Playback");
       ImGui.Separator();

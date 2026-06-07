@@ -103,6 +103,7 @@ namespace XivMediaPlayer
         private DateTime _lastClipboardCheck = DateTime.MinValue;
         private DateTime _lastServerSyncPush = DateTime.MinValue;
         private DateTime _lastServerSyncFetch = DateTime.MinValue;
+        private string _lastGridLocationKey = string.Empty;
         private long _serverTimeOffsetMs = 0;
         private bool _hasFetchedServerTime = false;
 
@@ -119,6 +120,7 @@ namespace XivMediaPlayer
 
         // Current room TV state
         public Networking.Models.TvPlacement? CurrentTvPlacement { get; internal set; }
+        private List<Networking.Models.TvPlacement> _nearbyTvs = new();
 
         // Input tracking
         private bool _wasLeftMousePressed = false;
@@ -362,8 +364,28 @@ namespace XivMediaPlayer
                 }
             }
 
+            // Track grid location changes
+            string currentLocKey = LocationKey;
+            if (_lastGridLocationKey != currentLocKey)
+            {
+                _lastGridLocationKey = currentLocKey;
+                // If it changed purely due to grid crossing, not territory
+                if (!string.IsNullOrEmpty(currentLocKey) && currentLocKey.StartsWith("zone_"))
+                {
+                    Task.Run(() =>
+                    {
+                        RestoreScreenForCurrentLocation();
+                        RestoreMediaForCurrentLocation();
+                        _ = FetchServerDataForCurrentLocationAsync();
+                    });
+                }
+            }
+
             // Sync Polling Loop
-            if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
+            bool isHouse = !string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_");
+            bool isZone = !string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("zone_");
+
+            if (isHouse || (isZone && _config.EnableOutdoorPublicScreens))
             {
                 bool isMediaOwner = _isLocalDj;
 
@@ -614,10 +636,15 @@ namespace XivMediaPlayer
                     }
                     break;
 
+                case "tv":
                 case "screen":
-                    if (!IsHousingMenuOpen)
+                    string locKey = LocationKey;
+                    bool isOutdoors = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("zone_");
+                    bool hasPrivileges = isOutdoors || IsHousingMenuOpen;
+                    
+                    if (!hasPrivileges)
                     {
-                        _chat.PrintError("[Media Player] The screen settings menu can only be accessed while the 'Edit Furnishings' housing menu is open.");
+                        _chat.PrintError("[Media Player] The screen settings menu can only be accessed while the 'Edit Furnishings' housing menu is open or you are outdoors.");
                         break;
                     }
 
@@ -705,6 +732,33 @@ namespace XivMediaPlayer
         private bool _isIntentionallyPaused = false;
         private DateTime _lastUrlLoadTime = DateTime.MinValue;
 
+        private bool IsUrlSafeForPublic(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            
+            try
+            {
+                var uri = new Uri(url);
+                var host = uri.Host.ToLowerInvariant();
+                
+                string[] safeDomains = {
+                    "youtube.com", "youtu.be",
+                    "twitch.tv",
+                    "vimeo.com",
+                    "soundcloud.com"
+                };
+                
+                foreach (var domain in safeDomains)
+                {
+                    if (host == domain || host.EndsWith("." + domain))
+                        return true;
+                }
+            }
+            catch { }
+            
+            return false;
+        }
+
         private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
             _isIntentionallyPaused = false;
@@ -720,6 +774,17 @@ namespace XivMediaPlayer
             {
                 _chat.PrintError("[Media Player] Cannot play: The TV in this room is locked by its owner.");
                 return;
+            }
+
+            string locationKey = GetLocationKey();
+            if (locationKey != null && locationKey.StartsWith("zone_") && _config.OnlySafeDomainsPublicScreens)
+            {
+                if (!IsUrlSafeForPublic(url))
+                {
+                    if (!isAutoSync) _chat.PrintError("[Media Player] Cannot play: Safe Mode is enabled for outdoor screens. Only verified domains (YouTube, Twitch, Vimeo) are allowed.");
+                    _pluginLog.Warning($"[Social] Blocked playback of unsafe URL {url} due to Safe Mode.");
+                    return;
+                }
             }
 
             if (!isAutoSync)
@@ -1097,6 +1162,7 @@ namespace XivMediaPlayer
         {
             SaveMediaStateForCurrentLocation();
             _videoWindow.IsOpen = false;
+            if (_screenSettingsWindow != null) _screenSettingsWindow.IsOpen = false;
             _mediaManager?.CleanSounds();
             ResetStreamValues();
 
@@ -1114,12 +1180,30 @@ namespace XivMediaPlayer
         private async Task FetchServerDataForCurrentLocationAsync()
         {
             // Fetch public TVs from the server
-            string locationKey = GetLocationKey();
-            if (!string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("house_"))
+            var keys = GetCurrentLocationKeys();
+            if (keys.Count == 0) return;
+
+            string primaryKey = GetLocationKey();
+            bool isHouse = !string.IsNullOrEmpty(primaryKey) && primaryKey.StartsWith("house_");
+            bool isZone = !string.IsNullOrEmpty(primaryKey) && primaryKey.StartsWith("zone_");
+
+            if (isHouse || (isZone && _config.EnableOutdoorPublicScreens))
             {
-                var tvs = await ServerClient.GetTvsForRoomAsync(locationKey);
+                var tvs = await ServerClient.GetTvsBatchAsync(keys);
+                _nearbyTvs = tvs;
+
                 if (tvs.Count > 0)
                 {
+                    // If multiple TVs are found, select the one closest to the player
+                    if (tvs.Count > 1)
+                    {
+                        var playerPos = GetLocalPlayer()?.Position;
+                        if (playerPos != null)
+                        {
+                            tvs = tvs.OrderBy(t => System.Numerics.Vector3.Distance(playerPos.Value, new System.Numerics.Vector3(t.PositionX, t.PositionY, t.PositionZ))).ToList();
+                        }
+                    }
+
                     var tv = tvs[0];
                     CurrentTvPlacement = tv;
 
@@ -1133,22 +1217,22 @@ namespace XivMediaPlayer
 
                         // Sync back to config for saving
                         _config.WorldScreen = _worldRenderer.Transform.Clone();
-                        _config.ScreenPlacements[locationKey] = _worldRenderer.Transform.Clone();
+                        _config.ScreenPlacements[tv.LocationKey] = _worldRenderer.Transform.Clone();
                         _config.Save();
                     }
 
-                    _pluginLog.Info($"[Social] Loaded public TV placement for room {locationKey}.");
+                    _pluginLog.Info($"[Social] Loaded public TV placement from room {tv.LocationKey}.");
                 }
                 else
                 {
                     CurrentTvPlacement = null;
 
                     // Auto-restore local TV configuration to the server if one exists and is enabled locally
-                    if (_config.ScreenPlacements.TryGetValue(locationKey, out var saved) && saved.Enabled)
+                    if (_config.ScreenPlacements.TryGetValue(primaryKey, out var saved) && saved.Enabled)
                     {
                         var tvToUpload = new Networking.Models.TvPlacement
                         {
-                            LocationKey = locationKey,
+                            LocationKey = primaryKey,
                             PositionX = saved.Position.X,
                             PositionY = saved.Position.Y,
                             PositionZ = saved.Position.Z,
@@ -1161,10 +1245,10 @@ namespace XivMediaPlayer
                             IsLocked = false
                         };
 
-                        CurrentTvPlacement = await ServerClient.RegisterTvAsync(locationKey, tvToUpload);
+                        CurrentTvPlacement = await ServerClient.RegisterTvAsync(primaryKey, tvToUpload);
                         if (CurrentTvPlacement != null)
                         {
-                            _pluginLog.Info($"[Social] Restored local TV placement to server for room {locationKey}.");
+                            _pluginLog.Info($"[Social] Restored local TV placement to server for room {primaryKey}.");
                         }
                     }
                 }
@@ -1277,7 +1361,7 @@ namespace XivMediaPlayer
         private async Task PushMediaToServerAsync(bool isBackgroundSync = false)
         {
             var key = GetLocationKey();
-            if (string.IsNullOrEmpty(key) || !key.StartsWith("house_")) return;
+            if (string.IsNullOrEmpty(key) || (!key.StartsWith("house_") && !key.StartsWith("zone_"))) return;
 
             var activeStream = _mediaManager?.ActiveStream;
 
@@ -1294,7 +1378,7 @@ namespace XivMediaPlayer
                 IsPlaying = !_isIntentionallyPaused,
                 OwnerId = _config.OwnerId,
                 PlaylistJson = System.Text.Json.JsonSerializer.Serialize(_mediaQueue.ToArray()),
-                BypassLock = IsHousingMenuOpen,
+                BypassLock = IsHousingMenuOpen || key.StartsWith("zone_"),
                 DurationMs = _currentMediaDurationMs,
                 IsBackgroundSync = isBackgroundSync
             };
@@ -1341,8 +1425,11 @@ namespace XivMediaPlayer
 
         public async Task FetchMediaFromServerAsync()
         {
-            var key = GetLocationKey();
-            if (string.IsNullOrEmpty(key) || !key.StartsWith("house_")) return;
+            var key = CurrentTvPlacement?.LocationKey ?? GetLocationKey();
+            if (string.IsNullOrEmpty(key)) return;
+            bool isHouse = key.StartsWith("house_");
+            bool isZone = key.StartsWith("zone_");
+            if (!isHouse && !(isZone && _config.EnableOutdoorPublicScreens)) return;
 
             var sync = await ServerClient.GetMediaStateAsync(key);
             if (sync == null || string.IsNullOrEmpty(sync.CurrentUrl)) return;
@@ -1463,6 +1550,41 @@ namespace XivMediaPlayer
         /// Regular zones: "zone_{territoryId}"
         /// Housing: "house_{worldId}_{territoryId}_{ward}_{plot}_{room}"
         /// </summary>
+        public List<string> GetCurrentLocationKeys()
+        {
+            var keys = new List<string>();
+            var key = GetLocationKey();
+            if (string.IsNullOrEmpty(key)) return keys;
+
+            if (key.StartsWith("house_"))
+            {
+                keys.Add(key);
+            }
+            else if (key.StartsWith("zone_"))
+            {
+                var playerPos = GetLocalPlayer()?.Position;
+                if (playerPos != null)
+                {
+                    int currentGridX = (int)Math.Floor(playerPos.Value.X / 50.0f);
+                    int currentGridZ = (int)Math.Floor(playerPos.Value.Z / 50.0f);
+                    var territoryId = _clientState.TerritoryType;
+
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        for (int dz = -1; dz <= 1; dz++)
+                        {
+                            keys.Add($"zone_{territoryId}_grid_{currentGridX + dx}_{currentGridZ + dz}");
+                        }
+                    }
+                }
+                else
+                {
+                    keys.Add(key); // Fallback
+                }
+            }
+            return keys;
+        }
+
         public unsafe string GetLocationKey()
         {
             try
@@ -1470,7 +1592,7 @@ namespace XivMediaPlayer
                 var territoryId = _clientState.TerritoryType;
                 if (territoryId == 0) return null;
 
-                var housingMgr = HousingManager.Instance();
+                var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
                 if (housingMgr != null && housingMgr->IsInside())
                 {
                     // Get world ID from local player character struct
@@ -1494,6 +1616,14 @@ namespace XivMediaPlayer
                     short plot = housingMgr->GetCurrentPlot();
                     short room = housingMgr->GetCurrentRoom();
                     return $"house_{worldId}_{territoryId}_{ward}_{plot}_{room}";
+                }
+
+                var playerPos = GetLocalPlayer()?.Position;
+                if (playerPos != null)
+                {
+                    int gridX = (int)Math.Floor(playerPos.Value.X / 50.0f);
+                    int gridZ = (int)Math.Floor(playerPos.Value.Z / 50.0f);
+                    return $"zone_{territoryId}_grid_{gridX}_{gridZ}";
                 }
 
                 return $"zone_{territoryId}";
@@ -1836,22 +1966,25 @@ namespace XivMediaPlayer
                                 // Lock (0.80 - 0.84)
                                 else if (uv.X >= 0.80f && uv.X <= 0.84f)
                                 {
-                                    if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
-                                    {
-                                        CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
-                                        if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
+                                    bool isOutdoors = !string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("zone_");
+                                    if (!isOutdoors) {
+                                        if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
                                         {
-                                            _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                            _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked" : "Unlocked")}.");
+                                            CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
+                                            if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
+                                            {
+                                                _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                                                _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked" : "Unlocked")}.");
+                                            }
                                         }
+                                        else if (CurrentTvPlacement == null)
+                                        {
+                                            CurrentTvPlacement = new Networking.Models.TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
+                                            _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                                            _chat.Print("[Media Player] TV registered and Unlocked.");
+                                        }
+                                        else { _chat.Print("[Media Player] You do not own this TV."); }
                                     }
-                                    else if (CurrentTvPlacement == null)
-                                    {
-                                        CurrentTvPlacement = new Networking.Models.TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
-                                        _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                        _chat.Print("[Media Player] TV registered and Unlocked.");
-                                    }
-                                    else { _chat.Print("[Media Player] You do not own this TV."); }
                                 }
                                 // Paste (0.85 - 0.89)
                                 else if (uv.X >= 0.85f && uv.X <= 0.89f)
@@ -1892,8 +2025,77 @@ namespace XivMediaPlayer
                     }
 
                     bool isLocked = CurrentTvPlacement?.IsLocked ?? true;
+                    float lockState = isLocked ? 1.0f : 0.0f;
+                    if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("zone_")) {
+                        lockState = -1.0f;
+                    }
                     float volume = _mediaManager != null ? _mediaManager.LiveStreamVolume : 1f;
-                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, cameraRight, cameraUp, fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, isLocked, volume, _titleTextureManager?.TextureHandle ?? IntPtr.Zero, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver);
+                    _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, cameraRight, cameraUp, fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, _titleTextureManager?.TextureHandle ?? IntPtr.Zero, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver);
+                }
+            }
+
+            DrawOutdoorGridDebug();
+        }
+
+        private unsafe void DrawOutdoorGridDebug()
+        {
+            if (!_config.ShowOutdoorGridDebug) return;
+
+            var playerPos = GetLocalPlayer()?.Position;
+            if (playerPos == null) return;
+
+            var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+            if (housingMgr != null && housingMgr->IsInside()) return;
+
+            var drawList = ImGui.GetBackgroundDrawList();
+            uint color = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0, 1, 0, 0.5f));
+            float thickness = 2.0f;
+
+            int currentGridX = (int)Math.Floor(playerPos.Value.X / 50.0f);
+            int currentGridZ = (int)Math.Floor(playerPos.Value.Z / 50.0f);
+
+            void DrawLineSegmented(System.Numerics.Vector3 pStart, System.Numerics.Vector3 pEnd)
+            {
+                int segments = 10;
+                for (int i = 0; i < segments; i++)
+                {
+                    float t1 = i / (float)segments;
+                    float t2 = (i + 1) / (float)segments;
+                    var pA = System.Numerics.Vector3.Lerp(pStart, pEnd, t1);
+                    var pB = System.Numerics.Vector3.Lerp(pStart, pEnd, t2);
+                    if (_gameGui.WorldToScreen(pA, out var spA) && _gameGui.WorldToScreen(pB, out var spB))
+                    {
+                        drawList.AddLine(spA, spB, color, thickness);
+                    }
+                }
+            }
+
+            for (int dx = -2; dx <= 2; dx++)
+            {
+                for (int dz = -2; dz <= 2; dz++)
+                {
+                    float startX = (currentGridX + dx) * 50.0f;
+                    float startZ = (currentGridZ + dz) * 50.0f;
+                    float y = playerPos.Value.Y;
+
+                    var p1 = new System.Numerics.Vector3(startX, y, startZ);
+                    var p2 = new System.Numerics.Vector3(startX + 50f, y, startZ);
+                    var p3 = new System.Numerics.Vector3(startX + 50f, y, startZ + 50f);
+                    var p4 = new System.Numerics.Vector3(startX, y, startZ + 50f);
+
+                    DrawLineSegmented(p1, p2);
+                    DrawLineSegmented(p2, p3);
+                    DrawLineSegmented(p3, p4);
+                    DrawLineSegmented(p4, p1);
+
+                    var center = new System.Numerics.Vector3(startX + 25f, y, startZ + 25f);
+                    if (_gameGui.WorldToScreen(center, out var sCenter))
+                    {
+                        string text = $"Grid {currentGridX + dx}, {currentGridZ + dz}";
+                        var textSize = ImGui.CalcTextSize(text);
+                        sCenter.X -= textSize.X / 2;
+                        drawList.AddText(sCenter, color, text);
+                    }
                 }
             }
         }

@@ -145,6 +145,42 @@ namespace XivMediaPlayer.Networking
             return null;
         }
 
+        public async Task<List<TvPlacement>> GetTvsBatchAsync(List<string> locationKeys)
+        {
+            try
+            {
+                var response = await _httpClient.PostAsJsonAsync($"{_baseUrl}/api/rooms/batch/tvs", locationKeys);
+                if (response.IsSuccessStatusCode)
+                {
+                    var tvs = await response.Content.ReadFromJsonAsync<List<TvPlacement>>();
+                    return tvs ?? new List<TvPlacement>();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to get TVs in batch");
+            }
+            return new List<TvPlacement>();
+        }
+
+        public async Task<List<RoomMediaStateSync>> GetMediaStatesBatchAsync(List<string> locationKeys)
+        {
+            try
+            {
+                var response = await _httpClient.PostAsJsonAsync($"{_baseUrl}/api/rooms/batch/media", locationKeys);
+                if (response.IsSuccessStatusCode)
+                {
+                    var states = await response.Content.ReadFromJsonAsync<List<RoomMediaStateSync>>();
+                    return states ?? new List<RoomMediaStateSync>();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to get media states in batch");
+            }
+            return new List<RoomMediaStateSync>();
+        }
+
         public void Dispose()
         {
             _httpClient.Dispose();

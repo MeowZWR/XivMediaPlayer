@@ -19,6 +19,8 @@ namespace XivMediaPlayer {
     private bool _tuneIntoTwitchStreams = true;
     private bool _tuneIntoTwitchStreamPrompt = true;
     private int _defaultVideoOpen = 1; // 0 = open, 1 = closed
+    private bool _enableOutdoorPublicScreens = true;
+    private bool _onlySafeDomainsPublicScreens = true;
 
     int IPluginConfiguration.Version { get; set; }
 
@@ -28,6 +30,10 @@ namespace XivMediaPlayer {
     public bool TuneIntoTwitchStreams { get => _tuneIntoTwitchStreams; set => _tuneIntoTwitchStreams = value; }
     public bool TuneIntoTwitchStreamPrompt { get => _tuneIntoTwitchStreamPrompt; set => _tuneIntoTwitchStreamPrompt = value; }
     public int DefaultVideoOpen { get => _defaultVideoOpen; set => _defaultVideoOpen = value; }
+    
+    public bool EnableOutdoorPublicScreens { get => _enableOutdoorPublicScreens; set => _enableOutdoorPublicScreens = value; }
+    public bool OnlySafeDomainsPublicScreens { get => _onlySafeDomainsPublicScreens; set => _onlySafeDomainsPublicScreens = value; }
+    public bool ShowOutdoorGridDebug { get; set; } = false;
 
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;
