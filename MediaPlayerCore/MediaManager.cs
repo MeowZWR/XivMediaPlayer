@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace MediaPlayerCore {
   public class MediaManager : IDisposable {
-    byte[] _lastFrame;
+    byte[] _lastFrame = Array.Empty<byte>();
     private bool _invalidated = false;
     private ConcurrentDictionary<string, MediaObject> _playbackStreams = new ConcurrentDictionary<string, MediaObject>();
     private List<MediaObject> _deadStreams = new List<MediaObject>();
@@ -23,6 +23,7 @@ namespace MediaPlayerCore {
 
     public float LiveStreamVolume { get => _livestreamVolume; set => _livestreamVolume = value; }
     public byte[] LastFrame { get => _lastFrame; set => _lastFrame = value; }
+    public object FrameLock { get; } = new object();
     public ulong LastFrameCount { get; set; } = 0;
     public int LastFrameWidth { get; set; } = 0;
     public int LastFrameHeight { get; set; } = 0;
@@ -216,7 +217,12 @@ namespace MediaPlayerCore {
             _playbackStreams?.Clear();
             _deadStreams.Clear();
         }
-        _lastFrame = null;
+        lock (FrameLock) {
+          _lastFrame = Array.Empty<byte>();
+          LastFrameWidth = 0;
+          LastFrameHeight = 0;
+          LastFrameCount++;
+        }
         OnCleanupTime?.Invoke(this, EventArgs.Empty);
       } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
     }
