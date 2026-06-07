@@ -11,7 +11,12 @@ Youtube, Twitch, Vimeo, RTSP, Image URLS, etc... full supported media site list 
 Simply copy the video/image/music URL of your choice, click the paste icon in the video window UI, and the media will play!
 
 For youtube video playback, installing the following browser plugin will let the video player use Youtube fully logged in and prevent rate limits/bot checks.
+
+Chrome/Brave/Chromium:
 https://chromewebstore.google.com/detail/vrcvideocacher-cookies-ex/kfgelknbegappcajiflgfbjbdpbpokge
+
+Firefox:
+https://addons.mozilla.org/en-US/firefox/addon/vrcvideocachercookiesexporter/
 
 Repo Link
 ```
