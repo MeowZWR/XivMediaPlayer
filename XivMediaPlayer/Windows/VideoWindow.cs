@@ -37,6 +37,9 @@ namespace XivMediaPlayer.Windows {
     private byte[] _lastLoadedFrame;
     private bool taskAlreadyRunning;
     private bool _disposed;
+    
+    private bool _isDraggingSeek;
+    private float _seekDragProgress;
 
     public VideoWindow(Plugin plugin, IDalamudPluginInterface pluginInterface, ITextureProvider textureProvider, IPluginLog pluginLog) :
       base("Media Player", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoFocusOnAppearing, false) {
@@ -123,19 +126,38 @@ namespace XivMediaPlayer.Windows {
         Size = new Vector2(ImGui.GetWindowSize().X, ImGui.GetWindowSize().X * 0.5625f + uiHeight);
         SizeConstraints = new WindowSizeConstraints() { MaximumSize = ImGui.GetMainViewport().Size, MinimumSize = new Vector2(360, 480) };
         
+        float availWidth = ImGui.GetContentRegionAvail().X;
         if (_frameToLoad != null) {
-          ImGui.Image(_frameToLoad.Handle, new Vector2(Size.Value.X, Size.Value.X * 0.5625f));
+          ImGui.Image(_frameToLoad.Handle, new Vector2(availWidth, availWidth * 0.5625f));
         }
 
         // --- Seek Slider (VODs only) ---
         if (_mediaManager != null) {
           var activeStream = _mediaManager.ActiveStream;
           if (activeStream != null && activeStream.Length > 0) {
-            float progress = (float)activeStream.Time / (float)activeStream.Length;
-            ImGui.SetNextItemWidth(Size.Value.X);
+            float progress;
+            if (!_isDraggingSeek) {
+                _seekDragProgress = (float)activeStream.Time / (float)activeStream.Length;
+            }
+            progress = _seekDragProgress;
+
+            ImGui.SetNextItemWidth(-1);
+            
+            // Format timecode based on drag progress if dragging, else use actual time
+            long displayTime = _isDraggingSeek ? (long)(progress * activeStream.Length) : activeStream.Time;
+            
             if (ImGui.SliderFloat("##seek", ref progress, 0f, 1f, 
-                FormatTimeCode(activeStream.Time) + " / " + FormatTimeCode(activeStream.Length))) {
-              activeStream.Time = (long)(progress * activeStream.Length);
+                FormatTimeCode(displayTime) + " / " + FormatTimeCode(activeStream.Length))) {
+              _seekDragProgress = progress;
+            }
+
+            if (ImGui.IsItemActivated()) {
+                _isDraggingSeek = true;
+            }
+            
+            if (ImGui.IsItemDeactivatedAfterEdit() || (ImGui.IsItemDeactivated() && _isDraggingSeek)) {
+                _isDraggingSeek = false;
+                activeStream.Time = (long)(_seekDragProgress * activeStream.Length);
             }
           }
         }
@@ -245,7 +267,7 @@ namespace XivMediaPlayer.Windows {
 
         // --- Volume Slider ---
         if (_mediaManager != null) {
-          ImGui.SetNextItemWidth(Size.Value.X - ImGui.CalcTextSize("Volume").X - 20);
+          ImGui.SetNextItemWidth(-(ImGui.CalcTextSize("Volume").X + ImGui.GetStyle().ItemInnerSpacing.X));
           int vol = (int)(_mediaManager.LiveStreamVolume * 100f);
           if (ImGui.SliderInt("Volume", ref vol, 0, 300)) {
               _mediaManager.LiveStreamVolume = vol / 100f;

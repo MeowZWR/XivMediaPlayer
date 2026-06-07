@@ -76,6 +76,7 @@ namespace XivMediaPlayer
         private Stack<string> _mediaHistory = new Stack<string>();
         private float _preMuteVolume = 0.5f;
         private bool _isMuted = false;
+        private bool _wasDragging3DSeek = false;
         private Random _shuffleRandom = new Random();
         private MediaCameraObject _playerCamera;
         private unsafe Camera* _camera;
@@ -1894,6 +1895,43 @@ namespace XivMediaPlayer
 
                     var uv = MathUtils.InverseBilinear(mousePos, sTL, sTR, sBR, sBL);
 
+                    if (_worldRenderer.UseDepthOcclusion && cameraPos.HasValue && cameraForward.HasValue)
+                    {
+                        var viewport = ImGui.GetMainViewport();
+                        float ndcX = ((mousePos.X - viewport.Pos.X) / viewport.Size.X) * 2f - 1f;
+                        float ndcY = -(((mousePos.Y - viewport.Pos.Y) / viewport.Size.Y) * 2f - 1f);
+
+                        float fovDist = 1.0f / (float)Math.Tan(fovY * 0.5f);
+                        var rayOrigin = cameraPos.Value;
+                        var rayDir = System.Numerics.Vector3.Normalize(ndcX * aspectRatio * cameraRight + ndcY * cameraUp - fovDist * cameraForward.Value);
+
+                        var tvRight = tr - tl;
+                        var tvDown = bl - tl;
+                        var tvNormal = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(tvRight, tvDown));
+
+                        float denom = System.Numerics.Vector3.Dot(tvNormal, rayDir);
+                        if (Math.Abs(denom) > 1e-6f)
+                        {
+                            float t = System.Numerics.Vector3.Dot(tl - rayOrigin, tvNormal) / denom;
+                            if (t > 0f)
+                            {
+                                var hitPoint = rayOrigin + rayDir * t;
+                                var d = hitPoint - tl;
+                                float u = System.Numerics.Vector3.Dot(d, tvRight) / tvRight.LengthSquared();
+                                float v = System.Numerics.Vector3.Dot(d, tvDown) / tvDown.LengthSquared();
+                                uv = new System.Numerics.Vector2(u, v);
+                            }
+                            else
+                            {
+                                uv = new System.Numerics.Vector2(-1, -1);
+                            }
+                        }
+                        else
+                        {
+                            uv = new System.Numerics.Vector2(-1, -1);
+                        }
+                    }
+
                     // We must calculate mouse state unconditionally every frame so that holding the mouse
                     // and dragging it OVER the window doesn't falsely trigger a "Click" event!
                     bool isLeftMousePressed = (GetAsyncKeyState(0x01) & 0x8000) != 0; // VK_LBUTTON
@@ -1905,23 +1943,49 @@ namespace XivMediaPlayer
                     {
                         hoverUV = uv;
 
+                        if (isLeftMousePressed)
+                        {
+                            // Handle Volume Slider Drag
+                            if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.28f && uv.X < 0.58f)
+                            {
+                                if (_mediaManager != null)
+                                {
+                                    float volProgress = (uv.X - 0.28f) / 0.30f;
+                                    _mediaManager.LiveStreamVolume = Math.Clamp(volProgress * 3f, 0f, 3f);
+                                    _config.LivestreamVolume = _mediaManager.LiveStreamVolume;
+                                    // Avoid saving config every frame of drag
+                                }
+                            }
+                            
+                            // Seek Bar Drag (0.28 - 0.58)
+                            if (uv.Y > 0.88f && uv.Y < 0.95f && uv.X >= 0.28f && uv.X <= 0.58f)
+                            {
+                                if (activeStream != null)
+                                {
+                                    float seekProgress = (uv.X - 0.28f) / 0.30f;
+                                    activeStream.Time = (long)(seekProgress * activeStream.Length);
+                                    _isLocalDj = true;
+                                    _wasDragging3DSeek = true;
+                                }
+                            }
+                        }
+
+                        if (isMouseReleased)
+                        {
+                            _config.Save(); // Save volume if it changed
+                            if (_wasDragging3DSeek)
+                            {
+                                _wasDragging3DSeek = false;
+                                _ = PushMediaToServerAsync(isBackgroundSync: false);
+                            }
+                        }
+
                         if (isMouseClicked)
                         {
                             _pluginLog.Information($"Media Control Clicked at UV: {uv.X:F2}, {uv.Y:F2}");
 
-                            // Handle Volume Slider Click
-                            if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.15f && uv.X < 0.72f)
-                            {
-                                if (_mediaManager != null)
-                                {
-                                    float volProgress = (uv.X - 0.15f) / 0.57f;
-                                    _mediaManager.LiveStreamVolume = Math.Clamp(volProgress * 3f, 0f, 3f);
-                                    _config.LivestreamVolume = _mediaManager.LiveStreamVolume;
-                                    _config.Save();
-                                }
-                            }
                             // Handle Transport Controls (Y between 0.85 and 0.95)
-                            else if (uv.Y > 0.85f && uv.Y < 0.95f)
+                            if (uv.Y > 0.85f && uv.Y < 0.95f)
                             {
                                 // Prev (0.02 - 0.06)
                                 if (uv.X >= 0.02f && uv.X <= 0.06f)
@@ -1948,17 +2012,7 @@ namespace XivMediaPlayer
                                 {
                                     PlayNext();
                                 }
-                                // Seek Bar (0.28 - 0.58)
-                                else if (uv.X >= 0.28f && uv.X <= 0.58f)
-                                {
-                                    if (activeStream != null)
-                                    {
-                                        float seekProgress = (uv.X - 0.28f) / 0.30f;
-                                        activeStream.Time = (long)(seekProgress * activeStream.Length);
-                                        _isLocalDj = true;
-                                        _ = PushMediaToServerAsync(isBackgroundSync: false);
-                                    }
-                                }
+
                                 // Loop (0.62 - 0.66)
                                 else if (uv.X >= 0.62f && uv.X <= 0.66f)
                                 {

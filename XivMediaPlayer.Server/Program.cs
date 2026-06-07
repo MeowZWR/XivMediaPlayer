@@ -10,7 +10,7 @@ builder.WebHost.UseUrls("http://0.0.0.0:5000");
 builder.Services.AddControllers();
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-    ?? "Data Source=XivMediaPlayer.db";
+    ?? "Data Source=XivMediaPlayer.db;Cache=Shared;";
 
 builder.Services.AddDbContext<XivMediaPlayer.Server.Models.AppDbContext>(options =>
     options.UseSqlite(connectionString));
