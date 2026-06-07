@@ -1398,6 +1398,7 @@ namespace XivMediaPlayer
                 // If we successfully pushed a foreground sync, we are definitely the DJ now.
                 if (!isBackgroundSync)
                 {
+                    _chat.Print($"[Media Player] Server push successful!");
                     _isLocalDj = true;
                     _currentMediaOwnerId = _config.OwnerId;
                 }
@@ -1496,6 +1497,7 @@ namespace XivMediaPlayer
             if (isDifferentUrl)
             {
                 _pluginLog.Information($"[Social] Syncing NEW media from server: {sync.CurrentUrl} at {targetTimeMs}ms (Playing: {sync.IsPlaying})");
+                _chat.Print($"[Media Player] Server Sync: Now playing media loaded by the room owner!");
 
                 _mediaQueue.Clear();
                 foreach (var url in state.Playlist) _mediaQueue.Enqueue(url);
