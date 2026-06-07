@@ -85,9 +85,14 @@ namespace MediaPlayerCore.Catalog {
           foreach (string line in lines) {
             try {
               var obj = JObject.Parse(line.Trim());
+              var url = obj["url"]?.ToString() ?? obj["webpage_url"]?.ToString() ?? "";
+              var title = obj["title"]?.ToString();
+              if (string.IsNullOrWhiteSpace(title) || title == "Unknown") title = url;
+              if (string.IsNullOrWhiteSpace(title)) title = "Unknown";
+              
               var item = new MediaCatalogItem {
-                Title = obj["title"]?.ToString() ?? "Unknown",
-                Url = obj["url"]?.ToString() ?? obj["webpage_url"]?.ToString() ?? "",
+                Title = title,
+                Url = url,
                 DurationSeconds = obj["duration"]?.Value<double?>(),
                 Uploader = obj["uploader"]?.ToString() ?? obj["channel"]?.ToString(),
                 Thumbnail = obj["thumbnail"]?.ToString() ?? obj["thumbnails"]?.First?["url"]?.ToString(),

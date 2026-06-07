@@ -854,7 +854,8 @@ namespace XivMediaPlayer
                             return;
                         }
                     }
-                    string title = metadata?.Title ?? "Unknown";
+                    string title = metadata?.Title;
+                    if (string.IsNullOrWhiteSpace(title) || title == "Unknown") title = url;
                     string uploader = metadata?.Uploader ?? "";
 
                     // Twitch streams often don't explicitly return is_live=true, but they lack a duration!
