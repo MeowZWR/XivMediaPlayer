@@ -74,6 +74,8 @@ namespace XivMediaPlayer.Compositing {
       IntPtr titleSrvPtr = default, bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0) {
       if (_disposed || !IsActive || textureWrap == null) return;
 
+      float videoAspect = textureWrap.Height > 0 ? (float)textureWrap.Width / textureWrap.Height : 0;
+
       if (cameraPos.HasValue && cameraForward.HasValue) {
         var (tl, tr, br, bl) = _transform.Corners;
         float zTL = Vector3.Dot(tl - cameraPos.Value, -cameraForward.Value);
@@ -94,9 +96,9 @@ namespace XivMediaPlayer.Compositing {
 
       if (_useDepthOcclusion && depthCapture != null && cameraPos.HasValue && cameraForward.HasValue && cameraRight.HasValue && cameraUp.HasValue) {
         RenderWithOcclusion(textureWrap, depthCapture, cameraPos.Value,
-          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver);
+          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect);
       } else {
-        RenderScreenSpace(textureWrap);
+        RenderScreenSpace(textureWrap, videoAspect);
       }
     }
 
@@ -130,7 +132,7 @@ namespace XivMediaPlayer.Compositing {
     /// </summary>
     private void RenderWithOcclusion(IDalamudTextureWrap textureWrap, DepthBufferCapture depthCapture,
       Vector3 cameraPos, Vector3 cameraForward, Vector3 cameraRight, Vector3 cameraUp, float fovY, float aspectRatio, UILayerCapture uiCapture,
-      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, float lockState, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver) {
+      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, float lockState, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver, float videoAspectRatio) {
       var (tl, tr, br, bl) = _transform.Corners;
 
       // WorldToScreen is the source of truth for screen positions
@@ -187,7 +189,7 @@ namespace XivMediaPlayer.Compositing {
       if (!_depthRenderer.IsInitialized) {
         if (!_depthRenderer.Initialize()) {
           DepthRendererError = $"Init failed: {_depthRenderer.InitError}";
-          RenderScreenSpace(textureWrap);
+          RenderScreenSpace(textureWrap, videoAspectRatio);
           return;
         }
       }
@@ -204,7 +206,7 @@ namespace XivMediaPlayer.Compositing {
       try {
         if (depthCapture.CapturedSRV == null) {
           DepthRendererError = "Depth SRV not available";
-          RenderScreenSpace(textureWrap);
+          RenderScreenSpace(textureWrap, videoAspectRatio);
           return;
         }
 
@@ -232,7 +234,7 @@ namespace XivMediaPlayer.Compositing {
           hoverUV, progress, isPlaying, lockState,
           minDepth, maxDepth, volume,
           depthCapture.RenderWidth, depthCapture.RenderHeight,
-          uiCapture?.LastAddonRects, titleSrvPtr, isLooping, isShuffle, time, showScreensaver);
+          uiCapture?.LastAddonRects, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspectRatio);
 
         DepthDebugInfo = $"Cam: {cameraPos:F1}\nFwd: {cameraForward:F2}\nFov: {fovY:F3}\nAspect: {aspectRatio:F3}";
 
@@ -247,11 +249,11 @@ namespace XivMediaPlayer.Compositing {
           DepthRendererError = null;
         } else {
           DepthRendererError = "GPU render returned false";
-          RenderScreenSpace(textureWrap);
+          RenderScreenSpace(textureWrap, videoAspectRatio);
         }
       } catch (Exception ex) {
         DepthRendererError = $"GPU render exception: {ex.Message}";
-        RenderScreenSpace(textureWrap);
+        RenderScreenSpace(textureWrap, videoAspectRatio);
       }
     }
 
@@ -297,7 +299,7 @@ namespace XivMediaPlayer.Compositing {
     /// <summary>
     /// Renders using ImGui screen-space projection (no occlusion).
     /// </summary>
-    private void RenderScreenSpace(IDalamudTextureWrap textureWrap) {
+    private void RenderScreenSpace(IDalamudTextureWrap textureWrap, float videoAspect) {
       var (tl, tr, br, bl) = _transform.Corners;
 
       WorldToScreenClamped(tl, out var sTL, out _);
@@ -314,11 +316,39 @@ namespace XivMediaPlayer.Compositing {
         RenderGlow(drawList, textureWrap, sTL, sTR, sBR, sBL, 1f); // no occlusion = full glow
       }
 
+      Vector2 uvTL = new Vector2(0, 0);
+      Vector2 uvTR = new Vector2(1, 0);
+      Vector2 uvBR = new Vector2(1, 1);
+      Vector2 uvBL = new Vector2(0, 1);
+
+      if (videoAspect > 0) {
+        float quadW = Vector2.Distance(sTL, sTR);
+        float quadH = Vector2.Distance(sTL, sBL);
+        float quadAspect = quadH > 0 ? quadW / quadH : 1.0f;
+        
+        Vector2 origTL = sTL, origTR = sTR, origBL = sBL, origBR = sBR;
+        
+        if (videoAspect > quadAspect) {
+          float scale = quadAspect / videoAspect;
+          float offset = (1.0f - scale) * 0.5f;
+          sTL = Vector2.Lerp(origTL, origBL, offset);
+          sTR = Vector2.Lerp(origTR, origBR, offset);
+          sBL = Vector2.Lerp(origBL, origTL, offset);
+          sBR = Vector2.Lerp(origBR, origTR, offset);
+        } else if (videoAspect < quadAspect) {
+          float scale = videoAspect / quadAspect;
+          float offset = (1.0f - scale) * 0.5f;
+          sTL = Vector2.Lerp(origTL, origTR, offset);
+          sBL = Vector2.Lerp(origBL, origBR, offset);
+          sTR = Vector2.Lerp(origTR, origTL, offset);
+          sBR = Vector2.Lerp(origBR, origBL, offset);
+        }
+      }
+
       drawList.AddImageQuad(
         textureWrap.Handle,
         sTL, sTR, sBR, sBL,
-        new Vector2(0, 0), new Vector2(1, 0),
-        new Vector2(1, 1), new Vector2(0, 1),
+        uvTL, uvTR, uvBR, uvBL,
         0xFFFFFFFF);
     }
 

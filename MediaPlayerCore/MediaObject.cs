@@ -28,8 +28,8 @@ namespace MediaPlayerCore {
     private string _soundPath;
     private string _libVLCPath;
 
-    private const uint _width = 1280;
-    private const uint _height = 720;
+    private uint _width = 1280;
+    private uint _height = 720;
 
     /// <summary>
     /// RGBA is used, so 4 byte per pixel, or 32 bits.
@@ -227,8 +227,8 @@ namespace MediaPlayerCore {
                   OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC player encountered an error during playback.") });
                 };
                 if (mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.EndsWith(".mp4") || mediaPath.EndsWith(".avi")) {
-                  _vlcPlayer.SetVideoFormat("RV32", _width, _height, _pitch);
-                  _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
+                    _vlcPlayer.SetVideoFormatCallbacks(VideoFormatSetup, null);
+                    _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
                 }
               }
 
@@ -353,22 +353,53 @@ namespace MediaPlayerCore {
       // No-op for VLC-only path; volume is managed through the VLC player directly.
     }
 
-    private void Display(IntPtr opaque, IntPtr picture) {
-      if (!Invalidated && _vlcBuffer != IntPtr.Zero) {
-        try {
-            lock (_parent.LastFrame) {
-              int totalBytes = (int)(_pitch * _lines);
-              if (_parent.LastFrame.Length != totalBytes) {
-                  _parent.LastFrame = new byte[totalBytes];
+      private void Display(IntPtr opaque, IntPtr picture) {
+        lock (_disposeLock) {
+            if (_disposed) return;
+            try {
+              lock (_parent.LastFrame) {
+                int totalBytes = (int)(_pitch * _lines);
+                if (_parent.LastFrame.Length != totalBytes) {
+                    _parent.LastFrame = new byte[totalBytes];
+                }
+                Marshal.Copy(_vlcBuffer, _parent.LastFrame, 0, totalBytes);
+                _parent.LastFrameWidth = (int)(_pitch / _bytePerPixel);
+                _parent.LastFrameHeight = (int)_lines;
+                _parent.LastFrameCount++;
               }
-              Marshal.Copy(_vlcBuffer, _parent.LastFrame, 0, totalBytes);
-              _parent.LastFrameWidth = (int)(_pitch / _bytePerPixel);
-              _parent.LastFrameHeight = (int)_lines;
-              _parent.LastFrameCount++;
+            } catch (Exception ex) {
+                Debug.WriteLine($"[MediaObject] Display error: {ex}");
             }
-        } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
+        }
       }
-    }
+
+      private uint VideoFormatSetup(ref IntPtr opaque, IntPtr chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines) {
+        byte[] rv32 = System.Text.Encoding.ASCII.GetBytes("RV32");
+        Marshal.Copy(rv32, 0, chroma, 4);
+        
+        _width = width;
+        _height = height;
+        _pitch = Align(_width * _bytePerPixel);
+        _lines = Align(_height);
+        
+        pitches = _pitch;
+        lines = _lines;
+        
+        lock (_disposeLock) {
+          if (!_disposed) {
+            if (_vlcMappedViewAccessor != null) {
+              _vlcMappedViewAccessor.Dispose();
+            }
+            if (_vlcMappedFile != null) {
+              _vlcMappedFile.Dispose();
+            }
+            _vlcMappedFile = MemoryMappedFile.CreateNew(null, _pitch * _lines);
+            _vlcMappedViewAccessor = _vlcMappedFile.CreateViewAccessor();
+            _vlcBuffer = _vlcMappedViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle();
+          }
+        }
+        return 1;
+      }
 
     public void Dispose() {
       lock (_disposeLock) {

@@ -61,7 +61,7 @@ namespace XivMediaPlayer.Compositing {
       public Vector3 CornerTR3D;
       public float _pad5;
       public Vector3 CornerBL3D;
-      public float _pad6;
+      public float VideoAspectRatio;
       
       // New fields appended at the end
       public Vector2 HoverUV;
@@ -114,7 +114,7 @@ cbuffer Constants : register(b0) {
   float3 CornerTR3D;
   float _pad5;
   float3 CornerBL3D;
-  float _pad6;
+  float VideoAspectRatio;
 
   float2 HoverUV;
   float Progress;
@@ -181,6 +181,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
   float2 uv = float2(-1, -1);
   float t = -1.0;
 
+  float2 sampleUV = float2(-1, -1);
   if (abs(denom) > 1e-6) {
       t = dot(CornerTL3D - rayOrigin, tvNormal) / denom;
       float3 hitPoint = rayOrigin + rayDir * t;
@@ -190,6 +191,18 @@ float4 PS(VS_OUT input) : SV_TARGET {
       
       uv = float2(u, v);
       isInside = (t > 0.0 && u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0);
+      
+      sampleUV = uv;
+      if (VideoAspectRatio > 0) {
+          float tvAspect = length(tvRight) / length(tvDown);
+          if (VideoAspectRatio > tvAspect) {
+              float scale = tvAspect / VideoAspectRatio;
+              sampleUV.y = (sampleUV.y - 0.5) / scale + 0.5;
+          } else {
+              float scale = VideoAspectRatio / tvAspect;
+              sampleUV.x = (sampleUV.x - 0.5) / scale + 0.5;
+          }
+      }
   }
   
   // Dynamic Resolution scaling: the depth buffer texture size might be larger than the actual rendered area
@@ -223,7 +236,11 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
   if (isInside && !occluded) {
       // Draw unoccluded TV
-      color = VideoTexture.Sample(VideoSampler, uv);
+      if (sampleUV.x < 0 || sampleUV.x > 1 || sampleUV.y < 0 || sampleUV.y > 1) {
+          color = float4(0, 0, 0, 1);
+      } else {
+          color = VideoTexture.Sample(VideoSampler, sampleUV);
+      }
       
       // Blend title texture perfectly flush onto the TV frame!
       if (HasTitleTexture > 0.5 && HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
@@ -711,7 +728,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float minDepth, float maxDepth, float volume,
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
-      bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0) {
+      bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
+      float videoAspectRatio = 0) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -746,6 +764,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           CornerTL3D = worldCorners.tl,
           CornerTR3D = worldCorners.tr,
           CornerBL3D = worldCorners.bl,
+          VideoAspectRatio = videoAspectRatio,
 
           Progress = progress,
           IsPlaying = isPlaying ? 1.0f : 0.0f,
