@@ -94,7 +94,7 @@ namespace XivMediaPlayer.Server.Controllers
             {
                 if (tv.OwnerId != ownerId && !bypassLock)
                 {
-                    return Forbid();
+                    return StatusCode(403);
                 }
                 _db.TvPlacements.Remove(tv);
                 await _db.SaveChangesAsync();
@@ -160,7 +160,7 @@ namespace XivMediaPlayer.Server.Controllers
             var tv = await _db.TvPlacements.FindAsync(locationKey);
             if (tv != null && tv.IsLocked && tv.OwnerId != state.OwnerId && !state.BypassLock)
             {
-                return Forbid();
+                return StatusCode(403);
             }
 
             // Always stamp with the server's exact current time to prevent client drift

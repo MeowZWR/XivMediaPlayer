@@ -102,6 +102,7 @@ namespace XivMediaPlayer
 
         private DateTime _lastClipboardCheck = DateTime.MinValue;
         private DateTime _lastServerSyncPush = DateTime.MinValue;
+        private DateTime? _deferredTerritoryChangeTime = null;
         private DateTime _lastServerSyncFetch = DateTime.MinValue;
         private string _lastGridLocationKey = string.Empty;
         private long _serverTimeOffsetMs = 0;
@@ -296,6 +297,14 @@ namespace XivMediaPlayer
         private unsafe void OnFrameworkUpdate(IFramework framework)
         {
             if (_disposed) return;
+
+            if (_deferredTerritoryChangeTime.HasValue && DateTime.UtcNow >= _deferredTerritoryChangeTime.Value)
+            {
+                _deferredTerritoryChangeTime = null;
+                RestoreScreenForCurrentLocation();
+                RestoreMediaForCurrentLocation();
+                _ = FetchServerDataForCurrentLocationAsync();
+            }
 
             if (!_hasBeenInitialized && _clientState.IsLoggedIn)
             {
@@ -776,7 +785,7 @@ namespace XivMediaPlayer
                 return;
             }
 
-            string locationKey = GetLocationKey();
+            string locationKey = _lastLocationKey;
             if (locationKey != null && locationKey.StartsWith("zone_") && _config.OnlySafeDomainsPublicScreens)
             {
                 if (!IsUrlSafeForPublic(url))
@@ -1166,15 +1175,7 @@ namespace XivMediaPlayer
             _mediaManager?.CleanSounds();
             ResetStreamValues();
 
-            // Auto-restore screen placement for the new location (deferred — housing data isn't ready yet)
-            Task.Run(async () =>
-            {
-                await Task.Delay(3000); // Wait for housing data to be available
-                RestoreScreenForCurrentLocation();
-                RestoreMediaForCurrentLocation();
-
-                await FetchServerDataForCurrentLocationAsync();
-            });
+            _deferredTerritoryChangeTime = DateTime.UtcNow.AddSeconds(3);
         }
 
         private async Task FetchServerDataForCurrentLocationAsync()
@@ -1350,18 +1351,16 @@ namespace XivMediaPlayer
             }
             else
             {
-                // Track location for future saving
-                _lastLocationKey = key;
-                return;
-            }
-
-            _lastLocationKey = key;
-        }
-
         private async Task PushMediaToServerAsync(bool isBackgroundSync = false)
         {
-            var key = GetLocationKey();
-            if (string.IsNullOrEmpty(key) || (!key.StartsWith("house_") && !key.StartsWith("zone_"))) return;
+            var key = _lastLocationKey;
+            _pluginLog.Information($"[Sync] PushMediaToServerAsync invoked. Key: {key}");
+            _pluginLog.Information($"[Sync] Attempting to push media to server for key: {key}");
+            if (string.IsNullOrEmpty(key) || (!key.StartsWith("house_") && !key.StartsWith("zone_")))
+            {
+                _pluginLog.Information($"[Sync] Aborting push because key is invalid.");
+                return;
+            }
 
             var activeStream = _mediaManager?.ActiveStream;
 
@@ -1425,7 +1424,8 @@ namespace XivMediaPlayer
 
         public async Task FetchMediaFromServerAsync()
         {
-            var key = CurrentTvPlacement?.LocationKey ?? GetLocationKey();
+            var key = _lastLocationKey;
+            _pluginLog.Information($"[Sync] FetchMediaFromServerAsync invoked. Key: {key}");
             if (string.IsNullOrEmpty(key)) return;
             bool isHouse = key.StartsWith("house_");
             bool isZone = key.StartsWith("zone_");
