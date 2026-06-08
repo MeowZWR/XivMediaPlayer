@@ -75,8 +75,9 @@ namespace XivMediaPlayer.Windows {
     public override void Draw() {
       string locKey = _plugin.LocationKey;
       bool isOutdoors = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("zone_");
+      bool isIsland = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("island_");
       bool hasHousingMenuOpen = _plugin.IsHousingMenuOpen;
-      bool hasPrivileges = isOutdoors || hasHousingMenuOpen;
+      bool hasPrivileges = isOutdoors || isIsland || hasHousingMenuOpen;
 
       if (!hasPrivileges) {
           ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Housing Menu Required");
@@ -274,13 +275,15 @@ namespace XivMediaPlayer.Windows {
 
       ImGui.Spacing();
       ImGui.Separator();
+
       ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Room Sync");
       ImGui.TextWrapped("Saving above only saves locally. To make the TV visible to other players, you must sync it to the room.");
       
       string locationKey = _plugin.LocationKey;
       bool isOutdoorsSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("zone_");
+      bool isIslandSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("island_");
       
-      if (string.IsNullOrEmpty(locationKey) || (!locationKey.StartsWith("house_") && !locationKey.StartsWith("zone_"))) {
+      if (string.IsNullOrEmpty(locationKey) || (!locationKey.StartsWith("house_") && !locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_"))) {
           ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "You must be inside a housing area or valid outdoor zone to sync TVs.");
       } else {
           ImGui.Text($"Location Key: {locationKey}");
@@ -309,7 +312,7 @@ namespace XivMediaPlayer.Windows {
                   DeleteTvAsync(locationKey);
               }
           } else {
-              if (_plugin.IsHousingMenuOpen || isOutdoorsSync) {
+              if (_plugin.IsHousingMenuOpen || isOutdoorsSync || isIslandSync) {
                   if (ImGui.Button("Take Ownership of TV")) {
                       RegisterTvAsync(locationKey);
                   }
@@ -335,7 +338,8 @@ namespace XivMediaPlayer.Windows {
         
         try {
             bool isOutdoorsSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("zone_");
-            bool success = await _plugin.ServerClient.DeleteTvAsync(locationKey, _plugin.CurrentTvPlacement.Id, _plugin.Config.OwnerId, _plugin.IsHousingMenuOpen || isOutdoorsSync);
+            bool isIslandSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("island_");
+            bool success = await _plugin.ServerClient.DeleteTvAsync(locationKey, _plugin.CurrentTvPlacement.Id, _plugin.Config.OwnerId, _plugin.IsHousingMenuOpen || isOutdoorsSync || isIslandSync);
             if (success) {
                 _plugin.CurrentTvPlacement = null;
                 _plugin.Config.ScreenPlacements.Remove(locationKey);
@@ -425,8 +429,8 @@ namespace XivMediaPlayer.Windows {
         ScaleX = _scale.X,
         ScaleY = _scale.Y,
         OwnerId = _plugin.Config.OwnerId,
-        IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? !locationKey.StartsWith("zone_"),
-        BypassLock = _plugin.IsHousingMenuOpen || locationKey.StartsWith("zone_")
+        IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? (!locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_")),
+        BypassLock = _plugin.IsHousingMenuOpen || locationKey.StartsWith("zone_") || locationKey.StartsWith("island_")
       };
 
       SyncToTransform();
@@ -449,6 +453,12 @@ namespace XivMediaPlayer.Windows {
       catch (UnauthorizedAccessException) 
       {
         _statusMessage = "Cannot move TV: It is locked by its owner.";
+        _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
+        _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+      }
+      catch (Exception)
+      {
+        _statusMessage = "Network error while syncing TV.";
         _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
         _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
       }

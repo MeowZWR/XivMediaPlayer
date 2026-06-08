@@ -47,6 +47,7 @@ namespace XivMediaPlayer
         private readonly ITextureProvider _textureProvider;
         private readonly IGameGui _gameGui;
         private readonly IObjectTable _objectTable;
+        private readonly IPartyList _partyList;
         private readonly IGameInteropProvider _gameInterop;
 
         private readonly Configuration _config;
@@ -136,6 +137,13 @@ namespace XivMediaPlayer
 
         private string _statusMessage = string.Empty;
 
+        public unsafe bool IsVisitingIslandSanctuary()
+        {
+            if (_clientState.TerritoryType != 1055) return false;
+            var mji = FFXIVClientStructs.FFXIV.Client.Game.MJI.MJIManager.Instance();
+            return mji != null && !mji->IsPlayerInSanctuary;
+        }
+
         // Current room TV state
         public Networking.Models.TvPlacement? CurrentTvPlacement { get; internal set; }
         private List<Networking.Models.TvPlacement> _nearbyTvs = new();
@@ -155,6 +163,7 @@ namespace XivMediaPlayer
           ITextureProvider textureProvider,
           IGameGui gameGui,
           IObjectTable objectTable,
+          IPartyList partyList,
           IGameInteropProvider gameInterop)
         {
             _pluginInterface = pluginInterface;
@@ -167,6 +176,7 @@ namespace XivMediaPlayer
             _textureProvider = textureProvider;
             _gameGui = gameGui;
             _objectTable = objectTable;
+            _partyList = partyList;
             _gameInterop = gameInterop;
 
             // Initialize dependency manager to download large binaries (libvlc, cef)
@@ -415,7 +425,11 @@ namespace XivMediaPlayer
             unsafe
             {
                 var housingGoods = _gameGui.GetAddonByName("HousingGoods", 1);
-                bool isHousingMenuOpen = (housingGoods != IntPtr.Zero);
+                var mjiFurnishing = _gameGui.GetAddonByName("MJIFurnishing", 1);
+                var mjiHousingGoods = _gameGui.GetAddonByName("MJIHousingGoods", 1);
+                var mjiFurnishingGlamour = _gameGui.GetAddonByName("MJIFurnishingGlamour", 1);
+                
+                bool isHousingMenuOpen = (housingGoods != IntPtr.Zero) || (mjiFurnishing != IntPtr.Zero) || (mjiHousingGoods != IntPtr.Zero) || (mjiFurnishingGlamour != IntPtr.Zero);
 
                 if (isHousingMenuOpen && !_wasHousingMenuOpen)
                 {
@@ -729,7 +743,8 @@ namespace XivMediaPlayer
                 case "screen":
                     string locKey = LocationKey;
                     bool isOutdoors = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("zone_");
-                    bool hasPrivileges = isOutdoors || IsHousingMenuOpen;
+                    bool isIsland = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("island_");
+                    bool hasPrivileges = isOutdoors || isIsland || IsHousingMenuOpen;
                     
                     if (!hasPrivileges)
                     {
@@ -1666,6 +1681,41 @@ namespace XivMediaPlayer
                 if (housingMgr != null && housingMgr->IsInside())
                 {
                     return $"house_{worldId}_{territoryId}_{ward}_{plot}_{room}_{indoorHouseId}";
+                }
+
+                if (territoryId == 1055)
+                {
+                    var mji = FFXIVClientStructs.FFXIV.Client.Game.MJI.MJIManager.Instance();
+                    if (mji != null && mji->IsPlayerInSanctuary)
+                    {
+                        var localPlayer = GetLocalPlayer();
+                        if (localPlayer != null)
+                        {
+                            return $"island_{worldId}_{localPlayer.Name.TextValue}";
+                        }
+                    }
+                    else
+                    {
+                        // Visiting another island. Try to guess owner from party leader, or use automated fallback.
+                        if (_partyList.Length > 0 && _partyList[0] != null)
+                        {
+                            return $"island_{worldId}_{_partyList[0].Name.TextValue}";
+                        }
+
+                        // Fallback: guess the owner based on the first other player in the object table.
+                        // The island owner is almost always the first person in the instance.
+                        var lp = GetLocalPlayer();
+                        foreach (var obj in _objectTable)
+                        {
+                            if (obj is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter pc && 
+                                lp != null && pc.Name.TextValue != lp.Name.TextValue)
+                            {
+                                return $"island_{worldId}_{pc.Name.TextValue}";
+                            }
+                        }
+
+                        return null; // Don't know who we are visiting
+                    }
                 }
 
                 var playerPos = _cachedLocalPlayerPosition;
