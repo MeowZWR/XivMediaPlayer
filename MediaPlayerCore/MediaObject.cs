@@ -160,6 +160,7 @@ namespace MediaPlayerCore {
             ChangeVideoStream(_soundPath, _width, (int)value);
           } else {
             _vlcPlayer.Time = value;
+            _bufferedWaveProvider?.ClearBuffer();
           }
         }
       }

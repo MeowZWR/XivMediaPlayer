@@ -1295,22 +1295,7 @@ namespace XivMediaPlayer
 
                     var tv = tvs[0];
                     CurrentTvPlacement = tv;
-
-                    // Apply to the ACTIVE renderer transform ONLY if we aren't actively editing it
-                    if (_worldRenderer != null && !IsHousingMenuOpen && !_screenSettingsWindow.IsOpen)
-                    {
-                        _worldRenderer.Transform.Enabled = true;
-                        _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
-                        _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
-                        _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
-
-                        // Sync back to config for saving
-                        _config.WorldScreen = _worldRenderer.Transform.Clone();
-                        _config.ScreenPlacements[tv.LocationKey] = _worldRenderer.Transform.Clone();
-                        _config.Save();
-                    }
-
-                    _pluginLog.Info($"[Social] Loaded public TV placement from room {tv.LocationKey}.");
+                    _pluginLog.Info($"[Social] Loaded TV state from room {tv.LocationKey}.");
                 }
                 else
                 {
@@ -1390,6 +1375,9 @@ namespace XivMediaPlayer
             var key = GetLocationKey();
             if (string.IsNullOrEmpty(key)) return;
 
+            // Track location for future saving
+            _lastLocationKey = key;
+
             if (_config.RoomMediaStates.TryGetValue(key, out var state))
             {
                 _pluginLog.Information($"Restoring media state for {key}");
@@ -1411,12 +1399,6 @@ namespace XivMediaPlayer
                     _lastStreamObject = CurrentAudioSource;
                     PlayViaYtDlp(state.CurrentUrl, CurrentAudioSource, (int)state.TimecodeMs, isAutoSync: true);
                 }
-            }
-            else
-            {
-                // Track location for future saving
-                _lastLocationKey = key;
-                return;
             }
         }
 
