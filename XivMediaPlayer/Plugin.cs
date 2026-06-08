@@ -2550,7 +2550,23 @@ namespace XivMediaPlayer
         public void TogglePlayPause()
         {
             var activeStream = _mediaManager?.ActiveStream;
-            if (activeStream == null) return;
+            if (activeStream == null)
+            {
+                // Play last media from history if available
+                var lastMedia = _config.WatchHistory.Values.OrderByDescending(x => x.LastPlayed).FirstOrDefault();
+                if (lastMedia != null)
+                {
+                    if (YtDlpManager.IsUrlSupported(lastMedia.Url) && _ytDlpManager.IsAvailable())
+                    {
+                        PlayViaYtDlp(lastMedia.Url, CurrentAudioSource, (int)lastMedia.TimecodeMs);
+                    }
+                    else
+                    {
+                        TuneIntoStream(lastMedia.Url, CurrentAudioSource, (int)lastMedia.TimecodeMs);
+                    }
+                }
+                return;
+            }
 
             if (activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing)
             {
@@ -2559,6 +2575,21 @@ namespace XivMediaPlayer
             }
             else
             {
+                if (activeStream.PlaybackState == NAudio.Wave.PlaybackState.Stopped && !string.IsNullOrEmpty(_lastStreamURL))
+                {
+                    _mediaManager?.StopStream();
+                    if (YtDlpManager.IsUrlSupported(_lastStreamURL) && _ytDlpManager.IsAvailable())
+                    {
+                        PlayViaYtDlp(_lastStreamURL, CurrentAudioSource, 0);
+                    }
+                    else
+                    {
+                        TuneIntoStream(_lastStreamURL, CurrentAudioSource, 0);
+                    }
+                    _isIntentionallyPaused = false;
+                    return;
+                }
+
                 activeStream.Resume();
                 _isIntentionallyPaused = false;
             }
