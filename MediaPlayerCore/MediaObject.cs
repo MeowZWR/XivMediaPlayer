@@ -164,7 +164,12 @@ namespace MediaPlayerCore {
         try {
           if (!string.IsNullOrEmpty(mediaPath) && PlaybackState == PlaybackState.Stopped) {
             try {
-              _parent.LastFrame = new byte[0];
+              lock (_parent.FrameLock) {
+                _parent.LastFrame = Array.Empty<byte>();
+                _parent.LastFrameWidth = 0;
+                _parent.LastFrameHeight = 0;
+                _parent.LastFrameCount++;
+              }
               string location = _libVLCPath + @"\libvlc\win-x64";
               Debug.WriteLine($"[MediaObject] Initializing VLC from: {location}");
               Debug.WriteLine($"[MediaObject] Media path: {mediaPath.Substring(0, Math.Min(100, mediaPath.Length))}...");
@@ -218,7 +223,14 @@ namespace MediaPlayerCore {
 
                 _vlcPlayer = new MediaPlayer(media);
                 _vlcPlayer.SetAudioOutput("directsound");
-                _vlcPlayer.Stopped += delegate { _parent.LastFrame = new byte[0]; };
+                _vlcPlayer.Stopped += delegate {
+                  lock (_parent.FrameLock) {
+                    _parent.LastFrame = Array.Empty<byte>();
+                    _parent.LastFrameWidth = 0;
+                    _parent.LastFrameHeight = 0;
+                    _parent.LastFrameCount++;
+                  }
+                };
                 _vlcPlayer.EndReached += delegate {
                   PlaybackFinished?.Invoke(this, "OK");
                 };
@@ -357,7 +369,7 @@ namespace MediaPlayerCore {
         lock (_disposeLock) {
             if (_disposed) return;
             try {
-              lock (_parent.LastFrame) {
+              lock (_parent.FrameLock) {
                 int totalBytes = (int)(_pitch * _lines);
                 if (_parent.LastFrame.Length != totalBytes) {
                     _parent.LastFrame = new byte[totalBytes];

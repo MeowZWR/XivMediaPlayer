@@ -9,7 +9,6 @@ using MediaPlayerCore;
 using MediaPlayerCore.Twitch;
 using System;
 using System.Diagnostics;
-using System.Threading.Tasks;
 using Vector2 = System.Numerics.Vector2;
 
 namespace XivMediaPlayer.Windows {
@@ -35,8 +34,8 @@ namespace XivMediaPlayer.Windows {
     private IDalamudTextureWrap _blackFrame;
     private ulong _lastLoadedFrameCount = 0;
     private byte[] _lastLoadedFrame;
-    private bool taskAlreadyRunning;
     private bool _disposed;
+    private readonly object _textureLock = new object();
     
     private bool _isDraggingSeek;
     private float _seekDragProgress;
@@ -65,51 +64,53 @@ namespace XivMediaPlayer.Windows {
     /// </summary>
     public void UpdateFrame() {
       if (_disposed || _mediaManager == null) return;
-      if (_mediaManager.LastFrame == null || _mediaManager.LastFrame.Length == 0) {
-        if (wasStreaming) {
-          if (!deadStreamTimer.IsRunning) {
-            deadStreamTimer.Start();
-          }
-          if (deadStreamTimer.ElapsedMilliseconds > 10000) {
-            deadStreamTimer.Stop();
-            deadStreamTimer.Reset();
-            IsOpen = false;
-            wasStreaming = false;
-          }
-        }
-        return;
-      }
-
-      // We have frame data — decode it into a texture
-      wasStreaming = true;
-      if (deadStreamTimer.IsRunning) {
-        deadStreamTimer.Stop();
-        deadStreamTimer.Reset();
-      }
 
       try {
-        if (!taskAlreadyRunning) {
-          _ = Task.Run(async () => {
-            try {
-              taskAlreadyRunning = true;
-              ReadOnlyMemory<byte> bytes = new byte[0];
-              lock (_mediaManager.LastFrame) {
-                bytes = _mediaManager.LastFrame;
+        lock (_mediaManager.FrameLock) {
+          ulong frameCount = _mediaManager.LastFrameCount;
+          int frameWidth = _mediaManager.LastFrameWidth;
+          int frameHeight = _mediaManager.LastFrameHeight;
+
+          if (frameWidth == 0 || frameHeight == 0 || _mediaManager.LastFrame == null || _mediaManager.LastFrame.Length == 0) {
+            if (wasStreaming) {
+              if (!deadStreamTimer.IsRunning) {
+                deadStreamTimer.Start();
+              }
+              if (deadStreamTimer.ElapsedMilliseconds > 10000) {
+                deadStreamTimer.Stop();
+                deadStreamTimer.Reset();
+                IsOpen = false;
+                wasStreaming = false;
+              }
+            }
+            return;
+          }
+
+          wasStreaming = true;
+          if (deadStreamTimer.IsRunning) {
+            deadStreamTimer.Stop();
+            deadStreamTimer.Reset();
+          }
+
+          if (_lastLoadedFrameCount != frameCount) {
+            // Create texture directly from the locked array, avoiding a massive 8MB array clone per frame.
+            var newTexture = _textureProvider.CreateFromRaw(
+              Dalamud.Interface.Textures.RawImageSpecification.Bgra32(frameWidth, frameHeight),
+              _mediaManager.LastFrame,
+              "VideoWindowTexture");
+
+            lock (_textureLock) {
+              if (_disposed) {
+                newTexture.Dispose();
+                return;
               }
 
-              if (bytes.Length > 0 && _mediaManager.LastFrameWidth > 0 && _mediaManager.LastFrameHeight > 0) {
-                if (_lastLoadedFrameCount != _mediaManager.LastFrameCount) {
-                  var newTexture = _textureProvider.CreateFromRaw(Dalamud.Interface.Textures.RawImageSpecification.Bgra32(_mediaManager.LastFrameWidth, _mediaManager.LastFrameHeight), bytes.Span, "VideoWindowTexture");
-                  var oldTexture = _frameToLoad;
-                  _frameToLoad = newTexture;
-                  _lastLoadedFrameCount = _mediaManager.LastFrameCount;
-                  oldTexture?.Dispose();
-                }
-              }
-            } finally {
-              taskAlreadyRunning = false;
+              var oldTexture = _frameToLoad;
+              _frameToLoad = newTexture;
+              _lastLoadedFrameCount = frameCount;
+              oldTexture?.Dispose();
             }
-          });
+          }
         }
       } catch (Exception e) {
         _pluginLog.Warning(e, e.Message);
@@ -278,7 +279,7 @@ namespace XivMediaPlayer.Windows {
           ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.7f, 0.15f, 0.15f, 1f));
           ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new System.Numerics.Vector4(0.9f, 0.2f, 0.2f, 1f));
           if (ImGui.Button("Kill", wideBtnSize)) {
-            _plugin.KillAndRestart();
+            _plugin.RequestKillAndRestart();
           }
           ImGui.PopStyleColor(2);
           if (ImGui.IsItemHovered()) ImGui.SetTooltip("Kill the media pipeline and restart it");
@@ -344,11 +345,13 @@ namespace XivMediaPlayer.Windows {
     }
 
     public void MarkDisposed() {
-      _disposed = true;
-      _frameToLoad?.Dispose();
-      _frameToLoad = null;
-      _blackFrame?.Dispose();
-      _blackFrame = null;
+      lock (_textureLock) {
+        _disposed = true;
+        _frameToLoad?.Dispose();
+        _frameToLoad = null;
+        _blackFrame?.Dispose();
+        _blackFrame = null;
+      }
     }
 
     /// <summary>
@@ -356,7 +359,9 @@ namespace XivMediaPlayer.Windows {
     /// or a black 16:9 placeholder if no video is playing.
     /// </summary>
     public IDalamudTextureWrap? GetCurrentTextureWrap() {
-      return _frameToLoad ?? _blackFrame;
+      lock (_textureLock) {
+        return _frameToLoad ?? _blackFrame;
+      }
     }
 
     /// <summary>
