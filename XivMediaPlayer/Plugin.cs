@@ -1454,6 +1454,16 @@ namespace XivMediaPlayer
                     IsBackgroundSync = isBackgroundSync
                 };
 
+                // Update local config immediately so we don't lose our place if we crash or the server is unavailable
+                var state = new RoomMediaState
+                {
+                    CurrentUrl = sync.CurrentUrl,
+                    TimecodeMs = sync.TimecodeMs,
+                    Playlist = new List<string>(mediaQueueArray)
+                };
+                _config.RoomMediaStates[key] = state;
+                _config.Save();
+
                 try
                 {
                     await ServerClient.UpdateMediaStateAsync(key, sync);
