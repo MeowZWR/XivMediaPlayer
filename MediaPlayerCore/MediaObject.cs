@@ -303,13 +303,13 @@ namespace MediaPlayerCore {
                   if (exactSeekMs > 0) {
                       // Fire exact seek to correct keyframe snapping margin of error
                       Task.Run(async () => {
-                          await Task.Delay(100);
+                        await Task.Delay(2000); // Bypass plugin load lag spike
                             if (_vlcPlayer != null) {
                                 _vlcPlayer.Time = exactSeekMs;
                                 _bufferedWaveProvider?.ClearBuffer();
                             }
-                          exactSeekMs = 0;
-                      });
+                        exactSeekMs = 0;
+                    });
                   }
               };
 
@@ -392,7 +392,7 @@ namespace MediaPlayerCore {
             playingHandler = (s, e) => {
                 if (exactSeekMs > 0) {
                     Task.Run(async () => {
-                        await Task.Delay(100);
+                        await Task.Delay(2000); // Bypass plugin load lag spike
                           if (_vlcPlayer != null && !_disposed) {
                               _vlcPlayer.Time = exactSeekMs;
                               _bufferedWaveProvider?.ClearBuffer();
@@ -437,8 +437,8 @@ namespace MediaPlayerCore {
       }
 
       private void FlushAudio(IntPtr data, long pts) {
-          // Do not clear the buffer on flush, as VLC may flush frequently for minor sync corrections, causing stutters.
-          // _bufferedWaveProvider?.ClearBuffer();
+          // Explicitly clear the buffer on flush so that stale audio from before a seek isn't played.
+          _bufferedWaveProvider?.ClearBuffer();
       }
 
       private void ResumeAudio(IntPtr data, long pts) {
@@ -462,9 +462,6 @@ namespace MediaPlayerCore {
                         if (_bufferedWaveProvider.BufferedDuration.TotalMilliseconds > 300) {
                             _waveOut.Play();
                         }
-                    } else if (_bufferedWaveProvider.BufferedDuration.TotalMilliseconds < 50) {
-                        // We are starving! The stream lagged. Pause to rebuild the buffer.
-                        _waveOut.Pause();
                     }
                 }
             }
