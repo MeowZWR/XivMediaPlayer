@@ -129,7 +129,7 @@ namespace MediaPlayerCore {
               _baseVolume = newValue;
               _vlcPlayer.Volume = (int)((float)newValue * volumePercentage);
               if (_volumeProvider != null) {
-                  _volumeProvider.Volume = (float)newValue / 100f * volumePercentage;
+                  _volumeProvider.Volume = ((float)newValue / 100f * volumePercentage) * 2.0f; // Boost spatial audio to match native VLC output
               }
             }
           } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
@@ -268,7 +268,7 @@ namespace MediaPlayerCore {
                     _panningProvider.Pan = 0;
                     
                     _volumeProvider = new VolumeSampleProvider(_panningProvider);
-                    _volumeProvider.Volume = _baseVolume / 100f; // Scale 0-100 to 0-1
+                    _volumeProvider.Volume = (_baseVolume / 100f) * 2.0f; // Scale 0-100 to 0-1, boosted for spatial compensation
                     
                     _waveOut = new WasapiOut(AudioClientShareMode.Shared, 150);
                     _waveOut.Init(_volumeProvider);
