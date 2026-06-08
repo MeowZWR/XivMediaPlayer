@@ -304,9 +304,10 @@ namespace MediaPlayerCore {
                       // Fire exact seek to correct keyframe snapping margin of error
                       Task.Run(async () => {
                           await Task.Delay(100);
-                          if (_vlcPlayer != null) {
-                              _vlcPlayer.Time = exactSeekMs;
-                          }
+                            if (_vlcPlayer != null) {
+                                _vlcPlayer.Time = exactSeekMs;
+                                _bufferedWaveProvider?.ClearBuffer();
+                            }
                           exactSeekMs = 0;
                       });
                   }
@@ -392,9 +393,10 @@ namespace MediaPlayerCore {
                 if (exactSeekMs > 0) {
                     Task.Run(async () => {
                         await Task.Delay(100);
-                        if (_vlcPlayer != null && !_disposed) {
-                            _vlcPlayer.Time = exactSeekMs;
-                        }
+                          if (_vlcPlayer != null && !_disposed) {
+                              _vlcPlayer.Time = exactSeekMs;
+                              _bufferedWaveProvider?.ClearBuffer();
+                          }
                         exactSeekMs = 0;
                     });
                 }
