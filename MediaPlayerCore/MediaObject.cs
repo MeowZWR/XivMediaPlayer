@@ -51,6 +51,7 @@ namespace MediaPlayerCore {
     private float _baseVolume = 1;
     private bool _vlcWasAbleToStart;
     private bool _disposed;
+    private bool _isDisposing;
     private readonly object _disposeLock = new object();
 
     public MediaObject(MediaManager parent, IMediaGameObject playerObject, IMediaGameObject camera,
@@ -131,7 +132,15 @@ namespace MediaPlayerCore {
     
     public long Time {
       get => _vlcPlayer?.Time ?? 0;
-      set { if (_vlcPlayer != null) _vlcPlayer.Time = value; }
+      set {
+        if (_vlcPlayer != null) {
+          if (_vlcPlayer.State == LibVLCSharp.Shared.VLCState.Ended || _vlcPlayer.State == LibVLCSharp.Shared.VLCState.Stopped) {
+            ChangeVideoStream(_soundPath, _width, (int)value);
+          } else {
+            _vlcPlayer.Time = value;
+          }
+        }
+      }
     }
 
     public long Length => _vlcPlayer?.Length ?? 0;
@@ -432,14 +441,28 @@ namespace MediaPlayerCore {
       LibVLC libVlcToDispose = null;
 
       lock (_disposeLock) {
-          if (_disposed) {
+          if (_disposed || _isDisposing) {
             return;
           }
-          _disposed = true;
-          _parent.OnCleanupTime -= _parent_OnCleanupTime;
+          _isDisposing = true;
           
           playerToStop = _vlcPlayer;
           libVlcToDispose = libVLC;
+      }
+
+      if (playerToStop != null) {
+          PlaybackStopped?.Invoke(this, "OK");
+          try { playerToStop.Stop(); } catch { }
+          try { playerToStop.Dispose(); } catch { }
+      }
+      if (libVlcToDispose != null) {
+          try { libVlcToDispose.Dispose(); } catch { }
+      }
+
+      lock (_disposeLock) {
+          if (_disposed) return;
+          _disposed = true;
+          _parent.OnCleanupTime -= _parent_OnCleanupTime;
           
           _vlcPlayer = null;
           libVLC = null;
@@ -453,15 +476,6 @@ namespace MediaPlayerCore {
               _vlcMappedFile = null;
           }
           _vlcBuffer = IntPtr.Zero;
-      }
-
-      if (playerToStop != null) {
-          PlaybackStopped?.Invoke(this, "OK");
-          try { playerToStop.Stop(); } catch { }
-          try { playerToStop.Dispose(); } catch { }
-      }
-      if (libVlcToDispose != null) {
-          try { libVlcToDispose.Dispose(); } catch { }
       }
     }
   }
