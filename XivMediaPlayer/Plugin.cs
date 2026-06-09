@@ -2261,6 +2261,7 @@ namespace XivMediaPlayer
                         ? (_historyMenuTextureManager?.TextureHandle ?? IntPtr.Zero) 
                         : (_titleTextureManager?.TextureHandle ?? IntPtr.Zero);
 
+                    _worldRenderer.UIBlendThreshold = _config.UIBlendThreshold;
                     _worldRenderer.Render(textureWrap, _depthCapture, cameraPos, cameraForward, cameraRight, cameraUp, fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver);
                 }
             }

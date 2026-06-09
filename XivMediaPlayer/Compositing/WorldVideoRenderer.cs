@@ -29,6 +29,11 @@ namespace XivMediaPlayer.Compositing {
     /// </summary>
     public bool EnableGlow { get => _enableGlow; set => _enableGlow = value; }
 
+    public float UIBlendThreshold {
+      get => _depthRenderer?.UIBlendThreshold ?? 0.95f;
+      set { if (_depthRenderer != null) _depthRenderer.UIBlendThreshold = value; }
+    }
+
     public WorldScreenTransform Transform => _transform;
 
     /// <summary>

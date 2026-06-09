@@ -78,11 +78,18 @@ namespace XivMediaPlayer.Compositing {
       public float IsShuffle;
       public float Time;
       public float ShowScreensaver;
+      public float UIBlendThreshold;
+      public float _pad6;
+      public float _pad7;
+      public float _pad8;
     }
+
+    public float UIBlendThreshold { get; set; } = 0.95f;
 
     [StructLayout(LayoutKind.Sequential)]
     private unsafe struct UIConstants {
       public fixed float UIRects[256]; // 64 * 4 (x, y, w, h)
+      public fixed float UIRectTypes[64]; // 0 = standard, 1 = MJI
       public int UIRectCount;
       public float _pad0;
       public float _pad1;
@@ -130,12 +137,15 @@ cbuffer Constants : register(b0) {
   float IsShuffle;
   float Time;
   float ShowScreensaver;
+  float UIBlendThreshold;
+  float3 _pad6;
 };
 
 cbuffer UIConsts : register(b1) {
   float4 UIRects[64];
+  float4 UIRectTypes[16]; // 64 floats packed into 16 vectors
   int UIRectCount;
-  float3 _uiPadEnd;
+  float3 _padUI;
 };
 
 Texture2D VideoTexture : register(t0);
@@ -622,12 +632,22 @@ float4 PS(VS_OUT input) : SV_TARGET {
   
   // Check if this pixel is inside any UI bounding box
   bool insideUI = false;
+  int rectType = 0; // 0 = Standard, 1 = MJI, 2 = ActionDetail
   for (int i = 0; i < UIRectCount; i++) {
       float4 r = UIRects[i];
       if (pixelPos.x >= r.x && pixelPos.x <= r.x + r.z &&
           pixelPos.y >= r.y && pixelPos.y <= r.y + r.w) {
           insideUI = true;
-          break;
+          
+          int vecIdx = i / 4;
+          int compIdx = i % 4;
+          float typeVal = UIRectTypes[vecIdx][compIdx];
+          
+          if (typeVal > 1.5) {
+              rectType = 2; // ActionDetail takes highest precedence
+          } else if (typeVal > 0.5 && rectType < 2) {
+              rectType = 1; // MJI
+          }
       }
   }
   
@@ -636,9 +656,23 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float4 bbColor = BackBufferTexture.Sample(VideoSampler, screenUV);
       
       if (color.a > 0.5) {
-          // As per the user's explicit request: stop trying to be clever and cut away
-          // the UI. Just purely blend the backbuffer over the TV using its native alpha mask.
-          color.rgb = color.rgb * saturate(1.0 - bbAlpha) + bbColor.rgb * bbAlpha;
+          if (rectType == 2) {
+              // ActionDetail: ultra aggressive threshold, only 255 cuts the TV
+              float threshold = 254.0 / 255.0;
+              float isPureWhite = smoothstep(threshold - 0.02, 1.0, bbAlpha);
+              float3 blendedBlack = color.rgb * saturate(1.0 - bbAlpha);
+              color.rgb = blendedBlack + (bbColor.rgb * bbAlpha * isPureWhite);
+          } else if (rectType == 1) {
+              // MJI: threshold 152
+              float threshold = 152.0 / 255.0;
+              float isPureWhite = smoothstep(threshold - 0.02, threshold, bbAlpha);
+              
+              float3 blendedBlack = color.rgb * saturate(1.0 - bbAlpha);
+              color.rgb = blendedBlack + (bbColor.rgb * bbAlpha * isPureWhite);
+          } else {
+              // For all other UI (standard game UI), use the pure standard alpha blend
+              color.rgb = color.rgb * saturate(1.0 - bbAlpha) + bbColor.rgb * bbAlpha;
+          }
       }
   }
   
@@ -823,6 +857,15 @@ float4 PS(VS_OUT input) : SV_TARGET {
             uiConsts.UIRects[i * 4 + 1] = r.Y;
             uiConsts.UIRects[i * 4 + 2] = r.W;
             uiConsts.UIRects[i * 4 + 3] = r.H;
+            
+            // Flag addons so the shader treats them differently: 1 = MJI, 2 = _ActionContents, 0 = Standard
+            if (r.Name != null && r.Name.StartsWith("_ActionContents")) {
+                uiConsts.UIRectTypes[i] = 2.0f;
+            } else if (r.Name != null && r.Name.StartsWith("MJI")) {
+                uiConsts.UIRectTypes[i] = 1.0f;
+            } else {
+                uiConsts.UIRectTypes[i] = 0.0f;
+            }
         }
         _context.UpdateSubresource(uiConsts, _uiRectBuffer);
 

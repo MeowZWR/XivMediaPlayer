@@ -44,6 +44,7 @@ namespace XivMediaPlayer {
     public bool OnlySafeDomainsPublicScreens { get => _onlySafeDomainsPublicScreens; set => _onlySafeDomainsPublicScreens = value; }
     public bool SpatialAudioEnabled { get => _spatialAudioEnabled; set => _spatialAudioEnabled = value; }
     public bool ShowOutdoorGridDebug { get; set; } = false;
+    public float UIBlendThreshold { get; set; } = 0.90f;
 
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;
