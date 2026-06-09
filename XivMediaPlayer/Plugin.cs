@@ -348,7 +348,13 @@ namespace XivMediaPlayer
                 }
             }
 
-            _playerObject?.Update();
+            if (!_clientState.IsLoggedIn) return;
+
+            var localPlayerObj = GetLocalPlayer();
+            if (localPlayerObj != null) {
+                _playerObject?.Update(localPlayerObj);
+            }
+            
             _playerCamera?.Update();
             
             if (_worldRenderer?.Transform.Enabled == true && _tvAudioObject != null) {
@@ -593,7 +599,7 @@ namespace XivMediaPlayer
             }
 
             _pluginLog.Info("[Media Player] Initializing media manager...");
-            _playerObject = new MediaGameObject(localPlayer);
+            _playerObject = new MediaGameObject(localPlayer.Name.TextValue, localPlayer.Position);
             _tvAudioObject = new MediaGameObject("TV", System.Numerics.Vector3.Zero);
             _camera = CameraManager.Instance()->GetActiveCamera();
             _playerCamera = new MediaCameraObject(_camera);

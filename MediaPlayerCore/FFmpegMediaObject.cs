@@ -51,11 +51,13 @@ namespace MediaPlayerCore
             }
         }
 
-        private int _width = 1280;
-        private int _height = 720;
+        private int _width = 1920;
+        private int _height = 1080;
         private int _bytesPerPixel = 4;
         private int _frameSize;
         private Thread _readerThread;
+        private System.Net.Sockets.TcpListener _audioTcpListener;
+        private System.Net.Sockets.TcpListener _videoTcpListener;
 
         public event EventHandler<string> PlaybackStopped;
         public event EventHandler<MediaError> OnErrorReceived;
@@ -106,16 +108,21 @@ namespace MediaPlayerCore
 
                     Task.Run(() =>
                     {
-                        // Generate random local UDP port for audio
-                        var udpClient = new System.Net.Sockets.UdpClient(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
-                        int audioPort = ((System.Net.IPEndPoint)udpClient.Client.LocalEndPoint).Port;
+                        // Generate local TCP ports for video and audio
+                        _audioTcpListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+                        _audioTcpListener.Start();
+                        int audioPort = ((System.Net.IPEndPoint)_audioTcpListener.LocalEndpoint).Port;
+
+                        _videoTcpListener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+                        _videoTcpListener.Start();
+                        int videoPort = ((System.Net.IPEndPoint)_videoTcpListener.LocalEndpoint).Port;
 
                         _ffmpegProcess = new Process();
                         _ffmpegProcess.StartInfo.FileName = _ffmpegPath;
-                        // Single process decoding both video to stdout and audio to UDP
-                        _ffmpegProcess.StartInfo.Arguments = $"-hwaccel auto -rtsp_transport tcp -use_wallclock_as_timestamps 1 -fflags nobuffer -flags low_delay -i \"{url}\" -map 0:v -vf scale={_width}:{_height} -sws_flags fast_bilinear -f rawvideo -pix_fmt bgra pipe:1 -map 0:a? -f s16le -ac 1 -ar 48000 udp://127.0.0.1:{audioPort}";
+                        // Single process decoding both video and audio over TCP to enforce synchronous backpressure
+                        _ffmpegProcess.StartInfo.Arguments = $"-hwaccel auto -rtsp_transport tcp -fflags nobuffer -flags low_delay -i \"{url}\" -map 0:v -r 60 -f rawvideo -pix_fmt bgra tcp://127.0.0.1:{videoPort} -map 0:a? -f s16le -ac 1 -ar 48000 tcp://127.0.0.1:{audioPort}";
                         _ffmpegProcess.StartInfo.UseShellExecute = false;
-                        _ffmpegProcess.StartInfo.RedirectStandardOutput = true;
+                        _ffmpegProcess.StartInfo.RedirectStandardOutput = false;
                         _ffmpegProcess.StartInfo.RedirectStandardError = true;
                         _ffmpegProcess.StartInfo.CreateNoWindow = true;
 
@@ -142,27 +149,62 @@ namespace MediaPlayerCore
                         _ffmpegProcess.Start();
                         _ffmpegProcess.BeginErrorReadLine();
 
-                        _readerThread = new Thread(ReadFrames);
-                        _readerThread.IsBackground = true;
-                        _readerThread.Start();
-
-                        Task.Run(async () => {
+                        Task.Run(() => {
                             try {
+                                using var videoClient = _videoTcpListener.AcceptTcpClient();
+                                _videoTcpListener.Stop();
+                                videoClient.ReceiveBufferSize = 8388608; // 8 MB buffer to prevent blocking
+                                var stream = videoClient.GetStream();
+                                byte[] buffer = new byte[_frameSize];
+
+                                while (!_disposed && !_ffmpegProcess.HasExited)
+                                {
+                                    int bytesRead = 0;
+                                    while (bytesRead < _frameSize && !_disposed)
+                                    {
+                                        int read = stream.Read(buffer, bytesRead, _frameSize - bytesRead);
+                                        if (read == 0) break;
+                                        bytesRead += read;
+                                    }
+
+                                    if (bytesRead == _frameSize && !_disposed)
+                                    {
+                                        lock (_parent.FrameLock)
+                                        {
+                                            if (_parent.LastFrame.Length != _frameSize)
+                                                _parent.LastFrame = new byte[_frameSize];
+                                            Buffer.BlockCopy(buffer, 0, _parent.LastFrame, 0, _frameSize);
+                                            _parent.LastFrameWidth = _width;
+                                            _parent.LastFrameHeight = _height;
+                                            _parent.LastFrameCount++;
+                                        }
+                                    }
+                                    else break;
+                                }
+                            } catch { }
+                        });
+
+                        Task.Run(() => {
+                            try {
+                                using var audioClient = _audioTcpListener.AcceptTcpClient();
+                                _audioTcpListener.Stop();
+                                var stream = audioClient.GetStream();
+                                byte[] buffer = new byte[8192];
+
                                 bool startedPlaying = false;
-                                while (!_disposed) {
-                                    var result = await udpClient.ReceiveAsync();
-                                    if (result.Buffer.Length > 0 && !_disposed) {
-                                        _bufferedWaveProvider.AddSamples(result.Buffer, 0, result.Buffer.Length);
+                                while (!_disposed && !_ffmpegProcess.HasExited) {
+                                    int read = stream.Read(buffer, 0, buffer.Length);
+                                    if (read > 0 && !_disposed) {
+                                        _bufferedWaveProvider.AddSamples(buffer, 0, read);
                                         if (!startedPlaying && _bufferedWaveProvider.BufferedDuration.TotalMilliseconds > 50) {
                                             _waveOut.Play();
                                             startedPlaying = true;
                                         }
+                                    } else if (read == 0) {
+                                        break;
                                     }
                                 }
                             } catch { }
-                            finally {
-                                try { udpClient.Dispose(); } catch { }
-                            }
                         });
                     });
                 }
@@ -173,53 +215,6 @@ namespace MediaPlayerCore
             }
         }
 
-        private void ReadFrames()
-        {
-            try
-            {
-                using (var stream = _ffmpegProcess.StandardOutput.BaseStream)
-                {
-                    byte[] buffer = new byte[_frameSize];
-                    while (!_disposed && !_ffmpegProcess.HasExited)
-                    {
-                        int bytesRead = 0;
-                        while (bytesRead < _frameSize && !_disposed)
-                        {
-                            int read = stream.Read(buffer, bytesRead, _frameSize - bytesRead);
-                            if (read == 0) break;
-                            bytesRead += read;
-                        }
-
-                        if (bytesRead == _frameSize && !_disposed)
-                        {
-                            lock (_parent.FrameLock)
-                            {
-                                if (_parent.LastFrame.Length != _frameSize)
-                                {
-                                    _parent.LastFrame = new byte[_frameSize];
-                                }
-                                Buffer.BlockCopy(buffer, 0, _parent.LastFrame, 0, _frameSize);
-                                _parent.LastFrameWidth = _width;
-                                _parent.LastFrameHeight = _height;
-                                _parent.LastFrameCount++;
-                            }
-                        }
-                        else
-                        {
-                            break; // EOF or stopped
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[FFmpegMediaObject] Stream read error: {ex.Message}");
-            }
-            finally
-            {
-                Stop();
-            }
-        }
 
         public void Stop()
         {
@@ -230,6 +225,17 @@ namespace MediaPlayerCore
             }
 
             PlaybackStopped?.Invoke(this, "OK");
+
+            try {
+                if (_audioTcpListener != null) {
+                    _audioTcpListener.Stop();
+                    _audioTcpListener = null;
+                }
+                if (_videoTcpListener != null) {
+                    _videoTcpListener.Stop();
+                    _videoTcpListener = null;
+                }
+            } catch { }
 
             try
             {

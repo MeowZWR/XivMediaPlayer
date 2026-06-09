@@ -38,9 +38,9 @@ namespace XivMediaPlayer.Windows {
                 ArraySize = 1,
                 Format = Format.B8G8R8A8_UNorm,
                 SampleDescription = new SampleDescription(1, 0),
-                Usage = ResourceUsage.Default,
+                Usage = ResourceUsage.Dynamic,
                 BindFlags = BindFlags.ShaderResource,
-                CPUAccessFlags = CpuAccessFlags.None,
+                CPUAccessFlags = CpuAccessFlags.Write,
                 MiscFlags = ResourceOptionFlags.None
             };
             
@@ -52,8 +52,24 @@ namespace XivMediaPlayer.Windows {
             if (_disposed || _context == null || _texture == null || rawData == null) return;
             
             unsafe {
-                fixed (byte* ptr = rawData) {
-                    _context.UpdateSubresource(_texture, 0, null, (IntPtr)ptr, width * 4, width * height * 4);
+                var mapped = _context.Map(_texture, 0, MapMode.WriteDiscard, Vortice.Direct3D11.MapFlags.None);
+                if (mapped.DataPointer != IntPtr.Zero) {
+                    fixed (byte* ptr = rawData) {
+                        // If the row pitch matches exactly, we can do one fast copy
+                        if (mapped.RowPitch == width * 4) {
+                            System.Buffer.MemoryCopy(ptr, (void*)mapped.DataPointer, rawData.Length, rawData.Length);
+                        } else {
+                            // Copy row by row
+                            for (int y = 0; y < height; y++) {
+                                System.Buffer.MemoryCopy(
+                                    ptr + (y * width * 4), 
+                                    (byte*)mapped.DataPointer.ToPointer() + (y * mapped.RowPitch), 
+                                    width * 4, 
+                                    width * 4);
+                            }
+                        }
+                    }
+                    _context.Unmap(_texture, 0);
                 }
             }
         }

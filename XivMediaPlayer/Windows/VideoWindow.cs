@@ -62,14 +62,21 @@ namespace XivMediaPlayer.Windows {
     /// Called every frame from Plugin.OnDraw(), regardless of window visibility,
     /// so the world renderer can get fresh frames even when the ImGui window is closed.
     /// </summary>
-    public void UpdateFrame() {
+        private byte[] _localFrameBuffer = Array.Empty<byte>();
+
+        public void UpdateFrame() {
       if (_disposed || _mediaManager == null) return;
 
       try {
+        bool needsUpdate = false;
+        ulong frameCount = 0;
+        int frameWidth = 0;
+        int frameHeight = 0;
+
         lock (_mediaManager.FrameLock) {
-          ulong frameCount = _mediaManager.LastFrameCount;
-          int frameWidth = _mediaManager.LastFrameWidth;
-          int frameHeight = _mediaManager.LastFrameHeight;
+          frameCount = _mediaManager.LastFrameCount;
+          frameWidth = _mediaManager.LastFrameWidth;
+          frameHeight = _mediaManager.LastFrameHeight;
 
           if (frameWidth == 0 || frameHeight == 0 || _mediaManager.LastFrame == null || _mediaManager.LastFrame.Length == 0) {
             if (wasStreaming) {
@@ -93,16 +100,24 @@ namespace XivMediaPlayer.Windows {
           }
 
           if (_lastLoadedFrameCount != frameCount) {
+             if (_localFrameBuffer.Length != _mediaManager.LastFrame.Length) {
+                 _localFrameBuffer = new byte[_mediaManager.LastFrame.Length];
+             }
+             Buffer.BlockCopy(_mediaManager.LastFrame, 0, _localFrameBuffer, 0, _localFrameBuffer.Length);
+             needsUpdate = true;
+          }
+        }
+
+        if (needsUpdate) {
             lock (_textureLock) {
               if (_disposed) return;
               if (_videoTexture == null || _videoTexture.Width != frameWidth || _videoTexture.Height != frameHeight) {
                 _videoTexture?.Dispose();
                 _videoTexture = new Direct3D11VideoTexture(frameWidth, frameHeight);
               }
-              _videoTexture.Update(_mediaManager.LastFrame, frameWidth, frameHeight);
+              _videoTexture.Update(_localFrameBuffer, frameWidth, frameHeight);
               _lastLoadedFrameCount = frameCount;
             }
-          }
         }
       } catch (Exception e) {
         _pluginLog.Warning(e, e.Message);
