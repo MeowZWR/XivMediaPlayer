@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using XivMediaPlayer.Server.Models;
 using System.Linq;
 using Microsoft.Extensions.Configuration;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace XivMediaPlayer.Server.Controllers
 {
@@ -189,6 +191,19 @@ namespace XivMediaPlayer.Server.Controllers
                 return BadRequest("The provided URL is blacklisted.");
             }
 
+            if (!string.IsNullOrEmpty(state.PlaylistJson))
+            {
+                try
+                {
+                    var playlist = System.Text.Json.JsonSerializer.Deserialize<List<string>>(state.PlaylistJson);
+                    if (playlist != null && playlist.Any(url => IsUrlBlacklisted(url)))
+                    {
+                        return BadRequest("One or more URLs in the queue are blacklisted.");
+                    }
+                }
+                catch { }
+            }
+
             state.LocationKey = locationKey;
             
             // Check if the TV is locked
@@ -335,21 +350,54 @@ namespace XivMediaPlayer.Server.Controllers
             
             var blacklistedDomains = _config.GetSection("MediaBlacklist:Domains").Get<List<string>>() ?? new List<string>();
             var blacklistedUrls = _config.GetSection("MediaBlacklist:Urls").Get<List<string>>() ?? new List<string>();
+            var hashedDomains = _config.GetSection("MediaBlacklist:HashedDomains").Get<List<string>>() ?? new List<string>();
+            var hashedUrls = _config.GetSection("MediaBlacklist:HashedUrls").Get<List<string>>() ?? new List<string>();
 
             if (blacklistedUrls.Contains(url, StringComparer.OrdinalIgnoreCase)) return true;
+            if (hashedUrls.Any())
+            {
+                var urlHash = ComputeSha256Hash(url.ToLowerInvariant());
+                if (hashedUrls.Contains(urlHash, StringComparer.OrdinalIgnoreCase)) return true;
+            }
 
             try
             {
                 var uri = new Uri(url);
-                var host = uri.Host;
+                var host = uri.Host.ToLowerInvariant();
+                
                 if (blacklistedDomains.Any(d => host.Equals(d, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + d, StringComparison.OrdinalIgnoreCase)))
                 {
                     return true;
+                }
+
+                if (hashedDomains.Any())
+                {
+                    var parts = host.Split('.');
+                    for (int i = 0; i < parts.Length - 1; i++) // Need at least domain.tld
+                    {
+                        var domainToTest = string.Join(".", parts.Skip(i));
+                        var domainHash = ComputeSha256Hash(domainToTest);
+                        if (hashedDomains.Contains(domainHash, StringComparer.OrdinalIgnoreCase)) return true;
+                    }
                 }
             }
             catch { }
 
             return false;
+        }
+
+        private string ComputeSha256Hash(string rawData)
+        {
+            using (SHA256 sha256Hash = SHA256.Create())
+            {
+                byte[] bytes = sha256Hash.ComputeHash(Encoding.UTF8.GetBytes(rawData));
+                var builder = new StringBuilder();
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    builder.Append(bytes[i].ToString("x2"));
+                }
+                return builder.ToString();
+            }
         }
     }
 }

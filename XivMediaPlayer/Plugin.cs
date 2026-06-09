@@ -556,6 +556,28 @@ namespace XivMediaPlayer
             }
         }
 
+        private bool IsPlayerAlone()
+        {
+            try
+            {
+                int playerCount = 0;
+                foreach (var obj in _objectTable)
+                {
+                    if (obj is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter)
+                    {
+                        playerCount++;
+                        if (playerCount > 1) return false;
+                    }
+                }
+                return true; // only the local player
+            }
+            catch (Exception ex)
+            {
+                _pluginLog.Error(ex, "Failed to check if player is alone");
+                return false; // assume not alone to be safe
+            }
+        }
+
         private unsafe void InitializeMediaManager()
         {
             var localPlayer = GetLocalPlayer();
@@ -1492,6 +1514,18 @@ namespace XivMediaPlayer
                     _currentMediaOwnerId = "";
                     _chat.PrintError("[Media Player] Cannot share media: The TV in this room is locked by its owner.");
                     await FetchMediaFromServerAsync();
+                }
+                catch (HttpRequestException ex)
+                {
+                    if (IsPlayerAlone())
+                    {
+                        _chat.Print($"[Media Player] {ex.Message} (Playing locally only since you are alone).");
+                    }
+                    else
+                    {
+                        _chat.PrintError($"[Media Player] {ex.Message} Cannot share video because others are around.");
+                        await FetchMediaFromServerAsync();
+                    }
                 }
                 catch (Exception ex)
                 {
