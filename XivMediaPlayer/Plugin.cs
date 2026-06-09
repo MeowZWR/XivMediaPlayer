@@ -1282,7 +1282,14 @@ namespace XivMediaPlayer
                 _config.Save();
             }
 
-            PlayNext();
+            if (_mediaQueue.Count == 0 || e == "Emulation")
+            {
+                ResetStreamValues();
+            }
+            else
+            {
+                PlayNext();
+            }
         }
 
         private unsafe void ResetStreamValues()

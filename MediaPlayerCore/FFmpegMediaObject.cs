@@ -95,7 +95,7 @@ namespace MediaPlayerCore
 
                 try
                 {
-                    Stop();
+                    Stop(true);
                     _disposed = false;
 
                     lock (_parent.FrameLock)
@@ -151,6 +151,10 @@ namespace MediaPlayerCore
 
                         Task.Run(() => {
                             try {
+                                while (!_videoTcpListener.Pending()) {
+                                    if (_disposed || (_ffmpegProcess != null && _ffmpegProcess.HasExited)) return;
+                                    Thread.Sleep(10);
+                                }
                                 using var videoClient = _videoTcpListener.AcceptTcpClient();
                                 _videoTcpListener.Stop();
                                 videoClient.ReceiveBufferSize = 8388608; // 8 MB buffer to prevent blocking
@@ -189,6 +193,10 @@ namespace MediaPlayerCore
 
                         Task.Run(() => {
                             try {
+                                while (!_audioTcpListener.Pending()) {
+                                    if (_disposed || (_ffmpegProcess != null && _ffmpegProcess.HasExited)) return;
+                                    Thread.Sleep(10);
+                                }
                                 using var audioClient = _audioTcpListener.AcceptTcpClient();
                                 _audioTcpListener.Stop();
                                 var stream = audioClient.GetStream();
@@ -198,6 +206,11 @@ namespace MediaPlayerCore
                                 while (!_disposed && !_ffmpegProcess.HasExited) {
                                     int read = stream.Read(buffer, 0, buffer.Length);
                                     if (read > 0 && !_disposed) {
+                                        // If the audio buffer has grown too large (desync), clear it to snap back to live
+                                        if (_bufferedWaveProvider.BufferedDuration.TotalMilliseconds > 150) {
+                                            _bufferedWaveProvider.ClearBuffer();
+                                        }
+
                                         _bufferedWaveProvider.AddSamples(buffer, 0, read);
                                         if (!startedPlaying && _bufferedWaveProvider.BufferedDuration.TotalMilliseconds > 50) {
                                             _waveOut.Play();
@@ -219,7 +232,7 @@ namespace MediaPlayerCore
         }
 
 
-        public void Stop()
+        public void Stop(bool silent = false)
         {
             lock (_disposeLock)
             {
@@ -227,7 +240,10 @@ namespace MediaPlayerCore
                 _disposed = true;
             }
 
-            PlaybackStopped?.Invoke(this, "OK");
+            if (!silent)
+            {
+                PlaybackStopped?.Invoke(this, "OK");
+            }
 
             try {
                 if (_audioTcpListener != null) {
