@@ -2203,9 +2203,10 @@ namespace XivMediaPlayer
                         // Pass native mouse state to Emulation Server if active
                         SendEmulationMouseState(uv.X, uv.Y, isLeftMousePressed, isRightMousePressed);
 
-
-                        if (isMouseReleased)
+                        if (_currentStreamer != "Emulation" && _currentStreamer != "Camera")
                         {
+                            if (isMouseReleased)
+                            {
                             // Handle Volume Slider Drag
                             if (uv.Y > 0.95f && uv.Y < 0.97f && uv.X > 0.28f && uv.X < 0.58f)
                             {
@@ -2434,6 +2435,7 @@ namespace XivMediaPlayer
                                 }
                             }
                         }
+                        }
                     }
 
                     // Update dynamic 3D text texture
@@ -2455,6 +2457,10 @@ namespace XivMediaPlayer
                     IntPtr srvPtr = _isHistoryMenuOpen 
                         ? (_historyMenuTextureManager?.TextureHandle ?? IntPtr.Zero) 
                         : (_titleTextureManager?.TextureHandle ?? IntPtr.Zero);
+
+                    if (_currentStreamer == "Emulation") {
+                        srvPtr = IntPtr.Zero;
+                    }
 
                     _worldRenderer.UIBlendThreshold = _config.UIBlendThreshold;
                     _worldRenderer.Render(videoSrv, videoWidth, videoHeight, _depthCapture, cameraPos, cameraForward, cameraRight, cameraUp, fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver);

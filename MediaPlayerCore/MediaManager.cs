@@ -84,6 +84,7 @@ namespace MediaPlayerCore {
 
                 _ffmpegStream = new FFmpegMediaObject(this, ffmpegPath);
                 _ffmpegStream.OnErrorReceived += MediaManager_OnErrorReceived;
+                _ffmpegStream.PlaybackStopped += FFmpegStream_PlaybackStopped;
                 _ffmpegStream.Play(url, characterObject, spatialAllowed);
             } catch (Exception e) {
                 OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
@@ -91,8 +92,14 @@ namespace MediaPlayerCore {
         });
     }
 
+    private void FFmpegStream_PlaybackStopped(object? sender, string e) {
+        OnPlaybackFinished?.Invoke(this, "Emulation");
+    }
+
     private void StopFFmpegStream() {
         if (_ffmpegStream != null) {
+            _ffmpegStream.OnErrorReceived -= MediaManager_OnErrorReceived;
+            _ffmpegStream.PlaybackStopped -= FFmpegStream_PlaybackStopped;
             try { _ffmpegStream.Dispose(); } catch { }
             _ffmpegStream = null;
         }

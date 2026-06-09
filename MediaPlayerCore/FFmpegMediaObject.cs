@@ -182,6 +182,9 @@ namespace MediaPlayerCore
                                     else break;
                                 }
                             } catch { }
+                            finally {
+                                Stop();
+                            }
                         });
 
                         Task.Run(() => {
