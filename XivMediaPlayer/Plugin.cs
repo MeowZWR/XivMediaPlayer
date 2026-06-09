@@ -1522,6 +1522,9 @@ namespace XivMediaPlayer
                 }
                 catch (ArgumentException ex)
                 {
+                    _isLocalDj = false; // Strip DJ status so background sync stops spamming the server
+                    _currentMediaOwnerId = "";
+
                     if (IsPlayerAlone())
                     {
                         _chat.Print($"[Media Player] {ex.Message} (Playing locally only since you are alone).");
@@ -1806,13 +1809,18 @@ namespace XivMediaPlayer
         {
             _mediaErrorCount++;
             _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred! Error count: {_mediaErrorCount}");
-            if (_mediaErrorCount < 3)
+            if (_mediaErrorCount < 5)
             {
                 _refreshQueued = true;
             }
-            else
+            else if (_mediaErrorCount == 5)
             {
                 _chat.PrintError("[Media Player] Failed to play media after multiple attempts.");
+                EnqueueFrameworkAction(() =>
+                {
+                    _mediaManager?.StopStream();
+                    ResetStreamValues();
+                });
             }
         }
 
