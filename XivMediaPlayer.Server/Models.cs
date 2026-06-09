@@ -54,10 +54,21 @@ namespace XivMediaPlayer.Server.Models
         public double? DurationMs { get; set; } = null;
     }
 
+    public class MediaTrackRecord
+    {
+        public int Id { get; set; }
+        public string Url { get; set; } = string.Empty;
+        public string Domain { get; set; } = string.Empty;
+        public string LocationKey { get; set; } = string.Empty;
+        public string OwnerId { get; set; } = string.Empty;
+        public DateTime PlayedAtUtc { get; set; } = DateTime.UtcNow;
+    }
+
     public class AppDbContext : Microsoft.EntityFrameworkCore.DbContext
     {
         public Microsoft.EntityFrameworkCore.DbSet<TvPlacement> TvPlacements { get; set; } = null!;
         public Microsoft.EntityFrameworkCore.DbSet<RoomMediaStateSync> RoomMediaStates { get; set; } = null!;
+        public Microsoft.EntityFrameworkCore.DbSet<MediaTrackRecord> MediaTrackRecords { get; set; } = null!;
 
         public AppDbContext(Microsoft.EntityFrameworkCore.DbContextOptions<AppDbContext> options) : base(options) { }
 
@@ -68,6 +79,9 @@ namespace XivMediaPlayer.Server.Models
 
             modelBuilder.Entity<RoomMediaStateSync>()
                 .HasKey(m => m.LocationKey);
+
+            modelBuilder.Entity<MediaTrackRecord>()
+                .HasKey(r => r.Id);
         }
     }
 }
