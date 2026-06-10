@@ -329,6 +329,9 @@ namespace XivMediaPlayer
                     RestoreMediaForCurrentLocation();
                 });
             });
+
+            // Start proxy server for stream routing
+            MediaPlayerCore.StreamProxy.Instance.Start();
         }
 
         #region Framework / Initialization
