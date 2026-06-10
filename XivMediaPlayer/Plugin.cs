@@ -3022,12 +3022,8 @@ namespace XivMediaPlayer
             var activeStream = _mediaManager?.ActiveStream;
             int currentTimeMs = activeStream != null ? (int)activeStream.Time : 0;
             
-            // If the stream has crashed multiple times, the server might not support HTTP Range requests (seeking).
-            // Drop the start time requirement to see if it can at least play from the beginning.
-            if (_mediaErrorCount >= 2)
-            {
-                currentTimeMs = 0;
-            }
+            // Removed the old fallback that dropped currentTimeMs to 0 on multiple errors.
+            // StreamProxy now guarantees Range support, so we should always attempt to resume from the exact crash/seek point.
 
             _chat.Print("[Media Player] Refreshing media...");
             _mediaManager?.StopStream();
