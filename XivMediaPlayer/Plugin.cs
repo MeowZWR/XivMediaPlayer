@@ -1938,9 +1938,18 @@ namespace XivMediaPlayer
         }
 
         private int _mediaErrorCount = 0;
+        private DateTime _lastMediaErrorTime = DateTime.MinValue;
 
         private void OnMediaError(object? sender, MediaError e)
         {
+            if ((DateTime.UtcNow - _lastMediaErrorTime).TotalMilliseconds < 500)
+            {
+                // Group errors that occur within 500ms into a single "error event"
+                _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred! (grouped)");
+                return;
+            }
+
+            _lastMediaErrorTime = DateTime.UtcNow;
             _mediaErrorCount++;
             _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred! Error count: {_mediaErrorCount}");
             if (_mediaErrorCount < 5)
