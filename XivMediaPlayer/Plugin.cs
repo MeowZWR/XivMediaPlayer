@@ -1943,9 +1943,9 @@ namespace XivMediaPlayer
         private void OnMediaError(object? sender, MediaError e)
         {
             string errorMsg = e.Exception?.Message ?? string.Empty;
-            if (errorMsg.Contains("failed to set on top", StringComparison.OrdinalIgnoreCase))
+            if (!errorMsg.Contains("demux", StringComparison.OrdinalIgnoreCase))
             {
-                return; // Benign VLC error related to windowless rendering
+                return;
             }
 
             if ((DateTime.UtcNow - _lastMediaErrorTime).TotalMilliseconds < 500)
@@ -3027,9 +3027,6 @@ namespace XivMediaPlayer
 
             var activeStream = _mediaManager?.ActiveStream;
             int currentTimeMs = activeStream != null ? (int)activeStream.Time : 0;
-            
-            // Removed the old fallback that dropped currentTimeMs to 0 on multiple errors.
-            // StreamProxy now guarantees Range support, so we should always attempt to resume from the exact crash/seek point.
 
             _chat.Print("[Media Player] Refreshing media...");
             _mediaManager?.StopStream();
