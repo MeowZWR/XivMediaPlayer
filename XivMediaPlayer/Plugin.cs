@@ -1088,10 +1088,17 @@ namespace XivMediaPlayer
                     catch (Exception resolveEx)
                     {
                         _pluginLog.Warning(resolveEx, "[yt-dlp] Failed to resolve stream URL.");
-                        if (resolveEx.ToString().Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                        string errorStr = resolveEx.ToString();
+                        
+                        if (errorStr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
                         {
                             EnqueueFrameworkAction(() => _chat.PrintError("[Media Player] YouTube blocked the request (bot check). Please configure cookies via VRCVideoCacher or cookies.txt to play YouTube videos!"));
                             return;
+                        }
+                        
+                        if (errorStr.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase) || errorStr.Contains("HTTP Error 403", StringComparison.OrdinalIgnoreCase))
+                        {
+                            MediaPlayerCore.YtDlp.YtDlpManager.MarkUrlAsFailed(url);
                         }
                     }
 
@@ -1103,10 +1110,17 @@ namespace XivMediaPlayer
                     catch (Exception metadataEx)
                     {
                         _pluginLog.Warning(metadataEx, "[yt-dlp] Failed to get metadata.");
-                        if (metadataEx.ToString().Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+                        string errorStr = metadataEx.ToString();
+                        
+                        if (errorStr.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
                         {
                             EnqueueFrameworkAction(() => _chat.PrintError("[Media Player] YouTube blocked the request (bot check). Please configure cookies via VRCVideoCacher or cookies.txt to play YouTube videos!"));
                             return;
+                        }
+                        
+                        if (errorStr.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase) || errorStr.Contains("HTTP Error 403", StringComparison.OrdinalIgnoreCase))
+                        {
+                            MediaPlayerCore.YtDlp.YtDlpManager.MarkUrlAsFailed(url);
                         }
                     }
 

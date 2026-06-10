@@ -307,6 +307,20 @@ namespace MediaPlayerCore.YtDlp
             return Array.Empty<string>();
         }
 
+        private static readonly System.Collections.Generic.HashSet<string> _knownFailedUrls = new();
+
+        /// <summary>
+        /// Marks a URL as known to fail with yt-dlp (e.g. 403 or Unsupported).
+        /// </summary>
+        public static void MarkUrlAsFailed(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return;
+            lock (_knownFailedUrls)
+            {
+                _knownFailedUrls.Add(url);
+            }
+        }
+
         /// <summary>
         /// Checks if the given URL is likely supported by yt-dlp
         /// (not a raw stream or local file).
@@ -314,6 +328,12 @@ namespace MediaPlayerCore.YtDlp
         public static bool IsUrlSupported(string url)
         {
             if (string.IsNullOrWhiteSpace(url)) return false;
+            
+            lock (_knownFailedUrls)
+            {
+                if (_knownFailedUrls.Contains(url)) return false;
+            }
+
             // Don't try yt-dlp on raw streams or local files
             if (url.StartsWith("rtmp://", StringComparison.OrdinalIgnoreCase)) return false;
             if (url.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase)) return false;
