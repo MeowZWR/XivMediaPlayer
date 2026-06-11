@@ -130,6 +130,12 @@ namespace XivMediaPlayer.Networking
                     throw new InvalidOperationException("You are no longer the media owner.");
                 }
 
+                if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                {
+                    var errorMsg = await response.Content.ReadAsStringAsync();
+                    throw new ArgumentException(errorMsg);
+                }
+
                 if (response.IsSuccessStatusCode)
                 {
                     return await response.Content.ReadFromJsonAsync<RoomMediaStateSync>();

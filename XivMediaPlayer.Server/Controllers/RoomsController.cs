@@ -1,6 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using XivMediaPlayer.Server.Models;
+using System.Linq;
+using Microsoft.Extensions.Configuration;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace XivMediaPlayer.Server.Controllers
 {
@@ -10,12 +14,14 @@ namespace XivMediaPlayer.Server.Controllers
     {
         private readonly AppDbContext _db;
         private readonly ILogger<RoomsController> _logger;
+        private readonly IConfiguration _config;
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _lastFetchTimes = new();
 
-        public RoomsController(AppDbContext db, ILogger<RoomsController> logger)
+        public RoomsController(AppDbContext db, ILogger<RoomsController> logger, IConfiguration config)
         {
             _db = db;
             _logger = logger;
+            _config = config;
         }
 
         [HttpGet("{locationKey}/tvs")]
@@ -126,18 +132,42 @@ namespace XivMediaPlayer.Server.Controllers
                 var playlist = System.Text.Json.JsonSerializer.Deserialize<List<string>>(state.PlaylistJson);
                 if (playlist != null && playlist.Count > 0)
                 {
-                    state.CurrentUrl = playlist[0];
-                    playlist.RemoveAt(0);
-                    state.PlaylistJson = System.Text.Json.JsonSerializer.Serialize(playlist);
-                    
-                    // Reset timings for the new video
-                    state.TimecodeMs = 0;
-                    state.TimestampUtc = DateTime.UtcNow;
-                    state.DataAgeMs = 0;
-                    state.DurationMs = null; // We don't know the duration of the new video yet!
-                    
-                    _db.RoomMediaStates.Update(state);
-                    await _db.SaveChangesAsync();
+                    string nextUrl = null;
+                    while (playlist.Count > 0)
+                    {
+                        var candidate = playlist[0];
+                        playlist.RemoveAt(0);
+                        if (!IsUrlBlacklisted(candidate))
+                        {
+                            nextUrl = candidate;
+                            break;
+                        }
+                    }
+
+                    if (nextUrl != null)
+                    {
+                        state.CurrentUrl = nextUrl;
+                        state.PlaylistJson = System.Text.Json.JsonSerializer.Serialize(playlist);
+                        
+                        // Reset timings for the new video
+                        state.TimecodeMs = 0;
+                        state.TimestampUtc = DateTime.UtcNow;
+                        state.DataAgeMs = 0;
+                        state.DurationMs = null; // We don't know the duration of the new video yet!
+                        
+                        _db.RoomMediaStates.Update(state);
+                        await RecordMediaPlay(state.CurrentUrl, locationKey, state.OwnerId);
+                        await _db.SaveChangesAsync();
+                    }
+                    else
+                    {
+                        // No valid queue left, stop playing
+                        state.IsPlaying = false;
+                        state.TimecodeMs = (long)state.DurationMs.Value;
+                        
+                        _db.RoomMediaStates.Update(state);
+                        await _db.SaveChangesAsync();
+                    }
                 }
                 else
                 {
@@ -156,6 +186,24 @@ namespace XivMediaPlayer.Server.Controllers
         [HttpPost("{locationKey}/media")]
         public async Task<IActionResult> UpdateMediaState(string locationKey, [FromBody] RoomMediaStateSync state)
         {
+            if (IsUrlBlacklisted(state.CurrentUrl))
+            {
+                return BadRequest("The provided URL is blacklisted.");
+            }
+
+            if (!string.IsNullOrEmpty(state.PlaylistJson))
+            {
+                try
+                {
+                    var playlist = System.Text.Json.JsonSerializer.Deserialize<List<string>>(state.PlaylistJson);
+                    if (playlist != null && playlist.Any(url => IsUrlBlacklisted(url)))
+                    {
+                        return BadRequest("One or more URLs in the queue are blacklisted.");
+                    }
+                }
+                catch { }
+            }
+
             state.LocationKey = locationKey;
             
             // Check if the TV is locked
@@ -169,12 +217,18 @@ namespace XivMediaPlayer.Server.Controllers
             state.TimestampUtc = DateTime.UtcNow;
 
             var existing = await _db.RoomMediaStates.FindAsync(locationKey);
+            bool isNewPlay = false;
             if (existing != null)
             {
                 if (state.IsBackgroundSync && existing.OwnerId != state.OwnerId)
                 {
                     // Stale background push from a deposed DJ!
                     return Conflict();
+                }
+
+                if (existing.CurrentUrl != state.CurrentUrl && !string.IsNullOrEmpty(state.CurrentUrl))
+                {
+                    isNewPlay = true;
                 }
 
                 existing.CurrentUrl = state.CurrentUrl;
@@ -188,7 +242,16 @@ namespace XivMediaPlayer.Server.Controllers
             }
             else
             {
+                if (!string.IsNullOrEmpty(state.CurrentUrl))
+                {
+                    isNewPlay = true;
+                }
                 _db.RoomMediaStates.Add(state);
+            }
+
+            if (isNewPlay)
+            {
+                await RecordMediaPlay(state.CurrentUrl, locationKey, state.OwnerId);
             }
 
             await _db.SaveChangesAsync();
@@ -225,6 +288,116 @@ namespace XivMediaPlayer.Server.Controllers
                 _lastFetchTimes[state.LocationKey] = DateTime.UtcNow;
             }
             return Ok(states);
+        }
+
+        [HttpGet("media/history")]
+        public async Task<IActionResult> GetMediaHistory([FromQuery] int limit = 100)
+        {
+            var history = await _db.MediaTrackRecords
+                .OrderByDescending(r => r.PlayedAtUtc)
+                .Take(limit)
+                .ToListAsync();
+            return Ok(history);
+        }
+
+        [HttpGet("media/stats")]
+        public async Task<IActionResult> GetMediaStats([FromQuery] int limit = 10)
+        {
+            var topUrls = await _db.MediaTrackRecords
+                .GroupBy(r => r.Url)
+                .Select(g => new { Url = g.Key, Count = g.Count(), LastPlayed = g.Max(r => r.PlayedAtUtc) })
+                .OrderByDescending(x => x.Count)
+                .Take(limit)
+                .ToListAsync();
+
+            var topDomains = await _db.MediaTrackRecords
+                .GroupBy(r => r.Domain)
+                .Select(g => new { Domain = g.Key, Count = g.Count(), LastPlayed = g.Max(r => r.PlayedAtUtc) })
+                .OrderByDescending(x => x.Count)
+                .Take(limit)
+                .ToListAsync();
+
+            return Ok(new { TopUrls = topUrls, TopDomains = topDomains });
+        }
+
+        private async Task RecordMediaPlay(string url, string locationKey, string ownerId)
+        {
+            if (string.IsNullOrEmpty(url)) return;
+
+            string domain = string.Empty;
+            try
+            {
+                var uri = new Uri(url);
+                domain = uri.Host;
+            }
+            catch { }
+
+            var record = new MediaTrackRecord
+            {
+                Url = url,
+                Domain = domain,
+                LocationKey = locationKey,
+                OwnerId = ownerId,
+                PlayedAtUtc = DateTime.UtcNow
+            };
+
+            _db.MediaTrackRecords.Add(record);
+        }
+
+        private bool IsUrlBlacklisted(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            
+            var blacklistedDomains = _config.GetSection("MediaBlacklist:Domains").Get<List<string>>() ?? new List<string>();
+            var blacklistedUrls = _config.GetSection("MediaBlacklist:Urls").Get<List<string>>() ?? new List<string>();
+            var hashedDomains = _config.GetSection("MediaBlacklist:HashedDomains").Get<List<string>>() ?? new List<string>();
+            var hashedUrls = _config.GetSection("MediaBlacklist:HashedUrls").Get<List<string>>() ?? new List<string>();
+
+            if (blacklistedUrls.Contains(url, StringComparer.OrdinalIgnoreCase)) return true;
+            if (hashedUrls.Any())
+            {
+                var urlHash = ComputeSha256Hash(url.ToLowerInvariant());
+                if (hashedUrls.Contains(urlHash, StringComparer.OrdinalIgnoreCase)) return true;
+            }
+
+            try
+            {
+                var uri = new Uri(url);
+                var host = uri.Host.ToLowerInvariant();
+                
+                if (blacklistedDomains.Any(d => host.Equals(d, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + d, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+
+                if (hashedDomains.Any())
+                {
+                    var parts = host.Split('.');
+                    for (int i = 0; i < parts.Length - 1; i++) // Need at least domain.tld
+                    {
+                        var domainToTest = string.Join(".", parts.Skip(i));
+                        var domainHash = ComputeSha256Hash(domainToTest);
+                        if (hashedDomains.Contains(domainHash, StringComparer.OrdinalIgnoreCase)) return true;
+                    }
+                }
+            }
+            catch { }
+
+            return false;
+        }
+
+        private string ComputeSha256Hash(string rawData)
+        {
+            using (SHA256 sha256Hash = SHA256.Create())
+            {
+                byte[] bytes = sha256Hash.ComputeHash(Encoding.UTF8.GetBytes(rawData));
+                var builder = new StringBuilder();
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    builder.Append(bytes[i].ToString("x2"));
+                }
+                return builder.ToString();
+            }
         }
     }
 }

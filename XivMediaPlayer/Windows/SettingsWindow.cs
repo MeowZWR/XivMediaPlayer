@@ -82,12 +82,52 @@ namespace XivMediaPlayer.Windows {
 
       bool safeMode = _plugin.Config.OnlySafeDomainsPublicScreens;
       if (ImGui.Checkbox("Safe Mode (Only allow safe domains outside)", ref safeMode)) {
-        _plugin.Config.OnlySafeDomainsPublicScreens = safeMode;
-        _plugin.Config.Save();
+        if (!safeMode) {
+            ImGui.OpenPopup("Disable Safe Mode Warning");
+        } else {
+            _plugin.Config.OnlySafeDomainsPublicScreens = true;
+            _plugin.Config.Save();
+        }
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
         "Blocks unverified URLs on outdoor screens to prevent abuse.");
 
+      var viewportCenter = ImGui.GetMainViewport().GetCenter();
+      ImGui.SetNextWindowPos(viewportCenter, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+      if (ImGui.BeginPopupModal("Disable Safe Mode Warning", ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)) {
+          ImGui.Text("WARNING: Disabling Safe Mode will allow almost any domain to play on outdoor screens (unless otherwise blacklisted by your current server).");
+          ImGui.Text("You may be exposed to content that you may not wish to see from unmoderated domains.");
+          ImGui.Spacing();
+          ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "By clicking 'I Agree', you accept full responsibility for your own screen,");
+          ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "and you explicitly agree that you WILL NOT play illegal content.");
+          ImGui.Separator();
+          ImGui.Spacing();
+          
+          if (ImGui.Button("I Agree, Disable Safe Mode", new Vector2(250, 0))) {
+              _plugin.Config.OnlySafeDomainsPublicScreens = false;
+              _plugin.Config.Save();
+              ImGui.CloseCurrentPopup();
+          }
+          ImGui.SameLine();
+          if (ImGui.Button("Cancel", new Vector2(120, 0))) {
+              ImGui.CloseCurrentPopup();
+          }
+          ImGui.EndPopup();
+      }
+
+      ImGui.Separator();
+
+      bool spatialAudio = _plugin.Config.SpatialAudioEnabled;
+      if (ImGui.Checkbox("Enable 3D Spatial Audio", ref spatialAudio)) {
+        _plugin.Config.SpatialAudioEnabled = spatialAudio;
+        _plugin.Config.Save();
+        _plugin.DoRefreshCurrentMedia();
+      }
+      ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
+        "Dynamically pans audio to simulate physical TV locations. If you experience A/V sync issues, disable this.");
+
+      ImGui.Separator();
+      
       bool showGrid = _plugin.Config.ShowOutdoorGridDebug;
       if (ImGui.Checkbox("Show Outdoor Grid Overlay (Debug)", ref showGrid)) {
         _plugin.Config.ShowOutdoorGridDebug = showGrid;
@@ -142,6 +182,22 @@ namespace XivMediaPlayer.Windows {
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
         "URL of the backend server used to sync TVs.");
+
+      ImGui.Spacing();
+      ImGui.Spacing();
+
+      // Support
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Support");
+      ImGui.Separator();
+
+      if (ImGui.Button("Support the Developer on Ko-fi")) {
+          try {
+              System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                  FileName = "https://ko-fi.com/sebastina",
+                  UseShellExecute = true
+              });
+          } catch { }
+      }
     }
   }
 }

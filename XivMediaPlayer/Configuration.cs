@@ -12,6 +12,14 @@ namespace XivMediaPlayer {
   }
 
   [Serializable]
+  public class MediaHistoryEntry {
+      public string Url { get; set; } = "";
+      public string Title { get; set; } = "";
+      public long TimecodeMs { get; set; } = 0;
+      public DateTime LastPlayed { get; set; } = DateTime.UtcNow;
+  }
+
+  [Serializable]
   public class Configuration : IPluginConfiguration {
     public event EventHandler OnConfigurationChanged;
 
@@ -19,8 +27,9 @@ namespace XivMediaPlayer {
     private bool _tuneIntoTwitchStreams = true;
     private bool _tuneIntoTwitchStreamPrompt = true;
     private int _defaultVideoOpen = 1; // 0 = open, 1 = closed
-    private bool _enableOutdoorPublicScreens = true;
+    private bool _enableOutdoorPublicScreens = false; // Opt-in
     private bool _onlySafeDomainsPublicScreens = true;
+    private bool _spatialAudioEnabled = true;
 
     int IPluginConfiguration.Version { get; set; }
 
@@ -33,7 +42,9 @@ namespace XivMediaPlayer {
     
     public bool EnableOutdoorPublicScreens { get => _enableOutdoorPublicScreens; set => _enableOutdoorPublicScreens = value; }
     public bool OnlySafeDomainsPublicScreens { get => _onlySafeDomainsPublicScreens; set => _onlySafeDomainsPublicScreens = value; }
+    public bool SpatialAudioEnabled { get => _spatialAudioEnabled; set => _spatialAudioEnabled = value; }
     public bool ShowOutdoorGridDebug { get; set; } = false;
+    public float UIBlendThreshold { get; set; } = 0.90f;
 
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;
@@ -46,6 +57,7 @@ namespace XivMediaPlayer {
       = new Dictionary<string, MediaPlayerCore.Compositing.WorldScreenTransform>();
 
     public Dictionary<string, RoomMediaState> RoomMediaStates { get; set; } = new Dictionary<string, RoomMediaState>();
+    public Dictionary<string, MediaHistoryEntry> WatchHistory { get; set; } = new Dictionary<string, MediaHistoryEntry>();
 
     public string ServerUrl { get; set; } = "http://24.77.70.65:5000";
 

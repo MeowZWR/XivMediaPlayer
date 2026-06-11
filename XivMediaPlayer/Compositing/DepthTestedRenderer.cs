@@ -78,11 +78,18 @@ namespace XivMediaPlayer.Compositing {
       public float IsShuffle;
       public float Time;
       public float ShowScreensaver;
+      public float UIBlendThreshold;
+      public float _pad6;
+      public float _pad7;
+      public float _pad8;
     }
+
+    public float UIBlendThreshold { get; set; } = 0.95f;
 
     [StructLayout(LayoutKind.Sequential)]
     private unsafe struct UIConstants {
       public fixed float UIRects[256]; // 64 * 4 (x, y, w, h)
+      public fixed float UIRectTypes[64]; // 0 = standard, 1 = MJI
       public int UIRectCount;
       public float _pad0;
       public float _pad1;
@@ -130,12 +137,15 @@ cbuffer Constants : register(b0) {
   float IsShuffle;
   float Time;
   float ShowScreensaver;
+  float UIBlendThreshold;
+  float3 _pad6;
 };
 
 cbuffer UIConsts : register(b1) {
   float4 UIRects[64];
+  float4 UIRectTypes[16]; // 64 floats packed into 16 vectors
   int UIRectCount;
-  float3 _uiPadEnd;
+  float3 _padUI;
 };
 
 Texture2D VideoTexture : register(t0);
@@ -242,102 +252,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           color = VideoTexture.Sample(VideoSampler, sampleUV);
       }
       
-      // Blend title texture perfectly flush onto the TV frame!
-      if (HasTitleTexture > 0.5 && HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
-          float4 titleColor = TitleTexture.Sample(VideoSampler, uv);
-          // Standard alpha blend
-          color.rgb = lerp(color.rgb, titleColor.rgb, titleColor.a);
-      }
-  } else {
-      float depthMask = 1.0;
-      if (gameDepth < 0.0001) depthMask = 0; // Ignore skybox
-      
-      // Calculate TV dimensions in screen pixels
-      float tvWidthPixels = length(CornerTR - CornerTL);
-      float tvHeightPixels = length(CornerBL - CornerTL);
-      float tvPixelSize = max(tvWidthPixels, tvHeightPixels);
-      
-      // Calculate distance from the center of the TV in true screen pixels!
-      // By using true screen distance, we completely bypass UV space perspective distortion and the mathematical vanishing point.
-      // This guarantees a perfectly smooth radial glow everywhere on screen.
-      float2 tvCenter = (CornerTL + CornerTR + CornerBL + CornerBR) * 0.25;
-      float distInPixels = distance(pixelPos, tvCenter);
-      
-      // Subtract half the TV size so the glow starts fading from the edges, not the center
-      distInPixels = max(0.0, distInPixels - tvPixelSize * 0.5);
-      
-      // Removing the 2D in-front shadow blocker!
-      // Because we use Color Dodge, the light naturally wraps around 3D objects and beautifully illuminates them.
-      // Trying to fake shadows with a 2D screen-space cutout creates blocky rectangular lines on characters!
-      
-      // Physical light dissipation based on screen pixels!
-      // This ensures the light reaches the same distance regardless of perspective.
-      float maxGlowRadiusPixels = max(200.0, tvPixelSize * 1.5);
-      float distanceFade = saturate(1.0 - (distInPixels / maxGlowRadiusPixels)); 
-      depthMask *= pow(distanceFade, 2.5); // Non-linear falloff for realism
-      
-      if (depthMask > 0.001) {
-          // We replace the 9-point sample with a massive 144-point (12x12 grid) average!
-          // Because all screen pixels read the exact same UVs, this is a 100% texture cache hit
-          // and costs almost zero performance, but it creates an incredibly stable color.
-          // This completely eliminates the epilepsy flicker caused by moving objects!
-          float3 prominentColor = float3(0, 0, 0);
-          for (float x = 0.05; x < 1.0; x += 0.0833) {
-              for (float y = 0.05; y < 1.0; y += 0.0833) {
-                  prominentColor += VideoTexture.Sample(VideoSampler, float2(x, y)).rgb;
-              }
-          }
-          prominentColor /= 144.0;
-          
-          // Brighter video pixels get more alpha.
-          float luminance = dot(prominentColor, float3(0.299, 0.587, 0.114));
-          float alpha = saturate(depthMask * luminance * 3.5); 
-          
-          // We clamp the ceiling to prevent extreme blowout on bright pixels.
-          // alpha = 0.75 -> Scene / 0.25 = 4.0x brightness max.
-          // This keeps the light vibrant without reaching the 10x multiplier of alpha 0.9.
-          alpha = clamp(alpha, 0.0, 0.75); 
-          
-          // TRUE LIGHTING BLEND
-          // Instead of using ImGui's standard alpha blend (which washes out the background like fog),
-          // we sample the actual game pixel and ADD the light to it!
-          float3 light = prominentColor * alpha;
-          
-          if (HasBackBuffer > 0.5) {
-              float3 sceneColor = BackBufferTexture.Sample(VideoSampler, screenUV).rgb;
-              
-              // Color Dodge Blend: Final = Scene / (1.0 - Light)
-              // Screen blending raised the black floor, causing the grey fog over the shadows.
-              // Color Dodge preserves pure black shadows (0 / X = 0) while powerfully illuminating the textures!
-              float3 finalColor = saturate(sceneColor / max(0.001, 1.0 - light));
-              
-              color = float4(finalColor, 1.0); // Output opaque because we already blended the scene!
-          } else {
-              // Fallback to standard fog overlay if backbuffer is missing
-              color = float4(prominentColor, alpha);
-          }
-      }
-  }
-
-  // Check if this pixel is inside any UI bounding box
-  bool insideUI = false;
-  for (int i = 0; i < UIRectCount; i++) {
-      float4 r = UIRects[i];
-      if (pixelPos.x >= r.x && pixelPos.x <= r.x + r.z &&
-          pixelPos.y >= r.y && pixelPos.y <= r.y + r.w) {
-          insideUI = true;
-          break;
-      }
-  }
-  
-  if (insideUI) {
-      // Use the BackBuffer Alpha channel for perfect UI masking!
-      float bbAlpha = BackBufferTexture.Sample(DepthSampler, screenUV).a;
-      
-      // Smoothly blend out the video behind UI drop shadows and gradients
-      color.a *= saturate(1.0 - bbAlpha);
       // XMP Screensaver
-      if (ShowScreensaver > 0.5 && isInside && !occluded) {
+      if (ShowScreensaver > 0.5) {
           color.rgb *= 0.2; // Dim background
           float aspect = 16.0 / 9.0;
           if (RenderResolution.y > 0) aspect = RenderResolution.x / RenderResolution.y;
@@ -429,10 +345,117 @@ float4 PS(VS_OUT input) : SV_TARGET {
               color.rgb = logoColor;
           }
       }
+
+      // Blend title texture perfectly flush onto the TV frame!
+      if (HasTitleTexture > 0.5 && HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
+          float4 titleColor = TitleTexture.Sample(VideoSampler, uv);
+          // Standard alpha blend
+          color.rgb = lerp(color.rgb, titleColor.rgb, titleColor.a);
+      }
+  } else {
+      float depthMask = 1.0;
+      if (gameDepth < 0.0001) depthMask = 0; // Ignore skybox
+      
+      // Convert gameDepth (reversed Z) to viewZ
+      float gameViewZ = (NearPlane * FarPlane) / (gameDepth * (FarPlane - NearPlane) + NearPlane);
+      
+      // Reconstruct the 3D world position of the game pixel
+      float3 gameWorldPos = CameraPos + rayDir * (gameViewZ / dot(rayDir, -CameraForward));
+      
+      // Calculate TV dimensions in 3D world space
+      float3 tvCenter3D = (CornerTR3D + CornerBL3D) * 0.5;
+      float tvWidth3D = length(CornerTR3D - CornerTL3D);
+      float tvHeight3D = length(CornerBL3D - CornerTL3D);
+      float tvSize3D = max(tvWidth3D, tvHeight3D);
+      
+      // Calculate distance from the center of the TV in 3D world space
+      float3 toPixel = gameWorldPos - tvCenter3D;
+      float dist3D = length(toPixel);
+      
+      // Subtract half the TV size so the glow starts fading from the edges, not the center
+      dist3D = max(0.0, dist3D - tvSize3D * 0.5);
+      
+      // Physical light dissipation based on world space distance
+      float maxGlowRadius3D = max(4.0, tvSize3D * 1.5);
+      float distanceFade = saturate(1.0 - (dist3D / maxGlowRadius3D)); 
+      depthMask *= pow(distanceFade, 2.5); // Non-linear falloff for realism
+      
+      // Backlight directionality fade: shine behind the TV, not on objects in front
+      float3 dirToPixel = dist3D > 0.001 ? normalize(toPixel) : float3(0, 0, 0);
+      float dotNorm = dot(dirToPixel, tvNormal);
+      float directionFade = smoothstep(0.5, -0.2, dotNorm);
+      depthMask *= directionFade;
+      
+      if (depthMask > 0.001) {
+          // Use a 144-point (12x12 grid) average texture sample to stabilize the glow color
+          // and mitigate potential flicker from on-screen movement.
+          float3 prominentColor = float3(0, 0, 0);
+          for (float x = 0.05; x < 1.0; x += 0.0833) {
+              for (float y = 0.05; y < 1.0; y += 0.0833) {
+                  prominentColor += VideoTexture.Sample(VideoSampler, float2(x, y)).rgb;
+              }
+          }
+          prominentColor /= 144.0;
+          
+          // Scale glow alpha by the computed video luminance.
+          float luminance = dot(prominentColor, float3(0.299, 0.587, 0.114));
+          float alpha = saturate(depthMask * luminance * 3.5); 
+          
+          // Clamp intensity ceiling to prevent extreme highlights overexposure.
+          alpha = clamp(alpha, 0.0, 0.45); 
+          
+          // Compute additive backlight intensity.
+          float3 light = prominentColor * alpha;
+          
+          if (HasBackBuffer > 0.5) {
+              float3 sceneColor = BackBufferTexture.Sample(VideoSampler, screenUV).rgb;
+              float bbAlpha = BackBufferTexture.Sample(DepthSampler, screenUV).a;
+              
+              // Color Dodge Blend: Final = Scene / (1.0 - Light) to preserve dark shadows
+              // while illuminating brighter midtones.
+              float3 glowedScene = saturate(sceneColor / max(0.001, 1.0 - light));
+              
+              // Protect overlapping UI elements from overexposure by blending back original scene color.
+              float3 finalColor = lerp(glowedScene, sceneColor, bbAlpha);
+              
+              color = float4(finalColor, 1.0); // Output pre-blended opaque color
+          } else {
+              // Fallback to standard transparent fog overlay if backbuffer is missing
+              color = float4(prominentColor, alpha);
+          }
+      }
   }
+
+  // The UI compositing block was moved to the bottom of the shader to draw OVER the media controls.
   
   // Media Controls UI overlay
-  if (isInside && !occluded && HoverUV.x >= 0.0 && HoverUV.y >= 0.0) {
+  if (isInside && !occluded && HoverUV.x >= 0.0 && HoverUV.y >= 0.0 && IsLockedTV >= 0.0) {
+    // History Icon Top Left (0.02 - 0.08, 0.04 - 0.12)
+    if (uv.x > 0.02 && uv.x < 0.08 && uv.y > 0.04 && uv.y < 0.12) {
+       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
+       float px = (uv.x - 0.02) / 0.06;
+       float py = (uv.y - 0.04) / 0.08;
+       
+       // draw clock
+       float dist = distance(float2(px, py), float2(0.5, 0.5));
+       if (abs(dist - 0.3) < 0.05) color.rgb = float3(1, 1, 1);
+       if (px > 0.45 && px < 0.55 && py > 0.25 && py < 0.55) color.rgb = float3(1, 1, 1); // hour hand
+       if (px > 0.45 && px < 0.7 && py > 0.45 && py < 0.55) color.rgb = float3(1, 1, 1); // minute hand
+    }
+
+    // DMCA Button (Top Right: 0.92 - 0.98, 0.04 - 0.12)
+    if (uv.x > 0.92 && uv.x < 0.98 && uv.y > 0.04 && uv.y < 0.12) {
+       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
+       float px = (uv.x - 0.92) / 0.06;
+       float py = (uv.y - 0.04) / 0.08;
+       
+       // draw 'i' for info/report
+       if (px > 0.4 && px < 0.6) {
+           if (py > 0.2 && py < 0.3) color.rgb = float3(1, 1, 1);
+           if (py > 0.4 && py < 0.8) color.rgb = float3(1, 1, 1);
+       }
+    }
+
     if (uv.y > 0.85) {
       // Background
       color.rgb = lerp(color.rgb, float3(0.05, 0.05, 0.05), 0.7);
@@ -608,6 +631,77 @@ float4 PS(VS_OUT input) : SV_TARGET {
          }
       }
     }
+  }
+  
+  // Check if this pixel is inside any UI bounding box
+  bool insideUI = false;
+  int rectType = 0; // 0 = Standard, 1 = MJI, 2 = ActionDetail
+  for (int i = 0; i < UIRectCount; i++) {
+      float4 r = UIRects[i];
+      if (pixelPos.x >= r.x && pixelPos.x <= r.x + r.z &&
+          pixelPos.y >= r.y && pixelPos.y <= r.y + r.w) {
+          insideUI = true;
+          
+          int vecIdx = i / 4;
+          int compIdx = i % 4;
+          float typeVal = UIRectTypes[vecIdx][compIdx];
+          
+          if (typeVal > 3.5) {
+              rectType = 4; // _ToDoList takes highest precedence
+          } else if (typeVal > 2.5 && rectType < 4) {
+              rectType = 3; // MjlHud
+          } else if (typeVal > 1.5 && rectType < 3) {
+              rectType = 2; // ActionDetail
+          } else if (typeVal > 0.5 && rectType < 2) {
+              rectType = 1; // MJI
+          }
+      }
+  }
+  
+  if (insideUI && isInside && !occluded) {
+      float bbAlpha = BackBufferTexture.Sample(DepthSampler, screenUV).a;
+      float4 bbColor = BackBufferTexture.Sample(VideoSampler, screenUV);
+      
+      if (color.a > 0.5) {
+          if (rectType == 4) {
+              // _ToDoList: threshold 90, backdrop #453C26
+              float threshold = 90.0 / 255.0;
+              float bbLuminance = dot(bbColor.rgb, float3(0.299, 0.587, 0.114));
+              float colorBoost = smoothstep(0.3, 0.6, bbLuminance);
+              float isPureWhite = max(smoothstep(threshold - 0.02, 1.0, bbAlpha), colorBoost);
+              float3 shadowColor = float3(69.0 / 255.0, 60.0 / 255.0, 38.0 / 255.0); // #453C26
+              float3 targetColor = lerp(shadowColor, bbColor.rgb, isPureWhite);
+              color.rgb = color.rgb * saturate(1.0 - bbAlpha) + targetColor * bbAlpha;
+          } else if (rectType == 3) {
+              // MjlHud: threshold 233, backdrop #ACA393
+              float threshold = 233.0 / 255.0;
+              float isPureWhite = smoothstep(threshold - 0.02, 1.0, bbAlpha);
+              float3 shadowColor = float3(172.0 / 255.0, 163.0 / 255.0, 147.0 / 255.0); // #ACA393
+              float3 targetColor = lerp(shadowColor, bbColor.rgb, isPureWhite);
+              color.rgb = color.rgb * saturate(1.0 - bbAlpha) + targetColor * bbAlpha;
+          } else if (rectType == 2) {
+              // ActionDetail: ultra aggressive threshold, only 255 cuts the TV
+              float threshold = 254.0 / 255.0;
+              float isPureWhite = smoothstep(threshold - 0.02, 1.0, bbAlpha);
+              float3 shadowColor = float3(48.0 / 255.0, 34.0 / 255.0, 21.0 / 255.0); // #302215
+              float3 targetColor = lerp(shadowColor, bbColor.rgb, isPureWhite);
+              color.rgb = color.rgb * saturate(1.0 - bbAlpha) + targetColor * bbAlpha;
+          } else if (rectType == 1) {
+              // MJI: threshold 152
+              float threshold = 152.0 / 255.0;
+              float isPureWhite = smoothstep(threshold - 0.02, threshold, bbAlpha);
+              
+              float3 blendedBlack = color.rgb * saturate(1.0 - bbAlpha);
+              color.rgb = blendedBlack + (bbColor.rgb * bbAlpha * isPureWhite);
+          } else {
+              // For all other UI (standard game UI), use a black backdrop with threshold 152
+              float threshold = 152.0 / 255.0;
+              float isPureWhite = smoothstep(threshold - 0.02, 1.0, bbAlpha);
+              float3 shadowColor = float3(0.0, 0.0, 0.0);
+              float3 targetColor = lerp(shadowColor, bbColor.rgb, isPureWhite);
+              color.rgb = color.rgb * saturate(1.0 - bbAlpha) + targetColor * bbAlpha;
+          }
+      }
   }
   
   return color;
@@ -791,6 +885,17 @@ float4 PS(VS_OUT input) : SV_TARGET {
             uiConsts.UIRects[i * 4 + 1] = r.Y;
             uiConsts.UIRects[i * 4 + 2] = r.W;
             uiConsts.UIRects[i * 4 + 3] = r.H;
+            
+            // Flag addons so the shader treats them differently: 2 = _ActionContents, 3 = MJI (Island Sanctuary HUD), 4 = _ToDoList, 0 = Standard
+            if (r.Name != null && r.Name.StartsWith("_ActionContents")) {
+                uiConsts.UIRectTypes[i] = 2.0f;
+            } else if (r.Name != null && r.Name.StartsWith("MJI")) {
+                uiConsts.UIRectTypes[i] = 3.0f;
+            } else if (r.Name != null && r.Name.StartsWith("_ToDoList")) {
+                uiConsts.UIRectTypes[i] = 4.0f;
+            } else {
+                uiConsts.UIRectTypes[i] = 0.0f;
+            }
         }
         _context.UpdateSubresource(uiConsts, _uiRectBuffer);
 

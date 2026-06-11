@@ -1,5 +1,7 @@
 using LibVLCSharp.Shared;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
+using NAudio.CoreAudioApi;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Advanced;
 using SixLabors.ImageSharp.PixelFormats;
@@ -21,6 +23,23 @@ namespace MediaPlayerCore {
     private MemoryMappedFile _vlcMappedFile;
     private MemoryMappedViewAccessor _vlcMappedViewAccessor;
     private IntPtr _vlcBuffer = IntPtr.Zero;
+
+    private IWavePlayer _waveOut;
+    private WaveFormat _waveFormat;
+    private BufferedWaveProvider _bufferedWaveProvider;
+    private PanningSampleProvider _panningProvider;
+    private VolumeSampleProvider _volumeProvider;
+    private bool _isPlayingAudio = false;
+
+    public float Pan {
+      get => _panningProvider?.Pan ?? 0;
+      set {
+        if (_panningProvider != null) {
+          _panningProvider.Pan = Math.Clamp(value, -1f, 1f);
+        }
+      }
+    }
+
     public event EventHandler<MediaError> OnErrorReceived;
     public event EventHandler<string> PlaybackStopped;
     public event EventHandler<string> PlaybackFinished;
@@ -51,11 +70,15 @@ namespace MediaPlayerCore {
     private float _baseVolume = 1;
     private bool _vlcWasAbleToStart;
     private bool _disposed;
+    private bool _isDisposing;
     private readonly object _disposeLock = new object();
 
+    private bool _audioOnly;
+
     public MediaObject(MediaManager parent, IMediaGameObject playerObject, IMediaGameObject camera,
-      SoundType soundType, string soundPath, string libVLCPath, bool spatialAllowed) {
+      SoundType soundType, string soundPath, string libVLCPath, bool spatialAllowed, bool audioOnly = false) {
       _playerObject = playerObject;
+      _audioOnly = audioOnly;
       _soundPath = soundPath;
       _camera = camera;
       _libVLCPath = libVLCPath;
@@ -108,6 +131,9 @@ namespace MediaPlayerCore {
             if (newValue != _vlcPlayer.Volume) {
               _baseVolume = newValue;
               _vlcPlayer.Volume = (int)((float)newValue * volumePercentage);
+              if (_volumeProvider != null) {
+                  _volumeProvider.Volume = ((float)newValue / 100f * volumePercentage) * 2.0f; // Boost spatial audio to match native VLC output
+              }
             }
           } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
         }
@@ -117,7 +143,9 @@ namespace MediaPlayerCore {
       get {
         if (_vlcPlayer != null) {
           try {
-            return _vlcPlayer.IsPlaying ? PlaybackState.Playing : PlaybackState.Stopped;
+            if (_vlcPlayer.State == LibVLCSharp.Shared.VLCState.Playing) return PlaybackState.Playing;
+            if (_vlcPlayer.State == LibVLCSharp.Shared.VLCState.Paused) return PlaybackState.Paused;
+            return PlaybackState.Stopped;
           } catch {
             return PlaybackState.Stopped;
           }
@@ -131,7 +159,22 @@ namespace MediaPlayerCore {
     
     public long Time {
       get => _vlcPlayer?.Time ?? 0;
-      set { if (_vlcPlayer != null) _vlcPlayer.Time = value; }
+      set {
+        if (_vlcPlayer != null) {
+          try {
+            if (!_vlcPlayer.IsSeekable && _vlcPlayer.State == LibVLCSharp.Shared.VLCState.Playing) {
+                return; // Cannot seek, ignore request to prevent stream crash
+            }
+          } catch {}
+
+          if (_vlcPlayer.State == LibVLCSharp.Shared.VLCState.Ended || _vlcPlayer.State == LibVLCSharp.Shared.VLCState.Stopped) {
+            ChangeVideoStream(_soundPath, _width, (int)value);
+          } else {
+            _vlcPlayer.Time = value;
+            _bufferedWaveProvider?.ClearBuffer();
+          }
+        }
+      }
     }
 
     public long Length => _vlcPlayer?.Length ?? 0;
@@ -179,22 +222,40 @@ namespace MediaPlayerCore {
 
               var vlcArgs = new List<string> {
                 "--vout=none", 
-                "--http-reconnect",
-                "--network-caching=2000"
+                "--http-reconnect"
               };
 
               libVLC = new LibVLC(vlcArgs.ToArray());
 
               // Hook VLC's internal log to catch errors
               libVLC.Log += (s, e) => {
-                if (e.Level >= LogLevel.Warning) {
+                if (e.Level >= LogLevel.Error) {
                   Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
                   OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception($"VLC [{e.Level}] {e.Module}: {e.Message}") });
+                } else if (e.Level >= LogLevel.Warning) {
+                  Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
                 }
               };
 
-              var media = new Media(libVLC, mediaPath, mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp")
+              var media = new Media(libVLC, mediaPath, mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.StartsWith("rtsp")
                 ? FromType.FromLocation : FromType.FromPath);
+              
+              if (_audioOnly) {
+                  media.AddOption(":no-video");
+              }
+
+              if (mediaPath.StartsWith("rtsp")) {
+                  if (_audioOnly) {
+                      media.AddOption(":network-caching=300");
+                  } else {
+                      media.AddOption(":network-caching=30");
+                      media.AddOption(":clock-jitter=0");
+                      media.AddOption(":drop-late-frames");
+                      media.AddOption(":skip-frames");
+                  }
+              } else {
+                  media.AddOption(":network-caching=2000");
+              }
               
               if (startTimeMs > 0) {
                   media.AddOption($":start-time={startTimeMs / 1000.0}");
@@ -211,7 +272,7 @@ namespace MediaPlayerCore {
               }
 
               Debug.WriteLine("[MediaObject] Parsing media...");
-              await media.Parse(mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp")
+              await media.Parse(mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.StartsWith("rtsp")
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
               Debug.WriteLine($"[MediaObject] Media parsed. Duration: {media.Duration}ms");
 
@@ -222,7 +283,26 @@ namespace MediaPlayerCore {
                 }
 
                 _vlcPlayer = new MediaPlayer(media);
-                _vlcPlayer.SetAudioOutput("directsound");
+                
+                if (_spatialAllowed) {
+                    _vlcPlayer.SetAudioFormat("s16l", 48000, 1);
+                    _vlcPlayer.SetAudioCallbacks(PlayAudio, PauseAudio, ResumeAudio, FlushAudio, DrainAudio);
+                    
+                    _waveFormat = new WaveFormat(48000, 16, 1);
+                    _bufferedWaveProvider = new BufferedWaveProvider(_waveFormat);
+                    _bufferedWaveProvider.BufferDuration = TimeSpan.FromSeconds(10);
+                    _bufferedWaveProvider.DiscardOnBufferOverflow = true;
+                    
+                    _panningProvider = new PanningSampleProvider(_bufferedWaveProvider.ToSampleProvider());
+                    _panningProvider.Pan = 0;
+                    
+                    _volumeProvider = new VolumeSampleProvider(_panningProvider);
+                    _volumeProvider.Volume = (_baseVolume / 100f) * 2.0f; // Scale 0-100 to 0-1, boosted for spatial compensation
+                    
+                    _waveOut = new WasapiOut(AudioClientShareMode.Shared, 150);
+                    _waveOut.Init(_volumeProvider);
+                }
+
                 _vlcPlayer.Stopped += delegate {
                   lock (_parent.FrameLock) {
                     _parent.LastFrame = Array.Empty<byte>();
@@ -238,7 +318,7 @@ namespace MediaPlayerCore {
                   Debug.WriteLine("[MediaObject] VLC EncounteredError event fired!");
                   OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC player encountered an error during playback.") });
                 };
-                if (mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.EndsWith(".mp4") || mediaPath.EndsWith(".avi")) {
+                if (!_audioOnly && (mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.StartsWith("rtsp") || mediaPath.EndsWith(".mp4") || mediaPath.EndsWith(".avi"))) {
                     _vlcPlayer.SetVideoFormatCallbacks(VideoFormatSetup, null);
                     _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
                 }
@@ -252,12 +332,13 @@ namespace MediaPlayerCore {
                   if (exactSeekMs > 0) {
                       // Fire exact seek to correct keyframe snapping margin of error
                       Task.Run(async () => {
-                          await Task.Delay(100);
-                          if (_vlcPlayer != null) {
-                              _vlcPlayer.Time = exactSeekMs;
-                          }
-                          exactSeekMs = 0;
-                      });
+                        await Task.Delay(2000); // Bypass plugin load lag spike
+                            if (_vlcPlayer != null) {
+                                _vlcPlayer.Time = exactSeekMs;
+                                _bufferedWaveProvider?.ClearBuffer();
+                            }
+                        exactSeekMs = 0;
+                    });
                   }
               };
 
@@ -288,8 +369,21 @@ namespace MediaPlayerCore {
       Task.Run(async delegate {
         try {
           if (_vlcPlayer != null) {
-            var media = new Media(libVLC, soundPath, soundPath.StartsWith("http") || soundPath.StartsWith("rtmp")
+            var media = new Media(libVLC, soundPath, soundPath.StartsWith("http") || soundPath.StartsWith("rtmp") || soundPath.StartsWith("rtsp")
                      ? FromType.FromLocation : FromType.FromPath);
+            
+            if (_audioOnly) {
+                media.AddOption(":no-video");
+            }
+
+            if (soundPath.StartsWith("rtsp")) {
+                media.AddOption(":network-caching=30");
+                media.AddOption(":clock-jitter=0");
+                media.AddOption(":drop-late-frames");
+                media.AddOption(":skip-frames");
+            } else {
+                media.AddOption(":network-caching=2000");
+            }
             
             if (startTimeMs > 0) {
                 media.AddOption($":start-time={startTimeMs / 1000.0}");
@@ -306,18 +400,33 @@ namespace MediaPlayerCore {
                 media.AddOption($":http-referrer={mediaReferer}");
             }
 
-            await media.Parse(soundPath.StartsWith("http") || soundPath.StartsWith("rtmp")
+            await media.Parse(soundPath.StartsWith("http") || soundPath.StartsWith("rtmp") || soundPath.StartsWith("rtsp")
               ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
             
+            MediaPlayer playerToStop = null;
             lock (_disposeLock) {
                 if (_disposed) {
                     media.Dispose();
                     return;
                 }
-                
-                // Explicitly stop the previous media before assigning the new one to prevent VLC from deadlocking
-                _vlcPlayer.Stop();
-                _vlcPlayer.Media = media;
+                playerToStop = _vlcPlayer;
+            }
+
+            // Explicitly stop the previous media before assigning the new one to prevent VLC from deadlocking
+            // Do NOT hold _disposeLock while stopping!
+            if (playerToStop != null) {
+                try { playerToStop.Stop(); } catch { }
+                _bufferedWaveProvider?.ClearBuffer();
+            }
+
+            lock (_disposeLock) {
+                if (_disposed) {
+                    media.Dispose();
+                    return;
+                }
+                if (_vlcPlayer != null) {
+                    _vlcPlayer.Media = media;
+                }
             }
 
             long exactSeekMs = startTimeMs;
@@ -325,10 +434,11 @@ namespace MediaPlayerCore {
             playingHandler = (s, e) => {
                 if (exactSeekMs > 0) {
                     Task.Run(async () => {
-                        await Task.Delay(100);
-                        if (_vlcPlayer != null && !_disposed) {
-                            _vlcPlayer.Time = exactSeekMs;
-                        }
+                        await Task.Delay(2000); // Bypass plugin load lag spike
+                          if (_vlcPlayer != null && !_disposed) {
+                              _vlcPlayer.Time = exactSeekMs;
+                              _bufferedWaveProvider?.ClearBuffer();
+                          }
                         exactSeekMs = 0;
                     });
                 }
@@ -364,6 +474,40 @@ namespace MediaPlayerCore {
     public void ResetVolume() {
       // No-op for VLC-only path; volume is managed through the VLC player directly.
     }
+
+      private void DrainAudio(IntPtr data) {
+      }
+
+      private void FlushAudio(IntPtr data, long pts) {
+          // Explicitly clear the buffer on flush so that stale audio from before a seek isn't played.
+          _bufferedWaveProvider?.ClearBuffer();
+      }
+
+      private void ResumeAudio(IntPtr data, long pts) {
+          _waveOut?.Play();
+      }
+
+      private void PauseAudio(IntPtr data, long pts) {
+          _waveOut?.Pause();
+      }
+
+        private void PlayAudio(IntPtr data, IntPtr samples, uint count, long pts) {
+            if (_bufferedWaveProvider != null && _waveFormat != null) {
+                int bytes = (int)count * _waveFormat.BlockAlign;
+                byte[] buffer = new byte[bytes];
+                Marshal.Copy(samples, buffer, 0, bytes);
+                _bufferedWaveProvider.AddSamples(buffer, 0, bytes);
+
+                if (_waveOut != null) {
+                    if (_waveOut.PlaybackState != PlaybackState.Playing) {
+                        // Wait until we have a healthy 300ms cushion before starting audio playback
+                        if (_bufferedWaveProvider.BufferedDuration.TotalMilliseconds > 300) {
+                            _waveOut.Play();
+                        }
+                    }
+                }
+            }
+        }
 
       private void Display(IntPtr opaque, IntPtr picture) {
         lock (_disposeLock) {
@@ -414,17 +558,34 @@ namespace MediaPlayerCore {
       }
 
     public void Dispose() {
+      MediaPlayer playerToStop = null;
+      LibVLC libVlcToDispose = null;
+
       lock (_disposeLock) {
-          if (_disposed) {
+          if (_disposed || _isDisposing) {
             return;
           }
+          _isDisposing = true;
+          
+          playerToStop = _vlcPlayer;
+          libVlcToDispose = libVLC;
+      }
+
+      if (playerToStop != null) {
+          PlaybackStopped?.Invoke(this, "OK");
+          try { playerToStop.Stop(); } catch { }
+          try { playerToStop.Dispose(); } catch { }
+      }
+      if (libVlcToDispose != null) {
+          try { libVlcToDispose.Dispose(); } catch { }
+      }
+
+      lock (_disposeLock) {
+          if (_disposed) return;
           _disposed = true;
           _parent.OnCleanupTime -= _parent_OnCleanupTime;
           
-          Stop();
-          try { _vlcPlayer?.Dispose(); } catch { }
           _vlcPlayer = null;
-          try { libVLC?.Dispose(); } catch { }
           libVLC = null;
 
           if (_vlcMappedViewAccessor != null) {
@@ -436,6 +597,12 @@ namespace MediaPlayerCore {
               _vlcMappedFile = null;
           }
           _vlcBuffer = IntPtr.Zero;
+
+          if (_waveOut != null) {
+              _waveOut.Stop();
+              _waveOut.Dispose();
+              _waveOut = null;
+          }
       }
     }
   }
