@@ -45,6 +45,7 @@ namespace XivMediaPlayer {
     public bool SpatialAudioEnabled { get => _spatialAudioEnabled; set => _spatialAudioEnabled = value; }
     public bool ShowOutdoorGridDebug { get; set; } = false;
     public float UIBlendThreshold { get; set; } = 0.90f;
+    public bool DepthOcclusionEnabled { get; set; } = true;
 
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;

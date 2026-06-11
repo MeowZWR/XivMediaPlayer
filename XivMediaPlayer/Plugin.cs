@@ -2082,6 +2082,8 @@ namespace XivMediaPlayer
 
         private unsafe void OnDraw()
         {
+            if (_worldRenderer != null) _worldRenderer.UseDepthOcclusion = _config.DepthOcclusionEnabled;
+
             // Reset per-frame depth capture flag
             _depthCapture?.BeginFrame();
 

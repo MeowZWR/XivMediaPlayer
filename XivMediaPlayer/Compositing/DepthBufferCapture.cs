@@ -21,6 +21,8 @@ namespace XivMediaPlayer.Compositing {
     private ID3D11ShaderResourceView _depthCopySRV; // SRV for shader-based depth sampling
     private int _texWidth, _texHeight;
     private Format _texFormat;
+    private int _sampleCount;
+    private int _sampleQuality;
     private bool _disposed;
     private bool _initialized;
     private string _debugInfo = "Not initialized";
@@ -93,7 +95,13 @@ namespace XivMediaPlayer.Compositing {
       var texDesc = depthTexture.Description;
 
       // Create or recreate our copy texture if needed
-      if (_depthCopy == null || _texWidth != (int)texDesc.Width || _texHeight != (int)texDesc.Height) {
+      if (_depthCopy == null || 
+          _texWidth != (int)texDesc.Width || 
+          _texHeight != (int)texDesc.Height ||
+          _texFormat != texDesc.Format ||
+          _sampleCount != texDesc.SampleDescription.Count ||
+          _sampleQuality != texDesc.SampleDescription.Quality) {
+          
         _depthCopy?.Dispose();
         _depthCopyDSV?.Dispose();
         _depthCopySRV?.Dispose();
@@ -105,6 +113,8 @@ namespace XivMediaPlayer.Compositing {
         _texWidth = (int)texDesc.Width;
         _texHeight = (int)texDesc.Height;
         _texFormat = texDesc.Format;
+        _sampleCount = texDesc.SampleDescription.Count;
+        _sampleQuality = texDesc.SampleDescription.Quality;
 
         // Create copy with both DepthStencil + ShaderResource bind flags
         _depthCopy = _device.CreateTexture2D(new Texture2DDescription {
@@ -113,7 +123,7 @@ namespace XivMediaPlayer.Compositing {
           MipLevels = 1,
           ArraySize = 1,
           Format = texDesc.Format,
-          SampleDescription = new SampleDescription(1, 0),
+          SampleDescription = new SampleDescription(_sampleCount, _sampleQuality),
           Usage = ResourceUsage.Default,
           BindFlags = BindFlags.DepthStencil | BindFlags.ShaderResource,
           CPUAccessFlags = CpuAccessFlags.None,
@@ -128,7 +138,7 @@ namespace XivMediaPlayer.Compositing {
         };
         _depthCopyDSV = _device.CreateDepthStencilView(_depthCopy, new DepthStencilViewDescription {
           Format = dsvFormat,
-          ViewDimension = DepthStencilViewDimension.Texture2D,
+          ViewDimension = _sampleCount > 1 ? DepthStencilViewDimension.Texture2DMultisampled : DepthStencilViewDimension.Texture2D,
         });
 
         // Create SRV view for shader sampling
@@ -140,7 +150,7 @@ namespace XivMediaPlayer.Compositing {
         };
         _depthCopySRV = _device.CreateShaderResourceView(_depthCopy, new ShaderResourceViewDescription {
           Format = srvFormat,
-          ViewDimension = Vortice.Direct3D.ShaderResourceViewDimension.Texture2D,
+          ViewDimension = _sampleCount > 1 ? Vortice.Direct3D.ShaderResourceViewDimension.Texture2DMultisampled : Vortice.Direct3D.ShaderResourceViewDimension.Texture2D,
           Texture2D = new Texture2DShaderResourceView { MipLevels = 1, MostDetailedMip = 0 },
         });
 
@@ -151,7 +161,7 @@ namespace XivMediaPlayer.Compositing {
           MipLevels = 1,
           ArraySize = 1,
           Format = texDesc.Format,
-          SampleDescription = new SampleDescription(1, 0),
+          SampleDescription = new SampleDescription(_sampleCount, _sampleQuality),
           Usage = ResourceUsage.Staging,
           BindFlags = BindFlags.None,
           CPUAccessFlags = CpuAccessFlags.Read,
