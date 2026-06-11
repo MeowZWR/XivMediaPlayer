@@ -95,13 +95,13 @@ namespace XivMediaPlayer.Windows {
       if (ImGui.Checkbox("Render in World", ref _enabled)) {
         _transform.Enabled = _enabled;
         
-        // Auto-delete from server if turning off and we own it
-        if (!_enabled && !string.IsNullOrEmpty(locKey) && locKey.StartsWith("house_") &&
-            _plugin.CurrentTvPlacement != null && _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
-            DeleteTvAsync(locKey);
+        // Server placement state is authoritative. Turning off a synced TV removes it
+        // from the area instead of storing a local hidden override.
+        if (!_enabled && !string.IsNullOrEmpty(locKey) && _plugin.CurrentTvPlacement != null) {
+            _ = DeleteTvAsync(locKey, restoreOnFailure: true);
+        } else {
+            _onSave?.Invoke();
         }
-        
-        _onSave?.Invoke();
       }
 
       if (!_enabled) {
@@ -309,7 +309,7 @@ namespace XivMediaPlayer.Windows {
               }
               ImGui.SameLine();
               if (ImGui.Button("Remove TV from Area")) {
-                  DeleteTvAsync(locationKey);
+                  _ = DeleteTvAsync(locationKey);
               }
           } else {
               if (_plugin.IsHousingMenuOpen || isOutdoorsSync || isIslandSync) {
@@ -330,37 +330,56 @@ namespace XivMediaPlayer.Windows {
       }
     }
 
-    public async void DeleteTvAsync(string locationKey) {
-        if (_plugin.CurrentTvPlacement == null) return;
+    public async System.Threading.Tasks.Task<bool> DeleteTvAsync(string locationKey, bool restoreOnFailure = false) {
+        if (_plugin.CurrentTvPlacement == null) return false;
+        var currentPlacement = _plugin.CurrentTvPlacement;
+        var serverLocationKey = string.IsNullOrEmpty(currentPlacement.LocationKey) ? locationKey : currentPlacement.LocationKey;
         
         _statusMessage = "Deleting TV from server...";
         _statusColor = new Vector4(1, 1, 1, 1);
         
         try {
-            bool isOutdoorsSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("zone_");
-            bool isIslandSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("island_");
-            bool success = await _plugin.ServerClient.DeleteTvAsync(locationKey, _plugin.CurrentTvPlacement.Id, _plugin.Config.OwnerId, _plugin.IsHousingMenuOpen || isOutdoorsSync || isIslandSync);
+            bool isOutdoorsSync = !string.IsNullOrEmpty(serverLocationKey) && serverLocationKey.StartsWith("zone_");
+            bool isIslandSync = !string.IsNullOrEmpty(serverLocationKey) && serverLocationKey.StartsWith("island_");
+            bool success = await _plugin.ServerClient.DeleteTvAsync(serverLocationKey, currentPlacement.Id, _plugin.Config.OwnerId, _plugin.IsHousingMenuOpen || isOutdoorsSync || isIslandSync);
             if (success) {
                 _plugin.CurrentTvPlacement = null;
                 _plugin.Config.ScreenPlacements.Remove(locationKey);
+                _plugin.Config.ScreenPlacements.Remove(serverLocationKey);
+                _transform.Enabled = false;
+                _enabled = false;
                 _plugin.Config.Save();
                 _statusMessage = "Successfully removed TV from the room!";
                 _statusColor = new Vector4(0.3f, 1f, 0.3f, 1);
                 _plugin.Chat.Print("[Media Player] " + _statusMessage);
+                return true;
             } else {
+                RestoreEnabledAfterDeleteFailure(restoreOnFailure);
                 _statusMessage = "Failed to remove TV.";
                 _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
                 _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+                return false;
             }
         } catch (UnauthorizedAccessException) {
+            RestoreEnabledAfterDeleteFailure(restoreOnFailure);
             _statusMessage = "Cannot delete TV: It is locked by its owner.";
             _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
             _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
         } catch (Exception) {
+            RestoreEnabledAfterDeleteFailure(restoreOnFailure);
             _statusMessage = "Network error while deleting TV.";
             _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
             _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
         }
+
+        return false;
+    }
+
+    private void RestoreEnabledAfterDeleteFailure(bool restoreOnFailure) {
+        if (!restoreOnFailure) return;
+
+        _enabled = true;
+        _transform.Enabled = true;
     }
 
     /// <summary>
@@ -420,6 +439,7 @@ namespace XivMediaPlayer.Windows {
       _statusColor = new Vector4(1, 1, 1, 1);
 
       var placement = new TvPlacement {
+        LocationKey = locationKey,
         PositionX = _position.X,
         PositionY = _position.Y,
         PositionZ = _position.Z,
@@ -440,7 +460,7 @@ namespace XivMediaPlayer.Windows {
       {
         var result = await _plugin.ServerClient.RegisterTvAsync(locationKey, placement);
         if (result != null) {
-          _plugin.CurrentTvPlacement = placement;
+          _plugin.CurrentTvPlacement = result;
           _statusMessage = "Successfully registered TV for all visitors!";
           _statusColor = new Vector4(0.3f, 1f, 0.3f, 1);
           _plugin.Chat.Print("[Media Player] " + _statusMessage);

@@ -1465,19 +1465,11 @@ namespace XivMediaPlayer
                     CurrentTvPlacement = tv;
 
                     // Apply to the ACTIVE renderer transform ONLY if we aren't actively editing it.
-                    // Preserve a local disabled state so fetching a public TV does not undo
-                    // the user's "Render in World" choice when re-entering a room.
+                    // Server placement state is authoritative: if a TV exists on the server,
+                    // render it unless the owner removes it from the area.
                     if (_worldRenderer != null && !IsHousingMenuOpen)
                     {
-                        bool renderEnabled = true;
-                        if ((_config.ScreenPlacements.TryGetValue(tv.LocationKey, out var savedPlacement) ||
-                             _config.ScreenPlacements.TryGetValue(primaryKey, out savedPlacement)) &&
-                            !savedPlacement.Enabled)
-                        {
-                            renderEnabled = false;
-                        }
-
-                        _worldRenderer.Transform.Enabled = renderEnabled;
+                        _worldRenderer.Transform.Enabled = true;
                         _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
                         _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
                         _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
@@ -3206,5 +3198,4 @@ namespace XivMediaPlayer
         #endregion
     }
 }
-
 
