@@ -1474,7 +1474,25 @@ namespace XivMediaPlayer
 
                     var tv = tvs[0];
                     CurrentTvPlacement = tv;
-                    _pluginLog.Info($"[Social] Loaded TV state from room {tv.LocationKey}.");
+
+                    // Apply to the ACTIVE renderer transform ONLY if we aren't actively editing it.
+                    // Server placement state is authoritative: if a TV exists on the server,
+                    // render it unless the owner removes it from the area.
+                    if (_worldRenderer != null && !IsHousingMenuOpen)
+                    {
+                        _worldRenderer.Transform.Enabled = true;
+                        _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
+                        _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
+                        _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
+
+                        // Sync back to config for saving
+                        _config.WorldScreen = _worldRenderer.Transform.Clone();
+                        _config.ScreenPlacements[tv.LocationKey] = _worldRenderer.Transform.Clone();
+                        _config.Save();
+                        _screenSettingsWindow?.SyncFromTransform();
+                    }
+
+                    _pluginLog.Info($"[Social] Loaded public TV placement from room {tv.LocationKey}.");
                 }
                 else
                 {
@@ -1513,10 +1531,12 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.RotationDegrees = saved.RotationDegrees;
                 _worldRenderer.Transform.Scale = saved.Scale;
                 _worldRenderer.Transform.Enabled = saved.Enabled;
+                _screenSettingsWindow?.SyncFromTransform();
             }
             else
             {
                 _worldRenderer.Transform.Enabled = false; // Turn off 3D screen in new zones by default
+                _screenSettingsWindow?.SyncFromTransform();
             }
         }
 
@@ -3211,5 +3231,4 @@ namespace XivMediaPlayer
         #endregion
     }
 }
-
 
