@@ -95,9 +95,9 @@ namespace XivMediaPlayer.Windows {
       if (ImGui.Checkbox("Render in World", ref _enabled)) {
         _transform.Enabled = _enabled;
         
-        // Server placement state is authoritative. Turning off a synced TV removes it
-        // from the area instead of storing a local hidden override.
-        if (!_enabled && !string.IsNullOrEmpty(locKey) && _plugin.CurrentTvPlacement != null) {
+        // Auto-delete from server if turning off and we own it
+        if (!_enabled && !string.IsNullOrEmpty(locKey) &&
+            _plugin.CurrentTvPlacement != null && _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
             _ = DeleteTvAsync(locKey, restoreOnFailure: true);
         } else {
             _onSave?.Invoke();
@@ -435,7 +435,7 @@ namespace XivMediaPlayer.Windows {
       }
       _lastRegistrationTime = DateTime.UtcNow;
 
-      _statusMessage = "Syncing with server...";
+      _statusMessage = "Registering TV on server...";
       _statusColor = new Vector4(1, 1, 1, 1);
 
       var placement = new TvPlacement {

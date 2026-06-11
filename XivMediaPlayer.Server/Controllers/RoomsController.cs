@@ -45,7 +45,6 @@ namespace XivMediaPlayer.Server.Controllers
         {
             placement.LocationKey = locationKey;
             placement.LastUpdated = DateTime.UtcNow;
-            TvPlacement savedPlacement;
 
             var existing = await _db.TvPlacements.FirstOrDefaultAsync(t => t.LocationKey == locationKey);
             if (existing != null)
@@ -78,22 +77,21 @@ namespace XivMediaPlayer.Server.Controllers
                 existing.ScaleX = placement.ScaleX;
                 existing.ScaleY = placement.ScaleY;
                 existing.IsLocked = placement.IsLocked;
-                // Unlocked or bypass-authorized updates transfer ownership to the registering client.
+                // We do NOT update the OwnerId of an existing TV unless they were already the owner, 
+                // but if it wasn't locked they can technically steal it right now.
                 existing.OwnerId = placement.OwnerId;
                 existing.LastUpdated = placement.LastUpdated;
                 _db.TvPlacements.Update(existing);
-                savedPlacement = existing;
             }
             else
             {
                 // Add new TV
                 _db.TvPlacements.Add(placement);
-                savedPlacement = placement;
             }
 
             await _db.SaveChangesAsync();
 
-            return Ok(savedPlacement);
+            return Ok(placement);
         }
 
         [HttpDelete("{locationKey}/tvs/{tvId}")]
