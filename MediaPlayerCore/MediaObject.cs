@@ -519,6 +519,15 @@ namespace MediaPlayerCore {
                     _parent.LastFrame = new byte[totalBytes];
                 }
                 Marshal.Copy(_vlcBuffer, _parent.LastFrame, 0, totalBytes);
+                
+                unsafe {
+                    fixed (byte* ptr = _parent.LastFrame) {
+                        for (int i = 3; i < totalBytes; i += 4) {
+                            ptr[i] = 255;
+                        }
+                    }
+                }
+                
                 _parent.LastFrameWidth = (int)(_pitch / _bytePerPixel);
                 _parent.LastFrameHeight = (int)_lines;
                 _parent.LastFrameCount++;

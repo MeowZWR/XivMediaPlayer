@@ -250,6 +250,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           color = float4(0, 0, 0, 1);
       } else {
           color = VideoTexture.Sample(VideoSampler, sampleUV);
+          color.a = 1.0;
       }
       
       // XMP Screensaver
