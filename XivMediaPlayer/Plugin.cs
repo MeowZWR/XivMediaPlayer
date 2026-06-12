@@ -672,7 +672,7 @@ namespace XivMediaPlayer
                         if (_playerObject != null)
                         {
                             _lastStreamObject = CurrentAudioSource;
-                            PlayViaYtDlp(splitArgs[1], CurrentAudioSource, 0);
+                            PlayRouted(splitArgs[1], CurrentAudioSource, 0);
                         }
                     }
                     else
@@ -732,7 +732,7 @@ namespace XivMediaPlayer
                         {
                             // Invoke yt-dlp resolution
                             _chat.Print("[Media Player] Resolving URL via yt-dlp...");
-                            PlayViaYtDlp(url, CurrentAudioSource);
+                            PlayRouted(url, CurrentAudioSource);
                         }
                         else
                         {
@@ -798,7 +798,7 @@ namespace XivMediaPlayer
                 case "listen":
                     if (!string.IsNullOrEmpty(_potentialStream) && _playerObject != null)
                     {
-                        PlayViaYtDlp(_potentialStream, CurrentAudioSource, 0);
+                        PlayRouted(_potentialStream, CurrentAudioSource, 0);
                     }
                     break;
 
@@ -1002,6 +1002,17 @@ namespace XivMediaPlayer
             return false;
         }
 
+        private void PlayRouted(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
+        {
+            if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable())
+            {
+                PlayViaYtDlp(url, audioGameObject, startTimeMs, isAutoSync);
+            }
+            else
+            {
+                TuneIntoStream(url, audioGameObject, startTimeMs, null, isAutoSync);
+            }
+        }
         private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
             if (_disposed) return;
@@ -1404,10 +1415,7 @@ namespace XivMediaPlayer
                                 if (_mediaManager.IsAllowedToStartStream(audioGameObject))
                                 {
                                     _lastStreamObject = CurrentAudioSource;
-                                    PlayViaYtDlp(value
-                                      .Trim('(').Trim(')')
-                                      .Trim('[').Trim(']')
-                                      .Trim('!').Trim('@'), audioGameObject, 0);
+                                    PlayRouted(value.Trim('(').Trim(')').Trim('[').Trim(']').Trim('!').Trim('@'), audioGameObject, 0);
                                 }
                             }
                             break;
@@ -1601,7 +1609,7 @@ namespace XivMediaPlayer
                 {
                     _chat.Print($"[Media Player] Resuming playback in this room...");
                     _lastStreamObject = CurrentAudioSource;
-                    PlayViaYtDlp(state.CurrentUrl, CurrentAudioSource, (int)state.TimecodeMs, isAutoSync: true);
+                    PlayRouted(state.CurrentUrl, CurrentAudioSource, (int)state.TimecodeMs, isAutoSync: true);
                 }
             }
         }
@@ -1798,7 +1806,7 @@ namespace XivMediaPlayer
                     {
                         // Starts the stream. If sync.IsPlaying is false, we should pause it immediately after it loads...
                         // But yt-dlp might take a while, so we just let it start and the next poll will poll it.
-                        PlayViaYtDlp(state.CurrentUrl, CurrentAudioSource, (int)targetTimeMs, isAutoSync: true);
+                        PlayRouted(state.CurrentUrl, CurrentAudioSource, (int)targetTimeMs, isAutoSync: true);
                     }
                 });
             }
@@ -2428,7 +2436,7 @@ namespace XivMediaPlayer
                                                 EnqueueFrameworkAction(() =>
                                                 {
                                                     _chat.Print("[Media Player] Loading URL from clipboard...");
-                                                    PlayViaYtDlp(clip, CurrentAudioSource);
+                                                    PlayRouted(clip, CurrentAudioSource);
                                                 });
                                             }
                                             else
@@ -2458,7 +2466,7 @@ namespace XivMediaPlayer
                                                 _mediaQueue.Enqueue(clip);
                                                 _chat.Print($"[Media Player] Queued ({_mediaQueue.Count}): {clip}");
                                                 if (activeStream == null || activeStream.PlaybackState == NAudio.Wave.PlaybackState.Stopped)
-                                                    if (_playerObject != null) PlayViaYtDlp(_mediaQueue.Dequeue(), CurrentAudioSource);
+                                                    if (_playerObject != null) PlayRouted(_mediaQueue.Dequeue(), CurrentAudioSource);
                                                 else _ = PushMediaToServerAsync(false);
                                             });
                                         }
@@ -2519,7 +2527,7 @@ namespace XivMediaPlayer
                                     // Same routing logic as MediaBrowserWindow
                                     if (YtDlpManager.IsUrlSupported(clickedEntry.Url) && _ytDlpManager.IsAvailable())
                                     {
-                                        PlayViaYtDlp(clickedEntry.Url, CurrentAudioSource, (int)clickedEntry.TimecodeMs);
+                                        PlayRouted(clickedEntry.Url, CurrentAudioSource, (int)clickedEntry.TimecodeMs);
                                     }
                                     else
                                     {
@@ -2755,7 +2763,7 @@ namespace XivMediaPlayer
             // Route through yt-dlp if available, otherwise direct play
             if (YtDlpManager.IsUrlSupported(item.Url) && _ytDlpManager.IsAvailable())
             {
-                PlayViaYtDlp(item.Url, CurrentAudioSource, (int)item.StartTimeMs);
+                PlayRouted(item.Url, CurrentAudioSource, (int)item.StartTimeMs);
             }
             else
             {
@@ -2932,7 +2940,7 @@ namespace XivMediaPlayer
                 {
                     if (YtDlpManager.IsUrlSupported(lastMedia.Url) && _ytDlpManager.IsAvailable())
                     {
-                        PlayViaYtDlp(lastMedia.Url, CurrentAudioSource, (int)lastMedia.TimecodeMs);
+                        PlayRouted(lastMedia.Url, CurrentAudioSource, (int)lastMedia.TimecodeMs);
                     }
                     else
                     {
@@ -2954,7 +2962,7 @@ namespace XivMediaPlayer
                     _mediaManager?.StopStream();
                     if (YtDlpManager.IsUrlSupported(_lastStreamURL) && _ytDlpManager.IsAvailable())
                     {
-                        PlayViaYtDlp(_lastStreamURL, CurrentAudioSource, 0);
+                        PlayRouted(_lastStreamURL, CurrentAudioSource, 0);
                     }
                     else
                     {
@@ -3009,7 +3017,7 @@ namespace XivMediaPlayer
             }
 
             _chat.Print($"[Media Player] Playing next: {nextUrl}");
-            PlayViaYtDlp(nextUrl, CurrentAudioSource);
+            PlayRouted(nextUrl, CurrentAudioSource);
         }
 
         /// <summary>
@@ -3030,7 +3038,7 @@ namespace XivMediaPlayer
 
             string prevUrl = _mediaHistory.Pop();
             _chat.Print($"[Media Player] Playing previous: {prevUrl}");
-            PlayViaYtDlp(prevUrl, CurrentAudioSource);
+            PlayRouted(prevUrl, CurrentAudioSource);
         }
 
         /// <summary>
@@ -3091,7 +3099,7 @@ namespace XivMediaPlayer
             
             if (YtDlpManager.IsUrlSupported(_lastStreamURL) && _ytDlpManager.IsAvailable())
             {
-                PlayViaYtDlp(_lastStreamURL, CurrentAudioSource, currentTimeMs);
+                PlayRouted(_lastStreamURL, CurrentAudioSource, currentTimeMs);
             }
             else
             {
@@ -3151,7 +3159,7 @@ namespace XivMediaPlayer
             if (!string.IsNullOrEmpty(savedUrl) && _playerObject != null)
             {
                 _chat.Print("[Media Player] Resuming playback...");
-                PlayViaYtDlp(savedUrl, CurrentAudioSource, savedTimeMs);
+                PlayRouted(savedUrl, CurrentAudioSource, savedTimeMs);
             }
             else
             {
@@ -3237,5 +3245,8 @@ namespace XivMediaPlayer
         #endregion
     }
 }
+
+
+
 
 
