@@ -19,6 +19,12 @@ namespace XivMediaPlayer.Networking
         public sbyte RightStickX;
         public sbyte RightStickY;
 
+        public static sbyte ApplyDeadzone(sbyte rawValue, int deadzone = 24)
+        {
+            if (Math.Abs(rawValue) < deadzone) return 0;
+            return rawValue;
+        }
+
         public void Reset()
         {
             Buttons = 0;
@@ -46,6 +52,18 @@ namespace XivMediaPlayer.Networking
         {
             if (Math.Abs((int)a) > Math.Abs((int)b)) return a;
             return b;
+        }
+
+        public bool Equals(ControllerState other)
+        {
+            if (other == null) return false;
+            return this.Buttons == other.Buttons &&
+                   this.LeftTrigger == other.LeftTrigger &&
+                   this.RightTrigger == other.RightTrigger &&
+                   this.LeftStickX == other.LeftStickX &&
+                   this.LeftStickY == other.LeftStickY &&
+                   this.RightStickX == other.RightStickX &&
+                   this.RightStickY == other.RightStickY;
         }
 
         public byte[] ToPacket(byte ctrlIdx, byte[] sessionBytes)
@@ -140,6 +158,9 @@ namespace XivMediaPlayer.Networking
 
         private void SenderLoop()
         {
+            ControllerState lastSent = new ControllerState();
+            int unchangedFrames = 0;
+
             while (_running)
             {
                 var merged = new ControllerState();
@@ -149,11 +170,29 @@ namespace XivMediaPlayer.Networking
                     foreach (var s in _dsStates.Values) merged.Merge(s);
                 }
 
-                byte[] packet = merged.ToPacket(_remoteCtrlIdx, _sessionBytes);
-                try { _udpClient.Send(packet, packet.Length, _remoteEndPoint); }
-                catch { }
+                bool changed = !merged.Equals(lastSent);
+                if (changed)
+                {
+                    unchangedFrames = 0;
+                    lastSent = merged;
+                }
+                else
+                {
+                    unchangedFrames++;
+                }
 
-                Thread.Sleep(8); // ~120Hz transmit rate
+                // Send if state changed, OR if we recently changed (send a couple dupes to prevent UDP loss of button releases),
+                // OR send a keepalive packet every 20 frames (~160ms)
+                if (changed || unchangedFrames < 2 || unchangedFrames >= 20)
+                {
+                    if (unchangedFrames >= 20) unchangedFrames = 2; // Reset keepalive counter
+                    
+                    byte[] packet = merged.ToPacket(_remoteCtrlIdx, _sessionBytes);
+                    try { _udpClient.Send(packet, packet.Length, _remoteEndPoint); }
+                    catch { }
+                }
+
+                Thread.Sleep(8); // ~120Hz loop
             }
         }
 
@@ -169,10 +208,10 @@ namespace XivMediaPlayer.Networking
                         cs.Buttons = state.Gamepad.wButtons;
                         cs.LeftTrigger = state.Gamepad.bLeftTrigger;
                         cs.RightTrigger = state.Gamepad.bRightTrigger;
-                        cs.LeftStickX = (sbyte)(state.Gamepad.sThumbLX / 256);
-                        cs.LeftStickY = (sbyte)(state.Gamepad.sThumbLY / 256);
-                        cs.RightStickX = (sbyte)(state.Gamepad.sThumbRX / 256);
-                        cs.RightStickY = (sbyte)(state.Gamepad.sThumbRY / 256);
+                        cs.LeftStickX = ControllerState.ApplyDeadzone((sbyte)(state.Gamepad.sThumbLX / 256));
+                        cs.LeftStickY = ControllerState.ApplyDeadzone((sbyte)(state.Gamepad.sThumbLY / 256));
+                        cs.RightStickX = ControllerState.ApplyDeadzone((sbyte)(state.Gamepad.sThumbRX / 256));
+                        cs.RightStickY = ControllerState.ApplyDeadzone((sbyte)(state.Gamepad.sThumbRY / 256));
 
                         lock (_stateLock) { _xinputStates[i] = cs; }
                     }
@@ -228,10 +267,10 @@ namespace XivMediaPlayer.Networking
                         if (length > 0 && buffer[0] == 0x01)
                         {
                             var cs = new ControllerState();
-                            cs.LeftStickX = (sbyte)(buffer[1] - 128);
-                            cs.LeftStickY = (sbyte)Math.Clamp(128 - buffer[2], -128, 127);
-                            cs.RightStickX = (sbyte)(buffer[3] - 128);
-                            cs.RightStickY = (sbyte)Math.Clamp(128 - buffer[4], -128, 127);
+                            cs.LeftStickX = ControllerState.ApplyDeadzone((sbyte)(buffer[1] - 128));
+                            cs.LeftStickY = ControllerState.ApplyDeadzone((sbyte)Math.Clamp(128 - buffer[2], -128, 127));
+                            cs.RightStickX = ControllerState.ApplyDeadzone((sbyte)(buffer[3] - 128));
+                            cs.RightStickY = ControllerState.ApplyDeadzone((sbyte)Math.Clamp(128 - buffer[4], -128, 127));
                             cs.LeftTrigger = buffer[5];
                             cs.RightTrigger = buffer[6];
 

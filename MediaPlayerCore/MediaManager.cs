@@ -77,6 +77,18 @@ namespace MediaPlayerCore {
         Task.Run(() => {
             try {
                 StopFFmpegStream();
+
+                // Stop all VLC streams synchronously to prevent them from playing concurrently
+                MediaObject[] streams;
+                lock (_playbackStreams) {
+                    streams = _playbackStreams.Values.ToArray();
+                    _playbackStreams.Clear();
+                    streams = streams.Concat(_deadStreams).ToArray();
+                }
+                foreach (var stream in streams) {
+                    try { stream?.Dispose(); } catch { }
+                }
+
                 OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
                 
                 // _libVLCPath is e.g. ConfigDir/Dependencies

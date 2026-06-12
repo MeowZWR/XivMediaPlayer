@@ -147,9 +147,11 @@ namespace MediaPlayerCore
                         _waveOut.Init(_volumeProvider);
 
                         _ffmpegProcess.Start();
+                        try { _ffmpegProcess.PriorityClass = ProcessPriorityClass.High; } catch { }
                         _ffmpegProcess.BeginErrorReadLine();
 
                         Task.Run(() => {
+                            Thread.CurrentThread.Priority = ThreadPriority.Highest;
                             try {
                                 while (!_videoTcpListener.Pending()) {
                                     if (_disposed || (_ffmpegProcess != null && _ffmpegProcess.HasExited)) return;
@@ -173,12 +175,15 @@ namespace MediaPlayerCore
 
                                     if (bytesRead == _frameSize && !_disposed)
                                     {
-                                        lock (_parent.FrameLock)
-                                        {
-                                            if (_parent.LastFrame.Length != _frameSize)
-                                                _parent.LastFrame = new byte[_frameSize];
-                                            Buffer.BlockCopy(buffer, 0, _parent.LastFrame, 0, _frameSize);
-                                            _parent.LastFrameWidth = _width;
+                                          lock (_parent.FrameLock)
+                                          {
+                                              // Zero-copy pointer swap!
+                                              var temp = _parent.LastFrame;
+                                              _parent.LastFrame = buffer;
+                                              buffer = temp;
+                                              if (buffer.Length != _frameSize) buffer = new byte[_frameSize];
+
+                                              _parent.LastFrameWidth = _width;
                                             _parent.LastFrameHeight = _height;
                                             _parent.LastFrameCount++;
                                         }
@@ -192,6 +197,7 @@ namespace MediaPlayerCore
                         });
 
                         Task.Run(() => {
+                            Thread.CurrentThread.Priority = ThreadPriority.Highest;
                             try {
                                 while (!_audioTcpListener.Pending()) {
                                     if (_disposed || (_ffmpegProcess != null && _ffmpegProcess.HasExited)) return;

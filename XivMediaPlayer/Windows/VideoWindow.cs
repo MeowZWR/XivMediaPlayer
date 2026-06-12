@@ -103,7 +103,10 @@ namespace XivMediaPlayer.Windows {
              if (_localFrameBuffer.Length != _mediaManager.LastFrame.Length) {
                  _localFrameBuffer = new byte[_mediaManager.LastFrame.Length];
              }
-             Buffer.BlockCopy(_mediaManager.LastFrame, 0, _localFrameBuffer, 0, _localFrameBuffer.Length);
+             // Zero-copy pointer swap!
+             var temp = _localFrameBuffer;
+             _localFrameBuffer = _mediaManager.LastFrame;
+             _mediaManager.LastFrame = temp;
              needsUpdate = true;
           }
         }
