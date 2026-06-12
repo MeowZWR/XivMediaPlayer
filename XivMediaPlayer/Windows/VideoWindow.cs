@@ -332,10 +332,11 @@ namespace XivMediaPlayer.Windows {
         
         // --- Emulation Controller ---
         if (_plugin.CurrentStreamer == "Emulation" && _plugin.ControllerService != null) {
+          ImGui.Separator();
           ImGui.SetNextItemWidth(100f);
-          int slot = _plugin.ControllerService.PlayerSlot;
-          if (ImGui.Combo("Controller Slot", ref slot, "Player 1\0Player 2\0Player 3\0Player 4\0")) {
-              _plugin.ControllerService.PlayerSlot = (byte)slot;
+          int comboIdx = _plugin.ControllerService.PlayerSlot == 255 ? 4 : _plugin.ControllerService.PlayerSlot;
+          if (ImGui.Combo("Controller Slot", ref comboIdx, "Player 1\0Player 2\0Player 3\0Player 4\0None\0")) {
+              _plugin.ControllerService.PlayerSlot = comboIdx == 4 ? (byte)255 : (byte)comboIdx;
           }
         }
 

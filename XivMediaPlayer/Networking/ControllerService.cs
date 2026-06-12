@@ -115,7 +115,7 @@ namespace XivMediaPlayer.Networking
         public static extern int XInputGetState(int dwUserIndex, out XINPUT_STATE pState);
 
         private bool _running = true;
-        private byte _remoteCtrlIdx = 0;
+        private byte _remoteCtrlIdx = 255;
         public byte PlayerSlot { get => _remoteCtrlIdx; set => _remoteCtrlIdx = value; }
         private byte[] _sessionBytes;
         private UdpClient _udpClient;
