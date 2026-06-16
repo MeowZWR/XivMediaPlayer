@@ -2274,7 +2274,7 @@ namespace XivMediaPlayer
                         try
                         {
                             var sceneCamera = _camera->CameraBase.SceneCamera;
-                            var rawView = sceneCamera.ViewMatrix;
+                            var rawView = sceneCamera.RenderCamera != null ? sceneCamera.RenderCamera->ViewMatrix : sceneCamera.ViewMatrix;
                             var view = System.Runtime.CompilerServices.Unsafe.As<
                               FFXIVClientStructs.FFXIV.Common.Math.Matrix4x4,
                               System.Numerics.Matrix4x4>(ref rawView);
@@ -2764,7 +2764,7 @@ namespace XivMediaPlayer
             {
                 var sceneCamera = _camera->CameraBase.SceneCamera;
 
-                var rawView = sceneCamera.ViewMatrix;
+                var rawView = sceneCamera.RenderCamera != null ? sceneCamera.RenderCamera->ViewMatrix : sceneCamera.ViewMatrix;
                 var view = System.Runtime.CompilerServices.Unsafe.As<
                   FFXIVClientStructs.FFXIV.Common.Math.Matrix4x4,
                   System.Numerics.Matrix4x4>(ref rawView);
@@ -3025,10 +3025,22 @@ namespace XivMediaPlayer
         {
             if (_camera != null)
             {
-                var camRawPos = _camera->CameraBase.SceneCamera.Object.Position;
-                var camPos = new System.Numerics.Vector3(camRawPos.X, camRawPos.Y, camRawPos.Z);
-                var viewMatrix = _camera->CameraBase.SceneCamera.ViewMatrix;
-                var forward = new System.Numerics.Vector3(viewMatrix.M13, viewMatrix.M23, viewMatrix.M33);
+                var sceneCamera = _camera->CameraBase.SceneCamera;
+                var rawView = sceneCamera.RenderCamera != null ? sceneCamera.RenderCamera->ViewMatrix : sceneCamera.ViewMatrix;
+                
+                var viewMatrix = System.Runtime.CompilerServices.Unsafe.As<
+                  FFXIVClientStructs.FFXIV.Common.Math.Matrix4x4,
+                  System.Numerics.Matrix4x4>(ref rawView);
+                  
+                viewMatrix.M14 = 0f;
+                viewMatrix.M24 = 0f;
+                viewMatrix.M34 = 0f;
+                viewMatrix.M44 = 1f;
+                
+                System.Numerics.Matrix4x4.Invert(viewMatrix, out var invView);
+                var camPos = invView.Translation;
+                var forward = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(invView.M31, invView.M32, invView.M33));
+                
                 var screenPos = camPos - forward * 5.0f;
                 _worldRenderer.PlaceAt(screenPos, camPos);
                 _chat.Print($"[Media Player] Screen placed at ({screenPos.X:F1}, {screenPos.Y:F1}, {screenPos.Z:F1})");
