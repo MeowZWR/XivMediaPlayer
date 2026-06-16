@@ -279,7 +279,6 @@ namespace XivMediaPlayer.Compositing {
           nearPlane, farPlane,
           screenW, screenH,
           uiCapture?.BackBufferSRV,
-          uiCapture?.SceneDiffuseSRV,
           hoverUV, progress, isPlaying, lockState,
           minDepth, maxDepth, volume,
           depthCapture.RenderWidth, depthCapture.RenderHeight,
@@ -549,3 +548,4 @@ namespace XivMediaPlayer.Compositing {
     }
   }
 }
+

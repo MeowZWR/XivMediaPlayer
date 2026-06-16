@@ -18,8 +18,6 @@ namespace XivMediaPlayer.Compositing {
     private ID3D11Device _device;
     private ID3D11Texture2D _backBufferCopy;
     private ID3D11ShaderResourceView _backBufferSRV;
-    private ID3D11Texture2D _sceneDiffuseCopy;
-    private ID3D11ShaderResourceView _sceneDiffuseSRV;
     private ID3D11Texture2D _stagingTexture;
     private ID3D11Texture2D _previewStagingTexture;
     private int _width, _height;
@@ -38,7 +36,6 @@ namespace XivMediaPlayer.Compositing {
     public string DebugInfo => _debugInfo;
     public bool IsInitialized => _initialized;
     public ID3D11ShaderResourceView BackBufferSRV => _backBufferSRV;
-    public ID3D11ShaderResourceView SceneDiffuseSRV => _sceneDiffuseSRV;
     public byte[] LastAlphaData { get; private set; }
     public int CaptureWidth { get; private set; }
     public int CaptureHeight { get; private set; }
@@ -58,8 +55,7 @@ namespace XivMediaPlayer.Compositing {
         Marshal.AddRef(_context.Device.NativePointer);
         _device = _context.Device;
 
-        _addonLifecycle.RegisterListener(Dalamud.Game.Addon.Lifecycle.AddonEvent.PreDraw, System.Linq.Enumerable.Empty<string>(), OnAddonPreDraw);
-
+        
         _initialized = true;
         _debugInfo = "Initialized, waiting for first capture.";
         return true;
@@ -67,15 +63,6 @@ namespace XivMediaPlayer.Compositing {
         _debugInfo = $"Init failed: {ex.Message}";
         return false;
       }
-    }
-
-    private void OnAddonPreDraw(Dalamud.Game.Addon.Lifecycle.AddonEvent eventType, Dalamud.Game.Addon.Lifecycle.AddonArgTypes.AddonArgs args) {
-        if (_disposed || !_initialized) return;
-        if (!_preUiCapturedThisFrame) {
-            // First addon drawing! Capture the scene before any UI is drawn!
-            CapturePreUIScene();
-            _preUiCapturedThisFrame = true;
-        }
     }
 
     private bool CaptureToTexture(ref ID3D11Texture2D targetCopy, ref ID3D11ShaderResourceView targetSrv, bool isPreUI) {
@@ -165,9 +152,7 @@ namespace XivMediaPlayer.Compositing {
       }
     }
 
-    private void CapturePreUIScene() {
-        CaptureToTexture(ref _sceneDiffuseCopy, ref _sceneDiffuseSRV, true);
-    }
+
 
     /// <summary>
     /// Call at the very start of OnDraw, before any ImGui rendering.
@@ -349,13 +334,10 @@ namespace XivMediaPlayer.Compositing {
     public void Dispose() {
       if (_disposed) return;
       _disposed = true;
-      _addonLifecycle?.UnregisterListener(Dalamud.Game.Addon.Lifecycle.AddonEvent.PreDraw, System.Linq.Enumerable.Empty<string>(), OnAddonPreDraw);
-      _stagingTexture?.Dispose();
+            _stagingTexture?.Dispose();
       _previewStagingTexture?.Dispose();
       _backBufferSRV?.Dispose();
       _backBufferCopy?.Dispose();
-      _sceneDiffuseSRV?.Dispose();
-      _sceneDiffuseCopy?.Dispose();
       _context?.Dispose();
       _device?.Dispose();
       _device = null;
@@ -363,3 +345,5 @@ namespace XivMediaPlayer.Compositing {
     }
   }
 }
+
+

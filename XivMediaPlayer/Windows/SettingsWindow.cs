@@ -66,6 +66,18 @@ namespace XivMediaPlayer.Windows {
         _plugin.Config.Save();
       }
 
+      bool strictMasking = _plugin.Config.UIBlendThreshold > 0.5f;
+      if (ImGui.Checkbox("Strict UI Masking (AMD Fix / Invisible Drop Shadows)", ref strictMasking)) {
+        _plugin.Config.UIBlendThreshold = strictMasking ? (171.0f / 255.0f) : 0.0f;
+        if (_plugin.WorldRenderer != null) {
+            _plugin.WorldRenderer.UIBlendThreshold = _plugin.Config.UIBlendThreshold;
+        }
+        _plugin.Config.Save();
+      }
+      if (ImGui.IsItemHovered()) {
+        ImGui.SetTooltip("Enable this if you have an AMD card and see a massive brown box over the TV.\nThis perfectly cuts out UI text, but hides UI drop shadows.");
+      }
+
       ImGui.Spacing();
       ImGui.Spacing();
 
