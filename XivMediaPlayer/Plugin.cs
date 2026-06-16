@@ -397,10 +397,40 @@ namespace XivMediaPlayer
 
             if (_deferredTerritoryChangeTime.HasValue && DateTime.UtcNow >= _deferredTerritoryChangeTime.Value)
             {
-                _deferredTerritoryChangeTime = null;
-                RestoreScreenForCurrentLocation();
-                RestoreMediaForCurrentLocation();
-                _ = FetchServerDataForCurrentLocationAsync();
+                // Wait until local player and housing manager are fully loaded
+                bool isHousingLoaded = true;
+                if (_clientState.TerritoryType != 0)
+                {
+                    unsafe
+                    {
+                        var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+                        if (housingMgr != null && housingMgr->IsInside())
+                        {
+                            if (housingMgr->GetCurrentIndoorHouseId().Id == 0)
+                            {
+                                isHousingLoaded = false;
+                            }
+                        }
+                    }
+
+                    if (_cachedLocalPlayerWorldId == 0)
+                    {
+                        isHousingLoaded = false;
+                    }
+                }
+
+                if (isHousingLoaded)
+                {
+                    _deferredTerritoryChangeTime = null;
+                    RestoreScreenForCurrentLocation();
+                    RestoreMediaForCurrentLocation();
+                    _ = FetchServerDataForCurrentLocationAsync();
+                }
+                else
+                {
+                    // Delay another 0.5s to wait for loading to finish
+                    _deferredTerritoryChangeTime = DateTime.UtcNow.AddSeconds(0.5);
+                }
             }
 
             if (_deferredBgmRestoreTime.HasValue && DateTime.UtcNow >= _deferredBgmRestoreTime.Value)
@@ -464,6 +494,9 @@ namespace XivMediaPlayer
 
                     if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId != _config.OwnerId && !string.IsNullOrEmpty(LocationKey))
                     {
+                        // Only re-register if the server TV belongs to someone else.
+                        // If it's ours already, the server coordinates are authoritative and we don't
+                        // want to overwrite them with stale local coordinates.
                         CurrentTvPlacement.OwnerId = _config.OwnerId;
                         _pluginLog.Info($"[Social] Automatically restoring TV ownership for {LocationKey} because housing menu was opened.");
                         _screenSettingsWindow.RegisterTvAsync(LocationKey);
@@ -1505,6 +1538,23 @@ namespace XivMediaPlayer
                         
                         _screenSettingsWindow?.SyncFromTransform();
                     }
+
+                    // Persist server coordinates into local config so that RestoreScreenForCurrentLocation
+                    // (which fires before this async fetch completes) won't push stale coordinates.
+                    // This prevents co-owners of the same house from overwriting each other's TV placement.
+                    var serverKey = !string.IsNullOrEmpty(tv.LocationKey) ? tv.LocationKey : primaryKey;
+                    _config.ScreenPlacements[serverKey] = new MediaPlayerCore.Compositing.WorldScreenTransform {
+                        Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ),
+                        RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ),
+                        Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY),
+                        Enabled = true
+                    };
+                    // Also store under the primary key in case they differ (e.g. batch vs single key)
+                    if (serverKey != primaryKey)
+                    {
+                        _config.ScreenPlacements[primaryKey] = _config.ScreenPlacements[serverKey];
+                    }
+                    _config.Save();
 
                     _pluginLog.Info($"[Social] Loaded public TV placement from room {tv.LocationKey}.");
                 }
