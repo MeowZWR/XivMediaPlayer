@@ -55,6 +55,7 @@ namespace MediaPlayerCore.YtDlp
         private Thread? _cookieListenerThread;
         private bool _isListeningForCookies;
         private readonly List<Process> _runningProcesses = new();
+        private Timer? _orphanCleanupTimer;
 
         public event EventHandler<string>? OnStatusUpdate;
         public event EventHandler<Exception>? OnError;
@@ -84,6 +85,40 @@ namespace MediaPlayerCore.YtDlp
             _preferredMaxHeight = preferredMaxHeight;
             _cookiesPath = FindCookiesFile();
             StartCookieListener();
+            _orphanCleanupTimer = new Timer(CleanupOrphanedProcesses, null, 5000, 60000);
+        }
+
+        private void CleanupOrphanedProcesses(object? state)
+        {
+            try
+            {
+                var processes = Process.GetProcessesByName("yt-dlp");
+                foreach (var p in processes)
+                {
+                    try
+                    {
+                        if (p.HasExited) continue;
+
+                        string? path = p.MainModule?.FileName;
+                        if (string.Equals(path, _ytDlpPath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            bool isTracked = false;
+                            lock (_runningProcesses)
+                            {
+                                _runningProcesses.RemoveAll(rp => rp.HasExited);
+                                isTracked = _runningProcesses.Any(rp => rp.Id == p.Id);
+                            }
+
+                            if (!isTracked)
+                            {
+                                p.Kill(true);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
         }
 
         private void StartCookieListener()
@@ -171,6 +206,7 @@ namespace MediaPlayerCore.YtDlp
 
         public void Dispose()
         {
+            _orphanCleanupTimer?.Dispose();
             _isListeningForCookies = false;
             try
             {
