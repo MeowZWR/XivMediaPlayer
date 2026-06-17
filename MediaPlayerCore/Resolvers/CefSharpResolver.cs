@@ -93,6 +93,19 @@ namespace MediaPlayerCore.Resolvers
             settings.LocalesDirPath = Path.Combine(cefDir, "locales");
             settings.ResourcesDirPath = cefDir;
 
+            try
+            {
+                // Dalamud uses a private, self-contained .NET runtime. CefSharp's out-of-process renderer
+                // won't know where to find it unless we explicitly set DOTNET_ROOT.
+                string runtimeDir = System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory();
+                var dirInfo = new DirectoryInfo(runtimeDir);
+                if (dirInfo.Parent?.Parent?.Parent != null)
+                {
+                    Environment.SetEnvironmentVariable("DOTNET_ROOT", dirInfo.Parent.Parent.Parent.FullName);
+                }
+            }
+            catch { }
+
             if (CefSharp.Cef.IsInitialized != true)
             {
                 if (!CefSharp.Cef.Initialize(settings, performDependencyCheck: false, browserProcessHandler: null))
