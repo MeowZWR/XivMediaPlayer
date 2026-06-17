@@ -681,7 +681,7 @@ namespace XivMediaPlayer
                 var player = _objectTable[0];
                 if (player != null)
                 {
-                    _pluginLog.Debug($"[Media Player] Found LocalPlayer from ObjectTable: {player.Name}");
+                    // _pluginLog.Debug($"[Media Player] Found LocalPlayer from ObjectTable: {player.Name}");
                 }
                 return player;
             }
@@ -1622,7 +1622,7 @@ namespace XivMediaPlayer
         /// </summary>
         private void SaveMediaStateForCurrentLocation()
         {
-            var key = _lastLocationKey;
+            var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             if (string.IsNullOrEmpty(key)) return;
 
             var state = new RoomMediaState();
@@ -1651,7 +1651,7 @@ namespace XivMediaPlayer
         /// </summary>
         private void RestoreMediaForCurrentLocation()
         {
-            var key = GetLocationKey();
+            var key = CurrentTvPlacement?.LocationKey ?? GetLocationKey();
             if (string.IsNullOrEmpty(key)) return;
 
             // Track location for future saving
@@ -1683,7 +1683,7 @@ namespace XivMediaPlayer
 
         private async Task PushMediaToServerAsync(bool isBackgroundSync = false)
         {
-            var key = _lastLocationKey;
+            var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             var activeStream = _mediaManager?.ActiveStream;
             string lastUrl = CleanUrl(_lastStreamURL ?? "");
             string soundPath = activeStream?.SoundPath ?? "";
@@ -1810,7 +1810,7 @@ namespace XivMediaPlayer
 
         public async Task FetchMediaFromServerAsync()
         {
-            var key = _lastLocationKey;
+            var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             _pluginLog.Information($"[Sync] FetchMediaFromServerAsync invoked. Key: {key}");
             if (string.IsNullOrEmpty(key)) return;
             bool isHouse = key.StartsWith("house_");
