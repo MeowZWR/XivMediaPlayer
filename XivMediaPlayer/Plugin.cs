@@ -9,12 +9,10 @@ using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using XivMediaPlayer.GameObjects;
 using XivMediaPlayer.Windows;
 using MediaPlayerCore;
-using MediaPlayerCore.Catalog;
 using MediaPlayerCore.Compositing;
 using MediaPlayerCore.Twitch;
 using MediaPlayerCore.YtDlp;
 using XivMediaPlayer.Compositing;
-using XivMediaPlayer.Providers;
 using Dalamud.Bindings.ImGui;
 using System;
 using System.Collections.Generic;
@@ -55,7 +53,6 @@ namespace XivMediaPlayer
         private readonly WindowSystem _windowSystem;
         private readonly VideoWindow _videoWindow;
         private readonly SettingsWindow _settingsWindow;
-        private readonly MediaBrowserWindow _browserWindow;
         private readonly ScreenSettingsWindow _screenSettingsWindow;
         internal ScreenSettingsWindow ScreenSettingsWindow => _screenSettingsWindow;
         private WorldVideoRenderer _worldRenderer;
@@ -284,7 +281,6 @@ namespace XivMediaPlayer
             _windowSystem = new WindowSystem("XivMediaPlayer");
             _videoWindow = new VideoWindow(this, _pluginInterface, _textureProvider, _pluginLog);
             _settingsWindow = new SettingsWindow(this, FixWindowsVolume);
-            _browserWindow = new MediaBrowserWindow();
             _screenSettingsWindow = new ScreenSettingsWindow(
               this,
               _gameGui,
@@ -298,20 +294,6 @@ namespace XivMediaPlayer
               onPlaceAtCamera: () => PlaceScreenAtCamera()
             );
 
-            // Set up catalog providers
-            string playlistDir = Path.Combine(Path.GetDirectoryName(_pluginInterface.AssemblyLocation.FullName) ?? "", "playlists");
-            var localProvider = new LocalPlaylistProvider(playlistDir);
-            localProvider.CreateSamplePlaylist();
-            _browserWindow.AddProvider(localProvider);
-
-            if (_ytDlpManager.IsAvailable())
-            {
-                var ytProvider = new YtDlpPlaylistProvider(_ytDlpManager);
-                _browserWindow.AddProvider(ytProvider);
-            }
-
-            _browserWindow.AddProvider(new HistoryMediaProvider(_config));
-
             _depthCapture = new DepthBufferCapture();
             _depthCapture.Initialize();
 
@@ -320,11 +302,8 @@ namespace XivMediaPlayer
             _depthPreviewWindow.UICapture = _uiCapture;
             _depthPreviewWindow.Config = _config;
 
-            _browserWindow.OnPlayRequested += OnBrowserPlayRequested;
-
             _windowSystem.AddWindow(_videoWindow);
             _windowSystem.AddWindow(_settingsWindow);
-            _windowSystem.AddWindow(_browserWindow);
             _windowSystem.AddWindow(_screenSettingsWindow);
             _windowSystem.AddWindow(_depthPreviewWindow);
 
@@ -842,9 +821,6 @@ namespace XivMediaPlayer
 
                 case "video":
                     _videoWindow.IsOpen = !_videoWindow.IsOpen;
-                    break;
-                case "browse":
-                    _browserWindow.IsOpen = true;
                     break;
 
                 case "emulate":
@@ -2845,23 +2821,6 @@ namespace XivMediaPlayer
                     RestoreMediaForCurrentLocation();
                     _ = FetchServerDataForCurrentLocationAsync();
                 }
-            }
-        }
-
-        private void OnBrowserPlayRequested(object? sender, MediaCatalogItem item)
-        {
-            if (_disposed || _playerObject == null) return;
-
-            _lastStreamObject = CurrentAudioSource;
-
-            // Route through yt-dlp if available, otherwise direct play
-            if (YtDlpManager.IsUrlSupported(item.Url) && _ytDlpManager.IsAvailable())
-            {
-                PlayRouted(item.Url, CurrentAudioSource, (int)item.StartTimeMs);
-            }
-            else
-            {
-                TuneIntoStream(item.Url, CurrentAudioSource, (int)item.StartTimeMs);
             }
         }
 

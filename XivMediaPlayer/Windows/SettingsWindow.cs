@@ -207,9 +207,31 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
       ImGui.Spacing();
 
-      // Support
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Support");
+      // Help & Support
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Help & Support");
       ImGui.Separator();
+
+      if (ImGui.Button("Tutorial Video (How to Place TVs)")) {
+          try {
+              System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                  FileName = "https://www.youtube.com/watch?v=ZgLs2OJQ8ks",
+                  UseShellExecute = true
+              });
+          } catch { }
+      }
+
+      ImGui.SameLine();
+
+      if (ImGui.Button("Join Support Discord")) {
+          try {
+              System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                  FileName = "https://discord.gg/rtGXwMn7pX",
+                  UseShellExecute = true
+              });
+          } catch { }
+      }
+
+      ImGui.Spacing();
 
       if (ImGui.Button("Support the Developer on Ko-fi")) {
           try {

@@ -82,6 +82,13 @@ namespace XivMediaPlayer.Windows {
       if (!hasPrivileges) {
           ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Housing Menu Required");
           ImGui.TextWrapped("To place or sync a screen, please open the 'Indoor Furnishings' menu in-game.");
+          ImGui.Spacing();
+          if (ImGui.Button("Tutorial Video")) {
+              System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                  FileName = "https://www.youtube.com/watch?v=ZgLs2OJQ8ks",
+                  UseShellExecute = true
+              });
+          }
           return;
       }
 
@@ -102,6 +109,15 @@ namespace XivMediaPlayer.Windows {
         } else {
             _onSave?.Invoke();
         }
+      }
+
+      ImGui.SameLine();
+      ImGui.SetCursorPosX(ImGui.GetWindowWidth() - 110);
+      if (ImGui.Button("Tutorial Video")) {
+          System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+              FileName = "https://www.youtube.com/watch?v=ZgLs2OJQ8ks",
+              UseShellExecute = true
+          });
       }
 
       if (!_enabled) {
