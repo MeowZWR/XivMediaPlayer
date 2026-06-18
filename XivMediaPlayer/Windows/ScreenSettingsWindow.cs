@@ -128,9 +128,9 @@ namespace XivMediaPlayer.Windows {
 
       ImGui.Separator();
 
-      // Shift quick-snap logic
-      bool isShiftPressed = ImGui.GetIO().KeyShift;
-      if (isShiftPressed && !_wasShiftPressed) {
+      // Ctrl+Shift quick-snap logic
+      bool isSnapKeyPressed = ImGui.GetIO().KeyShift && ImGui.GetIO().KeyCtrl;
+      if (isSnapKeyPressed && !_wasShiftPressed) {
           unsafe {
               var hm = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
               if (hm != null && hm->IndoorTerritory != null) {
@@ -148,7 +148,7 @@ namespace XivMediaPlayer.Windows {
               }
           }
       }
-      _wasShiftPressed = isShiftPressed;
+      _wasShiftPressed = isSnapKeyPressed;
 
       // Quick actions 
       if (ImGui.Button("Place at Camera")) {
@@ -159,7 +159,7 @@ namespace XivMediaPlayer.Windows {
       
       ImGui.Spacing();
       ImGui.TextColored(new Vector4(0.7f, 1f, 0.7f, 1f), "Quick Snap:");
-      ImGui.TextWrapped("Hold SHIFT while hovering over or selecting a furnishing in Edit Mode to instantly snap the TV to it.");
+      ImGui.TextWrapped("Hold CTRL + SHIFT while hovering over or selecting a furnishing in Edit Mode to instantly snap the TV to it.");
       ImGui.Spacing();
       
       if (ImGui.Button("Save")) {
