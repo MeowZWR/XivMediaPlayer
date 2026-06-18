@@ -40,6 +40,8 @@ namespace XivMediaPlayer.Compositing {
     public byte[] LastColorData { get; private set; }
     public int CaptureWidth { get; private set; }
     public int CaptureHeight { get; private set; }
+    public int Width => _width;
+    public int Height => _height;
     public bool Initialize() {
       if (_initialized || _disposed) return _initialized;
 

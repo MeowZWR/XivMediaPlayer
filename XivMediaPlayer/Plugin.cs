@@ -2246,7 +2246,7 @@ namespace XivMediaPlayer
                     System.Numerics.Vector3 cameraRight = System.Numerics.Vector3.UnitX;
                     System.Numerics.Vector3 cameraUp = System.Numerics.Vector3.UnitY;
 
-                    if (_worldRenderer.UseDepthOcclusion && _camera != null)
+                    if (_camera != null)
                     {
                         try
                         {
@@ -2314,7 +2314,35 @@ namespace XivMediaPlayer
                     bool vBL = _gameGui.WorldToScreen(bl, out var sBL);
 
                     System.Numerics.Vector2 uv = new System.Numerics.Vector2(-1, -1);
-                    if (vTL || vTR || vBR || vBL)
+                    if (cameraPos.HasValue && cameraForward.HasValue)
+                    {
+                        var viewport = ImGui.GetMainViewport();
+                        float ndcX = ((mousePos.X - viewport.Pos.X) / viewport.Size.X) * 2f - 1f;
+                        float ndcY = -(((mousePos.Y - viewport.Pos.Y) / viewport.Size.Y) * 2f - 1f);
+
+                        float fovDist = 1.0f / (float)Math.Tan(fovY * 0.5f);
+                        var rayOrigin = cameraPos.Value;
+                        var rayDir = System.Numerics.Vector3.Normalize(ndcX * aspectRatio * cameraRight + ndcY * cameraUp - fovDist * cameraForward.Value);
+
+                        var tvRight = tr - tl;
+                        var tvDown = bl - tl;
+                        var tvNormal = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(tvRight, tvDown));
+
+                        float denom = System.Numerics.Vector3.Dot(tvNormal, rayDir);
+                        if (Math.Abs(denom) > 1e-6f)
+                        {
+                            float t = System.Numerics.Vector3.Dot(tl - rayOrigin, tvNormal) / denom;
+                            if (t > 0f)
+                            {
+                                var hitPoint = rayOrigin + rayDir * t;
+                                var d = hitPoint - tl;
+                                float u = System.Numerics.Vector3.Dot(d, tvRight) / tvRight.LengthSquared();
+                                float v = System.Numerics.Vector3.Dot(d, tvDown) / tvDown.LengthSquared();
+                                uv = new System.Numerics.Vector2(u, v);
+                            }
+                        }
+                    }
+                    else if (vTL || vTR || vBR || vBL)
                     {
                         uv = MathUtils.InverseBilinear(mousePos, sTL, sTR, sBR, sBL);
                     }
@@ -2322,7 +2350,13 @@ namespace XivMediaPlayer
                     // UI Alpha Mask Check
                     if (_uiCapture != null && uv.X >= 0 && uv.Y >= 0)
                     {
-                        float alpha = _uiCapture.GetPixelAlpha((int)mousePos.X, (int)mousePos.Y);
+                        var io = ImGui.GetIO();
+                        float scaleX = io.DisplaySize.X > 0 ? _uiCapture.Width / io.DisplaySize.X : 1.0f;
+                        float scaleY = io.DisplaySize.Y > 0 ? _uiCapture.Height / io.DisplaySize.Y : 1.0f;
+                        int physX = (int)(mousePos.X * scaleX);
+                        int physY = (int)(mousePos.Y * scaleY);
+
+                        float alpha = _uiCapture.GetPixelAlpha(physX, physY);
                         if (alpha > 0f)
                         {
                             uv = new System.Numerics.Vector2(-1, -1);
