@@ -2278,7 +2278,7 @@ namespace XivMediaPlayer
                         isPlaying = true;
                     }
                     
-                    if (isPlaying) {
+                    if (isPlaying || _isResolvingMedia) {
                         _screensaverTimer.Stop();
                         _screensaverTimer.Reset();
                     } else {
