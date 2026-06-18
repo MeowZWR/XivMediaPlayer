@@ -561,8 +561,8 @@ namespace XivMediaPlayer
                 bool isMediaOwner = _isLocalDj;
 
                 // Only push if actively playing or loading.
-                // Paused media halts pushing to allow DataAgeMs to increment.
-                if (isMediaOwner && ((_mediaManager?.ActiveStream != null && !_isIntentionallyPaused) || !string.IsNullOrEmpty(_lastStreamURL)))
+                // Paused media should continue pushing so clients don't think the DJ crashed.
+                if (isMediaOwner && ((_mediaManager?.ActiveStream != null) || !string.IsNullOrEmpty(_lastStreamURL)))
                 {
                     if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
                     {
@@ -1408,7 +1408,7 @@ namespace XivMediaPlayer
             }
         }
 
-        private unsafe void ResetStreamValues()
+        private unsafe void ResetStreamValues(bool pushToServer = true)
         {
             _lastStreamObject = null;
             _streamURLs = null;
@@ -1436,7 +1436,9 @@ namespace XivMediaPlayer
                 _deferredBgmRestoreTime = DateTime.UtcNow.AddSeconds(1);
             }
 
-            _ = PushMediaToServerAsync(isBackgroundSync: false);
+            if (pushToServer) {
+                _ = PushMediaToServerAsync(isBackgroundSync: false);
+            }
         }
 
         #endregion
@@ -1511,7 +1513,7 @@ namespace XivMediaPlayer
             _videoWindow.IsOpen = false;
             if (_screenSettingsWindow != null) _screenSettingsWindow.IsOpen = false;
             _mediaManager?.CleanSounds();
-            ResetStreamValues();
+            ResetStreamValues(false);
             CurrentTvPlacement = null;
 
             _deferredTerritoryChangeTime = DateTime.UtcNow.AddSeconds(3);
