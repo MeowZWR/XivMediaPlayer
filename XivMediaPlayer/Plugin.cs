@@ -515,7 +515,18 @@ namespace XivMediaPlayer
                     // If it changed purely due to grid crossing, not territory
                     if (!string.IsNullOrEmpty(currentLocKey) && currentLocKey.StartsWith("zone_"))
                     {
+                        bool wasPublicTv = _worldRenderer?.Transform.Enabled == true;
+
                         RestoreScreenForCurrentLocation();
+
+                        bool isPublicTv = _worldRenderer?.Transform.Enabled == true;
+
+                        // If we are leaving a TV, entering a TV, or moving between TVs, stop the old stream to prevent double audio
+                        if (wasPublicTv || isPublicTv) 
+                        {
+                            _mediaManager?.StopStream();
+                        }
+
                         RestoreMediaForCurrentLocation();
                         _ = FetchServerDataForCurrentLocationAsync();
                     }
