@@ -308,7 +308,26 @@ namespace XivMediaPlayer.Windows {
       if (string.IsNullOrEmpty(locationKey) || (!locationKey.StartsWith("house_") && !locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_"))) {
           ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "You must be inside a housing area or valid outdoor zone to sync TVs.");
       } else {
-          ImGui.Text($"Location Key: {locationKey}");
+          unsafe
+          {
+              var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+              if (housingMgr != null && !housingMgr->IsInside() && housingMgr->GetCurrentPlot() >= 0 && housingMgr->GetCurrentWard() >= 0)
+              {
+                  ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), $"You are standing in Plot {housingMgr->GetCurrentPlot() + 1}");
+              }
+          }
+          
+          ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Placement Key:");
+          ImGui.SameLine();
+          ImGui.Text(locationKey);
+
+          if (_plugin.CurrentTvPlacement != null)
+          {
+              ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), "Synced TV Key:");
+              ImGui.SameLine();
+              ImGui.Text(_plugin.CurrentTvPlacement.LocationKey);
+          }
+
           if (_plugin.CurrentTvPlacement == null || _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
               bool isLocked = _plugin.CurrentTvPlacement?.IsLocked ?? !isOutdoorsSync;
               if (!isOutdoorsSync) {

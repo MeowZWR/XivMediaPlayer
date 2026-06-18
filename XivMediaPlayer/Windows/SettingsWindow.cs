@@ -201,6 +201,28 @@ namespace XivMediaPlayer.Windows {
       ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Debug");
       ImGui.Separator();
 
+      unsafe
+      {
+          var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+          if (housingMgr != null && !housingMgr->IsInside() && housingMgr->GetCurrentPlot() >= 0 && housingMgr->GetCurrentWard() >= 0)
+          {
+              ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), $"You are standing in Plot {housingMgr->GetCurrentPlot() + 1}");
+          }
+      }
+
+      string locationKey = _plugin.LocationKey;
+      ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Placement Key:");
+      ImGui.SameLine();
+      ImGui.Text(locationKey ?? "Unknown");
+
+      if (_plugin.CurrentTvPlacement != null)
+      {
+          ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), "Synced TV Key:");
+          ImGui.SameLine();
+          ImGui.Text(_plugin.CurrentTvPlacement.LocationKey);
+      }
+      ImGui.Spacing();
+
       bool verboseChat = _plugin.Config.VerboseChatLogging;
       if (ImGui.Checkbox("Enable Verbose Chat Logging", ref verboseChat)) {
         _plugin.Config.VerboseChatLogging = verboseChat;

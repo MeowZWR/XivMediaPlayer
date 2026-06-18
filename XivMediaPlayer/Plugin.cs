@@ -1526,13 +1526,14 @@ namespace XivMediaPlayer
 
                 if (tvs.Count > 0)
                 {
-                    // If multiple TVs are found, select the one closest to the player
+                    // If multiple TVs are found, prioritize exact key match (plot over grid), then closest to player
                     if (tvs.Count > 1)
                     {
                         var playerPos = _cachedLocalPlayerPosition;
                         if (playerPos != null)
                         {
-                            tvs = tvs.OrderBy(t => System.Numerics.Vector3.Distance(playerPos.Value, new System.Numerics.Vector3(t.PositionX, t.PositionY, t.PositionZ))).ToList();
+                            tvs = tvs.OrderBy(t => t.LocationKey != primaryKey)
+                                     .ThenBy(t => System.Numerics.Vector3.Distance(playerPos.Value, new System.Numerics.Vector3(t.PositionX, t.PositionY, t.PositionZ))).ToList();
                         }
                     }
 
@@ -1958,13 +1959,30 @@ namespace XivMediaPlayer
         /// Regular zones: "zone_{territoryId}"
         /// Housing: "house_{worldId}_{territoryId}_{ward}_{plot}_{room}"
         /// </summary>
-        public List<string> GetCurrentLocationKeys()
+        public unsafe List<string> GetCurrentLocationKeys()
         {
             var keys = new List<string>();
-            var key = GetLocationKey();
-            if (!string.IsNullOrEmpty(key))
+            var primaryKey = GetLocationKey();
+            if (!string.IsNullOrEmpty(primaryKey))
             {
-                keys.Add(key);
+                keys.Add(primaryKey);
+                
+                // If standing on a plot, also search the fallback grid for TVs in case a plot TV doesn't exist
+                if (primaryKey.Contains("_plot_"))
+                {
+                    var territoryId = _clientState.TerritoryType;
+                    ushort worldId = (ushort)_cachedLocalPlayerWorldId;
+                    var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+                    short ward = housingMgr != null ? housingMgr->GetCurrentWard() : (short)-1;
+
+                    var playerPos = _cachedLocalPlayerPosition;
+                    if (playerPos != null)
+                    {
+                        int gridX = (int)Math.Floor(playerPos.Value.X / 60.0f);
+                        int gridZ = (int)Math.Floor(playerPos.Value.Z / 60.0f);
+                        keys.Add($"zone_{worldId}_{ward}_{territoryId}_grid_{gridX}_{gridZ}");
+                    }
+                }
             }
             return keys;
         }
@@ -1987,6 +2005,11 @@ namespace XivMediaPlayer
                 if (housingMgr != null && housingMgr->IsInside())
                 {
                     return $"house_{worldId}_{territoryId}_{ward}_{plot}_{room}_{indoorHouseId}";
+                }
+
+                if (housingMgr != null && plot >= 0 && ward >= 0)
+                {
+                    return $"zone_{worldId}_{ward}_{territoryId}_plot_{plot}";
                 }
 
                 if (territoryId == 1055)
@@ -2027,8 +2050,8 @@ namespace XivMediaPlayer
                 var playerPos = _cachedLocalPlayerPosition;
                 if (playerPos != null)
                 {
-                    int gridX = (int)Math.Floor(playerPos.Value.X / 50.0f);
-                    int gridZ = (int)Math.Floor(playerPos.Value.Z / 50.0f);
+                    int gridX = (int)Math.Floor(playerPos.Value.X / 60.0f);
+                    int gridZ = (int)Math.Floor(playerPos.Value.Z / 60.0f);
                     return $"zone_{worldId}_{ward}_{territoryId}_grid_{gridX}_{gridZ}";
                 }
 
@@ -2722,8 +2745,8 @@ namespace XivMediaPlayer
             uint color = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0, 1, 0, 0.5f));
             float thickness = 2.0f;
 
-            int currentGridX = (int)Math.Floor(playerPos.Value.X / 50.0f);
-            int currentGridZ = (int)Math.Floor(playerPos.Value.Z / 50.0f);
+            int currentGridX = (int)Math.Floor(playerPos.Value.X / 60.0f);
+            int currentGridZ = (int)Math.Floor(playerPos.Value.Z / 60.0f);
 
             void DrawLineSegmented(System.Numerics.Vector3 pStart, System.Numerics.Vector3 pEnd)
             {
@@ -2745,14 +2768,14 @@ namespace XivMediaPlayer
             {
                 for (int dz = -2; dz <= 2; dz++)
                 {
-                    float startX = (currentGridX + dx) * 50.0f;
-                    float startZ = (currentGridZ + dz) * 50.0f;
+                    float startX = (currentGridX + dx) * 60.0f;
+                    float startZ = (currentGridZ + dz) * 60.0f;
                     float y = playerPos.Value.Y;
 
                     var p1 = new System.Numerics.Vector3(startX, y, startZ);
-                    var p2 = new System.Numerics.Vector3(startX + 50f, y, startZ);
-                    var p3 = new System.Numerics.Vector3(startX + 50f, y, startZ + 50f);
-                    var p4 = new System.Numerics.Vector3(startX, y, startZ + 50f);
+                    var p2 = new System.Numerics.Vector3(startX + 60f, y, startZ);
+                    var p3 = new System.Numerics.Vector3(startX + 60f, y, startZ + 60f);
+                    var p4 = new System.Numerics.Vector3(startX, y, startZ + 60f);
 
                     DrawLineSegmented(p1, p2);
                     DrawLineSegmented(p2, p3);
