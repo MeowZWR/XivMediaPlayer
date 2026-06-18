@@ -1411,6 +1411,7 @@ namespace XivMediaPlayer
             _streamSetCooldown.Stop();
             _streamSetCooldown.Reset();
             _mediaErrorCount = 0; // Reset error count when stream stops
+            _isLocalDj = false;
 
             if (wasPlaying)
             {
