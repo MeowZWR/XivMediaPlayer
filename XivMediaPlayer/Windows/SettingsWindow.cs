@@ -198,7 +198,7 @@ namespace XivMediaPlayer.Windows {
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
         "yt-dlp is automatically downloaded and updated.");
 
-      if (_plugin.MediaManager?.YtDlpManager != null && !_plugin.MediaManager.YtDlpManager.HasCookiesFile) {
+      if (_plugin.YtDlpManager != null && !_plugin.YtDlpManager.HasCookiesFile) {
         ImGui.Spacing();
         ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Warning: No cookies.txt found!");
         ImGui.TextWrapped("YouTube now heavily blocks players without cookies. To fix this, you must install the VRCVideoCacher extension in your browser, which locally syncs your cookie data.");

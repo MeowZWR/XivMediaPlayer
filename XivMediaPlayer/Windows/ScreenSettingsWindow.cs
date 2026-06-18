@@ -102,9 +102,9 @@ namespace XivMediaPlayer.Windows {
       if (ImGui.Checkbox("Render in World", ref _enabled)) {
         _transform.Enabled = _enabled;
         
-        // Auto-delete from server if turning off and we own it
+        // Auto-delete from server if turning off and we own it or have privileges
         if (!_enabled && !string.IsNullOrEmpty(locKey) &&
-            _plugin.CurrentTvPlacement != null && _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
+            _plugin.CurrentTvPlacement != null && (_plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId || hasPrivileges)) {
             _ = DeleteTvAsync(locKey, restoreOnFailure: true);
         } else {
             _onSave?.Invoke();
@@ -171,7 +171,13 @@ namespace XivMediaPlayer.Windows {
         _transform.Enabled = false;
         _enabled = false;
         SyncFromTransform();
-        _onSave?.Invoke();
+        
+        string locKey2 = _plugin.LocationKey;
+        if (!string.IsNullOrEmpty(locKey2) && _plugin.CurrentTvPlacement != null && (_plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId || hasPrivileges)) {
+            _ = DeleteTvAsync(locKey2, restoreOnFailure: true);
+        } else {
+            _onSave?.Invoke();
+        }
       }
 
       ImGui.Spacing();
