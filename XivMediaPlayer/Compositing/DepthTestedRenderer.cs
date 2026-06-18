@@ -506,14 +506,21 @@ float4 PS(VS_OUT input) : SV_TARGET {
          else if (px < 0.7 && px < 1.0 - abs(py - 0.5) * 2.0) color.rgb = float3(1, 1, 1);
       }
       
+      // Stop (0.27 - 0.31)
+      if (uv.x > 0.27 && uv.x < 0.31 && uv.y > 0.88 && uv.y < 0.94) {
+         float px = (uv.x - 0.27) / 0.04;
+         float py = (uv.y - 0.88) / 0.06;
+         if (px > 0.1 && px < 0.9 && py > 0.1 && py < 0.9) color.rgb = float3(1, 1, 1);
+      }
+      
       // Seek Bar & Volume Track
-      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.28 && uv.x < 0.58) {
-         float barProgress = (uv.x - 0.28) / 0.30;
+      if (uv.y > 0.90 && uv.y < 0.92 && uv.x > 0.32 && uv.x < 0.60) {
+         float barProgress = (uv.x - 0.32) / 0.28;
          if (barProgress < Progress) color.rgb = float3(0.8, 0.2, 0.2);
          else color.rgb = float3(0.3, 0.3, 0.3);
       }
-      if (uv.y > 0.95 && uv.y < 0.97 && uv.x > 0.28 && uv.x < 0.58) {
-         float volProgress = (uv.x - 0.28) / 0.30;
+      if (uv.y > 0.95 && uv.y < 0.97 && uv.x > 0.32 && uv.x < 0.60) {
+         float volProgress = (uv.x - 0.32) / 0.28;
          if (volProgress < Volume / 3.0) color.rgb = float3(0.2, 0.6, 0.8);
          else color.rgb = float3(0.3, 0.3, 0.3);
       }

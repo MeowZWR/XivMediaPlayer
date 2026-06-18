@@ -1661,8 +1661,8 @@ namespace XivMediaPlayer
                     }
                 }
 
-                // Start playback if there was a URL
-                if (!string.IsNullOrEmpty(state.CurrentUrl) && _playerObject != null)
+                // Start playback if there was a URL and auto resume is enabled
+                if (_config.AutoResumeMedia && !string.IsNullOrEmpty(state.CurrentUrl) && _playerObject != null)
                 {
                     _chat.Print($"[Media Player] Resuming playback in this room...");
                     _lastStreamObject = CurrentAudioSource;
@@ -2469,6 +2469,11 @@ namespace XivMediaPlayer
                                 {
                                     PlayNext();
                                 }
+                                // Stop (0.27 - 0.31)
+                                else if (uv.X >= 0.27f && uv.X <= 0.31f)
+                                {
+                                    Stop();
+                                }
 
                                 // Loop (0.62 - 0.66)
                                 else if (uv.X >= 0.62f && uv.X <= 0.66f)
@@ -2555,10 +2560,10 @@ namespace XivMediaPlayer
                                         }
                                     });
                                 }
-                                // Kill (0.95 - 0.99)
+                                // Kill/Stop (0.95 - 0.99)
                                 else if (uv.X >= 0.95f && uv.X <= 0.99f)
                                 {
-                                    RequestKillAndRestart();
+                                    Stop();
                                 }
                             }
                             // History Top Left (0.02 - 0.08, 0.04 - 0.12)
@@ -3041,6 +3046,25 @@ namespace XivMediaPlayer
         }
 
         /// <summary>
+        /// Completely stops playback, clears the queue, and clears the saved room resume state.
+        /// </summary>
+        public void Stop()
+        {
+            _chat.Print("[Media Player] Stopping media and clearing queue...");
+            _mediaManager?.StopStream();
+            _mediaQueue.Clear();
+            ResetStreamValues(true);
+
+            // Clear the saved room state so it doesn't auto-resume next time we enter
+            var key = CurrentTvPlacement?.LocationKey ?? GetLocationKey();
+            if (!string.IsNullOrEmpty(key) && _config.RoomMediaStates.ContainsKey(key))
+            {
+                _config.RoomMediaStates.Remove(key);
+                _config.Save();
+            }
+        }
+
+        /// <summary>
         /// Toggles play/pause on the current stream.
         /// </summary>
         public void TogglePlayPause()
@@ -3048,19 +3072,6 @@ namespace XivMediaPlayer
             var activeStream = _mediaManager?.ActiveStream;
             if (activeStream == null)
             {
-                // Play last media from history if available
-                var lastMedia = _config.WatchHistory.Values.OrderByDescending(x => x.LastPlayed).FirstOrDefault();
-                if (lastMedia != null)
-                {
-                    if (YtDlpManager.IsUrlSupported(lastMedia.Url) && _ytDlpManager.IsAvailable())
-                    {
-                        PlayRouted(lastMedia.Url, CurrentAudioSource, (int)lastMedia.TimecodeMs);
-                    }
-                    else
-                    {
-                        TuneIntoStream(lastMedia.Url, CurrentAudioSource, (int)lastMedia.TimecodeMs);
-                    }
-                }
                 return;
             }
 

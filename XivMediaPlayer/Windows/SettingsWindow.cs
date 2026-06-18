@@ -66,6 +66,13 @@ namespace XivMediaPlayer.Windows {
         _plugin.Config.Save();
       }
 
+      bool autoResume = _plugin.Config.AutoResumeMedia;
+      if (ImGui.Checkbox("Auto-resume media when entering locations", ref autoResume)) {
+        _plugin.Config.AutoResumeMedia = autoResume;
+        _plugin.Config.Save();
+      }
+
+
       /*
       bool strictMasking = _plugin.Config.UIBlendThreshold > 0.5f;
       if (ImGui.Checkbox("Strict UI Masking (AMD Fix / Invisible Drop Shadows)", ref strictMasking)) {
@@ -96,6 +103,12 @@ namespace XivMediaPlayer.Windows {
       }
       if (ImGui.IsItemHovered()) {
         ImGui.SetTooltip("Allows clicking the TV even if the game UI overlaps it. Useful if your visual mods heavily interfere with UI mask detection.");
+      }
+
+      if (ImGui.Button("Clear Watch History")) {
+        _plugin.Config.WatchHistory.Clear();
+        _plugin.Config.Save();
+        _plugin.Chat.Print("[Media Player] Watch history cleared.");
       }
 
       ImGui.Spacing();
