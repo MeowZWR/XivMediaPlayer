@@ -1825,7 +1825,19 @@ namespace XivMediaPlayer
 
             _currentMediaOwnerId = sync.OwnerId;
 
-            if (_isLocalDj) return;
+            if (_isLocalDj)
+            {
+                // Media change events override DJ status. If someone else changed the URL, step down!
+                if (sync.OwnerId != _config.OwnerId && sync.CurrentUrl != _lastStreamURL)
+                {
+                    _pluginLog.Information($"[Social] Another player entered in new media! Stepping down as DJ.");
+                    _isLocalDj = false;
+                }
+                else
+                {
+                    return;
+                }
+            }
 
             int realPlayerCount = _cachedRealPlayerCount;
             bool isRoomEmpty = realPlayerCount <= 1; // 1 means only we are here
