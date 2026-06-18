@@ -2497,25 +2497,25 @@ namespace XivMediaPlayer
                                 // Lock (0.80 - 0.84)
                                 else if (uv.X >= 0.80f && uv.X <= 0.84f)
                                 {
-                                    bool isOutdoors = !string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("zone_");
-                                    if (!isOutdoors) {
-                                        if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
+                                    if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
+                                    {
+                                        CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
+                                        if (!string.IsNullOrEmpty(LocationKey))
                                         {
-                                            CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
-                                            if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_"))
-                                            {
-                                                _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                                _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked" : "Unlocked")}.");
-                                            }
-                                        }
-                                        else if (CurrentTvPlacement == null)
-                                        {
-                                            CurrentTvPlacement = new Networking.Models.TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
                                             _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                            _chat.Print("[Media Player] TV registered and Unlocked.");
+                                            _chat.Print($"[Media Player] TV is now {(CurrentTvPlacement.IsLocked ? "Locked" : "Unlocked")}.");
                                         }
-                                        else { _chat.Print("[Media Player] You do not own this TV."); }
                                     }
+                                    else if (CurrentTvPlacement == null)
+                                    {
+                                        CurrentTvPlacement = new Networking.Models.TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
+                                        if (!string.IsNullOrEmpty(LocationKey))
+                                        {
+                                            _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                                        }
+                                        _chat.Print("[Media Player] TV registered and Unlocked.");
+                                    }
+                                    else { _chat.Print("[Media Player] You do not own this TV."); }
                                 }
                                 // Paste (0.85 - 0.89)
                                 else if (uv.X >= 0.85f && uv.X <= 0.89f)
@@ -2634,9 +2634,6 @@ namespace XivMediaPlayer
 
                     bool isLocked = CurrentTvPlacement?.IsLocked ?? true;
                     float lockState = isLocked ? 1.0f : 0.0f;
-                    if (!string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("zone_")) {
-                        lockState = -1.0f;
-                    }
                     if (_currentStreamer == "Emulation") {
                         lockState = -1.0f;
                     }
