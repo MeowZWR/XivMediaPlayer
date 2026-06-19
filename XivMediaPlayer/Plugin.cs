@@ -1693,15 +1693,16 @@ namespace XivMediaPlayer
             }
         }
 
-        private async Task PushMediaToServerAsync(bool isBackgroundSync = false)
+        public async Task PushMediaToServerAsync(bool isBackgroundSync, long? overrideTimeMs = null)
         {
             var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
+            
             var activeStream = _mediaManager?.ActiveStream;
             string lastUrl = CleanUrl(_lastStreamURL ?? "");
             string soundPath = activeStream?.SoundPath ?? "";
             // Never let local StreamProxy URLs (e.g. http://127.0.0.1:xxxxx/stream.m3u8?sid=...) leak as fallback
             if (soundPath.Contains("127.0.0.1")) soundPath = "";
-            long activeTime = (long)(activeStream?.Time ?? 0);
+            long activeTime = overrideTimeMs ?? (long)(activeStream?.Time ?? 0);
             bool isIntentionallyPaused = _isIntentionallyPaused;
             var mediaQueueArray = _mediaQueue.ToArray();
             var duration = _currentMediaDurationMs;
@@ -2434,9 +2435,10 @@ namespace XivMediaPlayer
                                 if (activeStream != null)
                                 {
                                     float seekProgress = (uv.X - 0.32f) / 0.28f;
-                                    activeStream.Time = (long)(seekProgress * activeStream.Length);
+                                    long newTime = (long)(seekProgress * activeStream.Length);
+                                    activeStream.Time = newTime;
                                     _isLocalDj = true;
-                                    _ = PushMediaToServerAsync(isBackgroundSync: false);
+                                    _ = PushMediaToServerAsync(isBackgroundSync: false, overrideTimeMs: newTime);
                                 }
                             }
                         }
@@ -3100,7 +3102,7 @@ namespace XivMediaPlayer
 
             if (_isLocalDj)
             {
-                _ = PushMediaToServerAsync(isBackgroundSync: false);
+                _ = PushMediaToServerAsync(isBackgroundSync: false, overrideTimeMs: newTime);
             }
         }
 
