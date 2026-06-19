@@ -2425,6 +2425,11 @@ namespace XivMediaPlayer
                         _clickStartedOnTv = isOnTv;
                     }
 
+                    if (_clickStartedOnTv && isLeftMousePressed)
+                    {
+                        ImGui.GetIO().WantCaptureMouse = true;
+                    }
+
                     if (isOnTv)
                     {
                         hoverUV = uv;
