@@ -1037,6 +1037,12 @@ namespace XivMediaPlayer
         private void PlayRouted(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
             url = CleanUrl(url);
+
+            if (startTimeMs == 0 && (url.Contains("youtube.com") || url.Contains("youtu.be")))
+            {
+                startTimeMs = ExtractYouTubeStartTimeMs(url);
+            }
+
             if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable())
             {
                 PlayViaYtDlp(url, audioGameObject, startTimeMs, isAutoSync);
@@ -2982,8 +2988,87 @@ namespace XivMediaPlayer
                 }
                 catch { }
             }
+            // Clean YouTube tracking noise (si, feature, pp, etc.)
+            if (url.Contains("youtube.com") || url.Contains("youtu.be"))
+            {
+                try
+                {
+                    var uri = new Uri(url);
+                    if (uri.Host.Contains("youtu.be"))
+                    {
+                        // youtu.be/ID?si=noise -> just keep the path
+                        url = uri.GetLeftPart(UriPartial.Path);
+                    }
+                    else if (uri.Host.Contains("youtube.com") && uri.AbsolutePath.Contains("/watch"))
+                    {
+                        string q = uri.Query;
+                        if (q.StartsWith("?")) q = q.Substring(1);
+                        var parts = q.Split('&');
+                        var keep = new System.Collections.Generic.List<string>();
+                        foreach (var part in parts)
+                        {
+                            if (part.StartsWith("v=") || part.StartsWith("list=") || part.StartsWith("t="))
+                            {
+                                keep.Add(part);
+                            }
+                        }
+                        url = uri.GetLeftPart(UriPartial.Path) + (keep.Count > 0 ? "?" + string.Join("&", keep) : "");
+                    }
+                }
+                catch { }
+            }
 
             return url;
+        }
+
+        private static int ExtractYouTubeStartTimeMs(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return 0;
+            try
+            {
+                var uri = new Uri(url);
+                string q = uri.Query;
+                if (q.StartsWith("?")) q = q.Substring(1);
+                var parts = q.Split('&');
+                foreach (var part in parts)
+                {
+                    if (part.StartsWith("t="))
+                    {
+                        string tVal = part.Substring(2);
+                        return ParseYouTubeTime(tVal);
+                    }
+                }
+            }
+            catch { }
+            return 0;
+        }
+
+        private static int ParseYouTubeTime(string tVal)
+        {
+            if (string.IsNullOrWhiteSpace(tVal)) return 0;
+            
+            if (int.TryParse(tVal, out int rawSeconds))
+            {
+                return rawSeconds * 1000;
+            }
+
+            int totalSeconds = 0;
+            int currentNum = 0;
+            foreach (char c in tVal)
+            {
+                if (char.IsDigit(c))
+                {
+                    currentNum = currentNum * 10 + (c - '0');
+                }
+                else
+                {
+                    if (c == 'h') totalSeconds += currentNum * 3600;
+                    else if (c == 'm') totalSeconds += currentNum * 60;
+                    else if (c == 's') totalSeconds += currentNum;
+                    currentNum = 0;
+                }
+            }
+            return totalSeconds * 1000;
         }
 
         private static string RemoveSpecialSymbols(string value)
