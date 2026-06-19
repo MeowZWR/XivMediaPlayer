@@ -1050,6 +1050,7 @@ namespace XivMediaPlayer
         {
             if (_disposed) return;
             UpdateWatchHistory();
+            DateTime resolutionStartTime = DateTime.UtcNow;
 
             url = CleanUrl(url);
 
@@ -1292,7 +1293,13 @@ namespace XivMediaPlayer
                             playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(resolvedStreamUrl, resolvedHeaders);
                         }
 
-                        _mediaManager.PlayStream(audioGameObject, playUrl, _config.SpatialAudioEnabled, startTimeMs, resolvedHeaders);
+                        int finalStartTimeMs = startTimeMs;
+                        if (isAutoSync && !isLive)
+                        {
+                            finalStartTimeMs += (int)(DateTime.UtcNow - resolutionStartTime).TotalMilliseconds;
+                        }
+
+                        _mediaManager.PlayStream(audioGameObject, playUrl, _config.SpatialAudioEnabled, finalStartTimeMs, resolvedHeaders);
                         _lastStreamURL = url;
                         _currentMediaDurationMs = resolvedDurationMs;
                         _currentStreamer = !string.IsNullOrEmpty(uploader) ? uploader : title;
@@ -1866,6 +1873,17 @@ namespace XivMediaPlayer
             // We only add the age if the video is currently playing.
             var targetTimeMs = sync.IsPlaying ? sync.TimecodeMs + (long)sync.DataAgeMs : sync.TimecodeMs;
 
+            if (sync.DurationMs.HasValue && sync.DurationMs.Value > 0)
+            {
+                // If the DJ left without pausing, the server assumes it's still playing infinitely.
+                // Cap the target time to just before the end so VLC naturally triggers EndReached instead of silently failing and restarting!
+                if (targetTimeMs >= sync.DurationMs.Value)
+                {
+                    targetTimeMs = (long)sync.DurationMs.Value - 500;
+                    if (targetTimeMs < 0) targetTimeMs = 0;
+                }
+            }
+
             _pluginLog.Information($"[Social] Fetched media sync: Server TimecodeMs={sync.TimecodeMs}, DataAgeMs={sync.DataAgeMs}. Calculated TargetTimeMs={targetTimeMs}.");
 
             // Update local config
@@ -1889,7 +1907,7 @@ namespace XivMediaPlayer
             bool isLocalEnded = activeStream != null && activeStream.VlcState == LibVLCSharp.Shared.VLCState.Ended;
             bool isDifferentUrl = activeStream == null || (!string.IsNullOrEmpty(_lastStreamURL) && _lastStreamURL != sync.CurrentUrl) || (isLocalEnded && sync.IsPlaying);
             // Only sync VODs. Live streams cannot be reliably timecode-synced.
-            bool isOutofSync = !_lastStreamIsLive && activeStream != null && activeStream.Length > 0 && Math.Abs(activeStream.Time - targetTimeMs) > 5000;
+            bool isOutofSync = !_lastStreamIsLive && activeStream != null && activeStream.Length > 0 && Math.Abs(activeStream.Time - targetTimeMs) > 2500;
             bool localIsPlaying = activeStream != null && activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
 
             if (isDifferentUrl)
