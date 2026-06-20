@@ -965,7 +965,6 @@ namespace XivMediaPlayer
                 return;
             }
 
-            string cleanedURL = RemoveSpecialSymbols(url);
             _streamURLs = new string[] { url };
             _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
             if (_streamURLs.Length > 0)
@@ -976,7 +975,7 @@ namespace XivMediaPlayer
                     playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(playUrl, httpHeaders);
                 }
                 _mediaManager.PlayStream(audioGameObject, playUrl, _config.SpatialAudioEnabled, startTimeMs, httpHeaders);
-                _lastStreamURL = cleanedURL;
+                _lastStreamURL = url;
                 _currentStreamer = "Stream";
                 PrintVerbose(@"[Media Player] Playing stream!" +
                   "\r\nUse \"/media video\" to toggle the video feed." +
