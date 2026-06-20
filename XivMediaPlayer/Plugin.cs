@@ -1115,7 +1115,14 @@ namespace XivMediaPlayer
                 string playUrl = url;
                 if (playUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 {
-                    playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(url, null);
+                    if (urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
+                    {
+                        playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterStream(url, null);
+                    }
+                    else
+                    {
+                        playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(url, null);
+                    }
                 }
 
                 _mediaManager.PlayStream(audioGameObject, playUrl, _config.SpatialAudioEnabled, startTimeMs, null);
