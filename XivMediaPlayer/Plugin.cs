@@ -2911,7 +2911,7 @@ namespace XivMediaPlayer
 
                     // Stabilize the combined ViewProjection matrix to filter out both
                     // camera float drift AND TAA/DLSS/FSR projection sub-pixel jitter.
-                    if (diff < 0.1f)
+                    if (diff < 0.002f)
                     {
                         vp = _lastStabilizedVP.Value;
                     }
