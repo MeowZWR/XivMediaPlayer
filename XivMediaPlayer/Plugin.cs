@@ -1927,7 +1927,7 @@ namespace XivMediaPlayer
                 _pluginLog.Information($"[Social] Syncing NEW media from server: {sync.CurrentUrl} at {targetTimeMs}ms (Playing: {sync.IsPlaying})");
                 EnqueueFrameworkAction(() =>
                 {
-                    _chat.Print($"[Media Player] Server Sync: Now playing media loaded by the room owner!");
+                    _chat.Print($"[Media Player] Server Sync: Now playing media loaded by the room owner.");
 
                     _mediaQueue.Clear();
                     foreach (var url in state.Playlist) _mediaQueue.Enqueue(url);
@@ -1960,7 +1960,7 @@ namespace XivMediaPlayer
                 {
                     if (sync.IsPlaying && !localIsPlaying)
                     {
-                        _pluginLog.Information($"[Social] Server says play, but we are paused. Resuming!");
+                        _pluginLog.Information($"[Social] Server says play, but we are paused. Resuming.");
                         activeStream.Resume();
                     }
                     else if (!sync.IsPlaying && localIsPlaying)
@@ -1970,12 +1970,12 @@ namespace XivMediaPlayer
                         // Check sync staleness or new stream status
                         if (sync.DataAgeMs < 15000 || isNewlyLoaded)
                         {
-                            _pluginLog.Information($"[Social] Server says paused (NewlyLoaded: {isNewlyLoaded}). Pausing!");
+                            _pluginLog.Information($"[Social] Server says paused (NewlyLoaded: {isNewlyLoaded}). Pausing.");
                             activeStream.Pause();
                         }
                         else
                         {
-                            _pluginLog.Information($"[Social] Server says paused, but it is {sync.DataAgeMs}ms old. Ignoring!");
+                            _pluginLog.Information($"[Social] Server says paused, but it is {sync.DataAgeMs}ms old. Ignoring.");
                         }
                     }
                 }
@@ -2123,13 +2123,13 @@ namespace XivMediaPlayer
             if ((DateTime.UtcNow - _lastMediaErrorTime).TotalMilliseconds < 500)
             {
                 // Group errors that occur within 500ms into a single "error event"
-                _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred! (grouped)");
+                _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred. (grouped)");
                 return;
             }
 
             _lastMediaErrorTime = DateTime.UtcNow;
             _mediaErrorCount++;
-            _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred! Error count: {_mediaErrorCount}");
+            _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred. Error count: {_mediaErrorCount}");
             if (_mediaErrorCount < 5)
             {
                 RequestRefreshCurrentMedia();
