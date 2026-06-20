@@ -186,7 +186,7 @@ namespace XivMediaPlayer.Windows {
           }
         }
 
-        // --- Seek Slider (VODs only) ---
+        //  Seek Slider (VODs only) 
         if (_mediaManager != null) {
           var activeStream = _mediaManager.ActiveStream;
           if (activeStream != null && activeStream.Length > 0) {
@@ -217,7 +217,7 @@ namespace XivMediaPlayer.Windows {
           }
         }
 
-        // --- Transport Controls ---
+        //  Transport Controls 
         if (_plugin != null) {
           float btnW = 36;
           float btnH = 24;
@@ -339,7 +339,7 @@ namespace XivMediaPlayer.Windows {
           if (ImGui.IsItemHovered()) ImGui.SetTooltip("Kill the media pipeline and restart it");
         }
 
-        // --- Volume Slider ---
+        //  Volume Slider 
         if (_mediaManager != null) {
           ImGui.SetNextItemWidth(-(ImGui.CalcTextSize("Volume").X + ImGui.GetStyle().ItemInnerSpacing.X));
           int vol = (int)(_mediaManager.LiveStreamVolume * 100f);
@@ -348,7 +348,7 @@ namespace XivMediaPlayer.Windows {
           }
         }
         
-        // --- Emulation Controller ---
+        //  Emulation Controller 
         if (_plugin.CurrentStreamer == "Emulation" && _plugin.ControllerService != null) {
           ImGui.Separator();
           ImGui.SetNextItemWidth(100f);
