@@ -105,6 +105,15 @@ namespace XivMediaPlayer.Windows {
         ImGui.SetTooltip("Allows clicking the TV even if the game UI overlaps it. Useful if your visual mods heavily interfere with UI mask detection.");
       }
 
+      bool enableWanderersCampfireFix = _plugin.Config.EnableWanderersCampfireFix;
+      if (ImGui.Checkbox("Enable Wanderer's Campfire Fix (For Modded Campfires)", ref enableWanderersCampfireFix)) {
+        _plugin.Config.EnableWanderersCampfireFix = enableWanderersCampfireFix;
+        _plugin.Config.Save();
+      }
+      if (ImGui.IsItemHovered()) {
+        ImGui.SetTooltip("Enable this if you use a modded invisible Wanderer's Campfire minion to bypass the indoor skybox occlusion. Leave off if you use the unmodded minion.");
+      }
+
       if (ImGui.Button("Clear Watch History")) {
         _plugin.Config.WatchHistory.Clear();
         _plugin.Config.Save();
