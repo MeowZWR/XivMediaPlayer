@@ -111,7 +111,7 @@ namespace XivMediaPlayer.Windows {
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Enable this if you modded skybox mods that replace Wanderer's Campfire.");
+        ImGui.SetTooltip("Enable this if you use modded skybox mods that replace Wanderer's Campfire.");
       }
 
       if (ImGui.Button("Clear Watch History")) {
