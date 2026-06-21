@@ -111,7 +111,7 @@ namespace XivMediaPlayer.Windows {
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Enable this if you use a modded invisible Wanderer's Campfire minion to bypass the indoor skybox occlusion. Leave off if you use the unmodded minion.");
+        ImGui.SetTooltip("Enable this if you modded skybox mods that replace Wanderer's Campfire.");
       }
 
       if (ImGui.Button("Clear Watch History")) {
