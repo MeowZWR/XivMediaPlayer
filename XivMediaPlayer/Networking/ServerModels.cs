@@ -17,6 +17,8 @@ namespace XivMediaPlayer.Networking.Models
         public string OwnerId { get; set; } = string.Empty;
         public bool IsLocked { get; set; } = false;
         public bool BypassLock { get; set; } = false;
+        public float Opacity { get; set; } = 1.0f;
+        public bool IsProjectorMode { get; set; } = false;
         public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     }
 

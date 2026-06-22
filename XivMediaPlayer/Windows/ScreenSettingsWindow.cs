@@ -29,6 +29,9 @@ namespace XivMediaPlayer.Windows {
     private bool _enabled;
     private bool _wasShiftPressed;
     private int _aspectRatio = 0; // 0 = 16:9, 1 = 4:3
+    
+    private float _opacity = 1.0f;
+    private bool _isProjectorMode = false;
 
     // Drag state for world-space interaction
     private bool _isDragging;
@@ -63,6 +66,8 @@ namespace XivMediaPlayer.Windows {
       _rotation = new Vector2(_transform.RotationDegrees.Y, _transform.RotationDegrees.X); // yaw, pitch
       _scale = _transform.Scale;
       _enabled = _transform.Enabled;
+      _opacity = _transform.Opacity;
+      _isProjectorMode = _transform.IsProjectorMode;
     }
 
     private void SyncToTransform() {
@@ -70,6 +75,8 @@ namespace XivMediaPlayer.Windows {
       _transform.RotationDegrees = new Vector3(_rotation.Y, _rotation.X, 0); // pitch, yaw, roll
       _transform.Scale = _scale;
       _transform.Enabled = _enabled;
+      _transform.Opacity = _opacity;
+      _transform.IsProjectorMode = _isProjectorMode;
     }
 
     public override void Draw() {
@@ -275,6 +282,25 @@ namespace XivMediaPlayer.Windows {
       ImGui.SameLine();
       if (ImGui.Button("Cinema (12m)")) { _scale.X = 12f; _scale.Y = _scale.X * (_aspectRatio == 0 ? (9f/16f) : (3f/4f)); _transform.Scale = _scale; _onSave?.Invoke(); }
 
+      ImGui.Spacing();
+      ImGui.Separator();
+
+      // Projector & Transparency
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Projector & Transparency");
+      
+      bool appearanceChanged = false;
+      appearanceChanged |= ImGui.Checkbox("Projector Mode (Additive Blend)", ref _isProjectorMode);
+      
+      appearanceChanged |= ImGui.SliderFloat("Opacity", ref _opacity, 0.05f, 1.0f, "%.2f");
+      bool saveAppearance = ImGui.IsItemDeactivatedAfterEdit();
+      
+      if (appearanceChanged) {
+        _transform.Opacity = _opacity;
+        _transform.IsProjectorMode = _isProjectorMode;
+      }
+      if (saveAppearance || appearanceChanged) {
+        _onSave?.Invoke();
+      }
 
       ImGui.Spacing();
       ImGui.Separator();
@@ -489,6 +515,8 @@ namespace XivMediaPlayer.Windows {
         RotationZ = _transform.RotationDegrees.Z,
         ScaleX = _scale.X,
         ScaleY = _scale.Y,
+        Opacity = _opacity,
+        IsProjectorMode = _isProjectorMode,
         OwnerId = _plugin.Config.OwnerId,
         IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? (!locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_")),
         BypassLock = _plugin.IsHousingMenuOpen || locationKey.StartsWith("zone_") || locationKey.StartsWith("island_")

@@ -1591,7 +1591,9 @@ namespace XivMediaPlayer
                         Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ),
                         RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ),
                         Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY),
-                        Enabled = true
+                        Enabled = true,
+                        Opacity = tv.Opacity,
+                        IsProjectorMode = tv.IsProjectorMode
                     };
                     // Also store under the primary key in case they differ (e.g. batch vs single key)
                     if (serverKey != primaryKey)
@@ -1648,6 +1650,8 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.RotationDegrees = saved.RotationDegrees;
                 _worldRenderer.Transform.Scale = saved.Scale;
                 _worldRenderer.Transform.Enabled = saved.Enabled;
+                _worldRenderer.Transform.Opacity = saved.Opacity;
+                _worldRenderer.Transform.IsProjectorMode = saved.IsProjectorMode;
             }
             else
             {
@@ -1655,6 +1659,8 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.RotationDegrees = System.Numerics.Vector3.Zero;
                 _worldRenderer.Transform.Scale = new System.Numerics.Vector2(3.0f, 1.6875f);
                 _worldRenderer.Transform.Enabled = false; // Turn off 3D screen in new zones by default
+                _worldRenderer.Transform.Opacity = 1.0f;
+                _worldRenderer.Transform.IsProjectorMode = false;
             }
         }
 

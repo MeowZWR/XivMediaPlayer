@@ -418,7 +418,9 @@ namespace XivMediaPlayer.Compositing {
           _gbuffer3Srv?.NativePointer ?? IntPtr.Zero,
           _unk68Srv?.NativePointer ?? IntPtr.Zero,
           _vignetteExtractor?.ExtrapolatedVignetteSRV?.NativePointer ?? IntPtr.Zero,
-          useDifferenceFallback);
+          useDifferenceFallback,
+          _transform.Opacity,
+          _transform.IsProjectorMode);
 
         DepthDebugInfo = $"Cam: {cameraPos:F1}\nFwd: {cameraForward:F2}\nFov: {fovY:F3}\nAspect: {aspectRatio:F3}";
 
@@ -532,12 +534,15 @@ namespace XivMediaPlayer.Compositing {
         }
       }
 
+      byte alpha = (byte)(Math.Clamp(_transform.Opacity, 0f, 1f) * 255f);
+      uint color = (uint)(alpha << 24) | 0x00FFFFFF;
+
       var currentId = System.Runtime.CompilerServices.Unsafe.As<IntPtr, Dalamud.Bindings.ImGui.ImTextureID>(ref textureSrv);
       drawList.AddImageQuad(
         currentId,
         sTL, sTR, sBR, sBL,
         uvTL, uvTR, uvBR, uvBL,
-        0xFFFFFFFF);
+        color);
     }
 
     /// <summary>

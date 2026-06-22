@@ -79,9 +79,10 @@ namespace XivMediaPlayer.Compositing {
       public float Time;
       public float ShowScreensaver;
       public float HasPreUI;
-      
       public float UseDifferenceFallback;
-      public Vector2 padding3;
+      public float Opacity;
+      public float IsProjectorMode;
+      public float _pad6;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -135,9 +136,10 @@ cbuffer Constants : register(b0) {
   float IsShuffle;
   float Time;
   float ShowScreensaver;
-  float HasPreUI;
   float UseDifferenceFallback;
-  float2 padding3;
+  float Opacity;
+  float IsProjectorMode;
+  float _pad6;
 };
 
 cbuffer UIConsts : register(b1) {
@@ -266,10 +268,16 @@ float4 PS(VS_OUT input) : SV_TARGET {
   if (isInside && occlusion < 0.999) {
       // Draw unoccluded TV
       if (sampleUV.x < 0 || sampleUV.x > 1 || sampleUV.y < 0 || sampleUV.y > 1) {
-          color = float4(0, 0, 0, 1);
+          color = float4(0, 0, 0, IsProjectorMode > 0.5 ? 0.0 : 1.0);
       } else {
           color = VideoTexture.Sample(VideoSampler, sampleUV);
-          color.a = 1.0;
+          if (IsProjectorMode > 0.5 && HasBackBuffer > 0.5) {
+              float3 sceneColor = BackBufferTexture.Sample(VideoSampler, screenUV).rgb;
+              color.rgb = sceneColor + color.rgb * Opacity;
+              color.a = 1.0;
+          } else {
+              color.a = clamp(Opacity, 0.0, 1.0);
+          }
       }
       
       // XMP Screensaver
@@ -921,7 +929,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
       bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
-      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false) {
+      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -972,7 +980,9 @@ float4 PS(VS_OUT input) : SV_TARGET {
           Time = time,
           ShowScreensaver = showScreensaver,
           HasPreUI = transparentUiSrvPtr != IntPtr.Zero ? 1.0f : 0.0f,
-          UseDifferenceFallback = useDifferenceFallback ? 1.0f : 0.0f
+          UseDifferenceFallback = useDifferenceFallback ? 1.0f : 0.0f,
+          Opacity = opacity,
+          IsProjectorMode = isProjectorMode ? 1.0f : 0.0f
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 
