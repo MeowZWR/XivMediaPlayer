@@ -211,6 +211,8 @@ namespace MediaPlayerCore {
                 _parent.LastFrame = Array.Empty<byte>();
                 _parent.LastFrameWidth = 0;
                 _parent.LastFrameHeight = 0;
+                _parent.LastFrameTrueWidth = 0;
+                _parent.LastFrameTrueHeight = 0;
                 _parent.LastFrameCount++;
               }
               string location = _libVLCPath + @"\libvlc\win-x64";
@@ -275,6 +277,21 @@ namespace MediaPlayerCore {
               await media.Parse(mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.StartsWith("rtsp")
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
               Debug.WriteLine($"[MediaObject] Media parsed. Duration: {media.Duration}ms");
+              
+              if (media.Tracks != null) {
+                  foreach (var track in media.Tracks) {
+                      if (track.TrackType == TrackType.Video) {
+                          int trueWidth = (int)track.Data.Video.Width;
+                          int trueHeight = (int)track.Data.Video.Height;
+                          if (trueWidth > 0 && trueHeight > 0 && _parent != null) {
+                              _parent.LastFrameTrueWidth = trueWidth;
+                              _parent.LastFrameTrueHeight = trueHeight;
+                              Debug.WriteLine($"[MediaObject] Extracted true video dimensions from track: {trueWidth}x{trueHeight}");
+                          }
+                          break;
+                      }
+                  }
+              }
 
               lock (_disposeLock) {
                 if (_disposed) {
@@ -307,7 +324,9 @@ namespace MediaPlayerCore {
                   lock (_parent.FrameLock) {
                     _parent.LastFrame = Array.Empty<byte>();
                     _parent.LastFrameWidth = 0;
-                    _parent.LastFrameHeight = 0;
+                _parent.LastFrameHeight = 0;
+                _parent.LastFrameTrueWidth = 0;
+                _parent.LastFrameTrueHeight = 0;
                     _parent.LastFrameCount++;
                   }
                 };
@@ -531,6 +550,10 @@ namespace MediaPlayerCore {
                 
                 _parent.LastFrameWidth = (int)(_pitch / _bytePerPixel);
                 _parent.LastFrameHeight = (int)_lines;
+                if (_parent.LastFrameTrueWidth == 0 || _parent.LastFrameTrueHeight == 0) {
+              _parent.LastFrameTrueWidth = (int)_width;
+              _parent.LastFrameTrueHeight = (int)_height;
+          }
                 _parent.LastFrameCount++;
               }
             } catch (Exception ex) {
@@ -617,3 +640,6 @@ namespace MediaPlayerCore {
     }
   }
 }
+
+
+

@@ -2329,7 +2329,7 @@ namespace XivMediaPlayer
                 if (_depthCapture != null)
                     _depthCapture.ReadDepthEnabled = _worldRenderer.UseDepthOcclusion;
 
-                _videoWindow.GetCurrentVideoTexture(out IntPtr videoSrv, out int videoWidth, out int videoHeight);
+                _videoWindow.GetCurrentVideoTexture(out IntPtr videoSrv, out int videoWidth, out int videoHeight, out int videoTrueWidth, out int videoTrueHeight);
                 if (videoSrv != IntPtr.Zero)
                 {
                     // Get camera info for depth occlusion
@@ -2816,7 +2816,7 @@ namespace XivMediaPlayer
                     
                     var mainViewport = ImGui.GetMainViewport();
                     
-                    _worldRenderer.Render(videoSrv, videoWidth, videoHeight, _depthCapture, 
+                    _worldRenderer.Render(videoSrv, videoWidth, videoHeight, videoTrueWidth, videoTrueHeight, _depthCapture, 
                         _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp, 
                         fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver, useDifferenceFallback: useDifferenceFallback, 
                         viewProjMatrix: _prevViewProjMatrix ?? viewProjMatrix, viewportPos: mainViewport.Pos, viewportSize: mainViewport.Size, uiBlendThreshold: _config.UIBlendThreshold);
@@ -3622,6 +3622,8 @@ namespace XivMediaPlayer
         #endregion
     }
 }
+
+
 
 
 

@@ -28,6 +28,8 @@ namespace MediaPlayerCore {
     public ulong LastFrameCount { get; set; } = 0;
     public int LastFrameWidth { get; set; } = 0;
     public int LastFrameHeight { get; set; } = 0;
+    public int LastFrameTrueWidth { get; set; } = 0;
+    public int LastFrameTrueHeight { get; set; } = 0;
     public bool Invalidated { get => _invalidated; set => _invalidated = value; }
     
     public MediaObject? ActiveStream {
@@ -312,6 +314,8 @@ namespace MediaPlayerCore {
           _lastFrame = Array.Empty<byte>();
           LastFrameWidth = 0;
           LastFrameHeight = 0;
+          LastFrameTrueWidth = 0;
+          LastFrameTrueHeight = 0;
           LastFrameCount++;
         }
         StopFFmpegStream();
@@ -328,3 +332,5 @@ namespace MediaPlayerCore {
     }
   }
 }
+
+

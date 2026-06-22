@@ -72,12 +72,16 @@ namespace XivMediaPlayer.Windows {
         bool needsUpdate = false;
         ulong frameCount = 0;
         int frameWidth = 0;
-        int frameHeight = 0;
+          int frameHeight = 0;
+          int trueWidth = 0;
+          int trueHeight = 0;
 
         lock (_mediaManager.FrameLock) {
           frameCount = _mediaManager.LastFrameCount;
           frameWidth = _mediaManager.LastFrameWidth;
-          frameHeight = _mediaManager.LastFrameHeight;
+            frameHeight = _mediaManager.LastFrameHeight;
+            trueWidth = _mediaManager.LastFrameTrueWidth;
+            trueHeight = _mediaManager.LastFrameTrueHeight;
 
           if (frameWidth == 0 || frameHeight == 0 || _mediaManager.LastFrame == null || _mediaManager.LastFrame.Length == 0) {
             if (wasStreaming) {
@@ -120,6 +124,8 @@ namespace XivMediaPlayer.Windows {
                 _videoTexture = new Direct3D11VideoTexture(frameWidth, frameHeight);
               }
               _videoTexture.Update(_localFrameBuffer, frameWidth, frameHeight);
+              _videoTexture.TrueWidth = trueWidth;
+              _videoTexture.TrueHeight = trueHeight;
               _lastLoadedFrameCount = frameCount;
             }
         }
@@ -139,10 +145,18 @@ namespace XivMediaPlayer.Windows {
         Vector2 avail = ImGui.GetContentRegionAvail();
         IntPtr currentSrv = IntPtr.Zero;
         Dalamud.Bindings.ImGui.ImTextureID currentId = default;
-        lock (_textureLock) {
+          int texW = 1920;
+          int texH = 1080;
+          int trueTexW = 0;
+          int trueTexH = 0;
+          lock (_textureLock) {
             if (_videoTexture != null && _videoTexture.ImGuiHandle != IntPtr.Zero) {
                 currentSrv = _videoTexture.ImGuiHandle;
                 currentId = System.Runtime.CompilerServices.Unsafe.As<IntPtr, Dalamud.Bindings.ImGui.ImTextureID>(ref currentSrv);
+                  texW = _videoTexture.Width;
+                  texH = _videoTexture.Height;
+                  trueTexW = _videoTexture.TrueWidth;
+                  trueTexH = _videoTexture.TrueHeight;
             } else if (_blackFrame != null) {
                 var handle = _blackFrame.Handle;
                 currentId = handle;
@@ -156,14 +170,20 @@ namespace XivMediaPlayer.Windows {
           float maxVidWidth = avail.X;
           float maxVidHeight = Math.Max(10f, avail.Y - uiHeight);
 
-          float targetWidth = maxVidWidth;
-          float targetHeight = targetWidth * 0.5625f;
-
-          if (targetHeight > maxVidHeight) {
-              // Pillarbox: video is too tall for the available width, shrink width to fit height
-              targetHeight = maxVidHeight;
-              targetWidth = targetHeight / 0.5625f;
-          }
+          float trueVidHeight = trueTexH > 0 ? trueTexH : texH;
+            float trueVidWidth = trueTexW > 0 ? trueTexW : texW;
+            float uvBottom = trueTexH > 0 ? (float)trueTexH / texH : 1.0f;
+            float uvRight = trueTexW > 0 ? (float)trueTexW / texW : 1.0f;
+            float aspect = trueVidHeight > 0 ? trueVidWidth / trueVidHeight : 1.7777f;
+            float inverseAspect = 1.0f / aspect;
+            
+            float targetWidth = maxVidWidth;
+            float targetHeight = targetWidth * inverseAspect;
+  
+            if (targetHeight > maxVidHeight) {
+                targetHeight = maxVidHeight;
+                targetWidth = targetHeight * aspect;
+            }
 
           float offsetX = (maxVidWidth - targetWidth) / 2.0f;
           if (offsetX > 0) {
@@ -171,7 +191,7 @@ namespace XivMediaPlayer.Windows {
           }
 
           Vector2 imageSize = new Vector2(targetWidth, targetHeight);
-          ImGui.Image(currentId, imageSize);
+            ImGui.Image(currentId, imageSize, new Vector2(0, 0), new Vector2(uvRight, uvBottom));
 
           if (ImGui.IsItemHovered()) {
               Vector2 mouse = ImGui.GetMousePos();
@@ -422,12 +442,16 @@ namespace XivMediaPlayer.Windows {
     /// Returns the current video frame texture pointer and dimensions,
     /// or a black 16:9 placeholder if no video is playing.
     /// </summary>
-    public void GetCurrentVideoTexture(out IntPtr srv, out int width, out int height) {
+    public void GetCurrentVideoTexture(out IntPtr srv, out int width, out int height, out int trueWidth, out int trueHeight) {
+        trueWidth = 0;
+        trueHeight = 0;
       lock (_textureLock) {
         if (_videoTexture != null && _videoTexture.ImGuiHandle != IntPtr.Zero) {
             srv = _videoTexture.ImGuiHandle;
             width = _videoTexture.Width;
             height = _videoTexture.Height;
+            trueWidth = _videoTexture.TrueWidth;
+            trueHeight = _videoTexture.TrueHeight;
         } else if (_blackFrame != null) {
             var handle = _blackFrame.Handle;
             srv = System.Runtime.CompilerServices.Unsafe.As<Dalamud.Bindings.ImGui.ImTextureID, IntPtr>(ref handle);
@@ -469,3 +493,8 @@ namespace XivMediaPlayer.Windows {
     }
   }
 }
+
+
+
+
+

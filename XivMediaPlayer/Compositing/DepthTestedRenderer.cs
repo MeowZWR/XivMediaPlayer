@@ -85,7 +85,9 @@ namespace XivMediaPlayer.Compositing {
       public Vector3 ScreensaverColor;
       public float ScreensaverStyle;
       public float UIBlendThreshold;
-      public Vector3 _pad6;
+      public float UVBottomEdge;
+        public float UVRightEdge;
+        public float _pad7;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -147,10 +149,12 @@ cbuffer Constants : register(b0) {
   float3 ScreensaverColor;
   float ScreensaverStyle;
   float UIBlendThreshold;
-  float3 _pad6;
-};
-
-cbuffer UIConsts : register(b1) {
+    float UVBottomEdge;
+    float UVRightEdge;
+    float2 _pad7;
+  };
+  
+  cbuffer UIConsts : register(b1) {
   float4 UIRects[64];
   float4 UIRectTypes[16]; // 64 floats packed into 16 vectors
   int UIRectCount;
@@ -295,11 +299,13 @@ float4 PS(VS_OUT input) : SV_TARGET {
       
       sampleUV = uv;
       if (VideoAspectRatio > 0) {
-          float tvAspect = length(tvRight) / length(tvDown);
-          float scale = tvAspect / VideoAspectRatio;
+            float tvAspect = length(tvRight) / length(tvDown);
+            float scale = tvAspect / VideoAspectRatio;
             sampleUV.x = (sampleUV.x - 0.5) * scale + 0.5;
+        }
+        sampleUV.y = sampleUV.y * UVBottomEdge;
+          sampleUV.x = sampleUV.x * UVRightEdge;
       }
-  }
   
   // Dynamic Resolution scaling: the depth buffer texture size might be larger than the actual rendered area
   float2 renderScale = float2(1.0, 1.0);
@@ -1322,7 +1328,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
       bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
-      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null, int screensaverStyle = 0, float uiBlendThreshold = 0.0f) {
+      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null, int screensaverStyle = 0, float uiBlendThreshold = 0.0f, float uvBottom = 1.0f, float uvRight = 1.0f) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -1378,9 +1384,11 @@ float4 PS(VS_OUT input) : SV_TARGET {
           IsProjectorMode = isProjectorMode ? 1.0f : 0.0f,
           ScreensaverColor = screensaverColor ?? new Vector3(0.0f, 0.0f, 0.0f),
           ScreensaverStyle = screensaverStyle,
-          UIBlendThreshold = uiBlendThreshold
-        };
-        _context.UpdateSubresource(constants, _constantBuffer);
+            UIBlendThreshold = uiBlendThreshold,
+            UVBottomEdge = uvBottom,
+            UVRightEdge = uvRight
+          };
+          _context.UpdateSubresource(constants, _constantBuffer);
 
         var uiConsts = new UIConstants {
             UIRectCount = Math.Min(64, uiRects?.Count ?? 0)
@@ -1479,6 +1487,9 @@ float4 PS(VS_OUT input) : SV_TARGET {
     }
   }
 }
+
+
+
 
 
 
