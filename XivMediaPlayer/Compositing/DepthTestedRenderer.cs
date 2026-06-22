@@ -432,7 +432,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           float alpha = saturate(depthMask * luminance * 3.5); 
           
           // Clamp intensity ceiling to prevent extreme highlights overexposure.
-          alpha = clamp(alpha, 0.0, 0.45); 
+          alpha = clamp(alpha, 0.0, 0.45) * Opacity; 
           
           // Compute additive backlight intensity.
           float3 light = prominentColor * alpha;
