@@ -56,15 +56,21 @@ namespace XivMediaPlayer.Windows {
                     fixed (byte* ptr = rawData) {
                         // If the row pitch matches exactly, we can do one fast copy
                         if (mapped.RowPitch == width * 4) {
-                            System.Buffer.MemoryCopy(ptr, (void*)mapped.DataPointer, rawData.Length, rawData.Length);
+                            long destSize = (long)mapped.RowPitch * height;
+                            long copySize = Math.Min((long)rawData.Length, destSize);
+                            System.Buffer.MemoryCopy(ptr, (void*)mapped.DataPointer, destSize, copySize);
                         } else {
                             // Copy row by row
+                            long copySize = width * 4;
+                            long destSize = mapped.RowPitch;
                             for (int y = 0; y < height; y++) {
+                                long srcOffset = y * copySize;
+                                if (srcOffset + copySize > rawData.Length) break;
                                 System.Buffer.MemoryCopy(
-                                    ptr + (y * width * 4), 
+                                    ptr + srcOffset, 
                                     (byte*)mapped.DataPointer.ToPointer() + (y * mapped.RowPitch), 
-                                    width * 4, 
-                                    width * 4);
+                                    destSize, 
+                                    copySize);
                             }
                         }
                     }
