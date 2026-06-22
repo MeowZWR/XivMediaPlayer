@@ -401,6 +401,75 @@ float4 PS(VS_OUT input) : SV_TARGET {
                       
                       color.rgb = logoColor;
                   }
+              } else if (ScreensaverStyle > 4.5) {
+                  // Style 5: Matrix Rain
+                  float2 screenUv = uv;
+                  float aspect = 16.0 / 9.0;
+                  if (RenderResolution.y > 0) aspect = RenderResolution.x / RenderResolution.y;
+                  
+                  // Setup grid (roughly 80 columns)
+                  float cols = 80.0;
+                  float rows = cols / aspect;
+                  
+                  float2 cell = floor(screenUv * float2(cols, rows));
+                  float2 cellUv = frac(screenUv * float2(cols, rows));
+                  
+                  // Random hashes
+                  float colHash = frac(sin(cell.x * 12.9898) * 43758.5453);
+                  
+                  // Column speed and drop offset
+                  float speed = colHash * 0.5 + 0.3; // screen heights per second
+                  float offset = frac(sin(cell.x * 78.233) * 43758.5453) * 100.0;
+                  
+                  // The continuous head of the drop for this column
+                  float head = (Time * speed + offset) * rows; // in row units
+                  
+                  // Wrap distance from head
+                  float dist = head - cell.y;
+                  dist = fmod(dist, rows * 1.5);
+                  if (dist < 0.0) dist += rows * 1.5;
+                  
+                  float tailLength = colHash * 15.0 + 10.0;
+                  
+                  float3 cellColor = float3(0.0, 0.0, 0.0);
+                  
+                  if (dist < tailLength) {
+                      float brightness = 1.0 - (dist / tailLength);
+                      brightness = max(0.0, brightness);
+                      
+                      // Head is bright/white, tail is green
+                      float3 baseColor = (dist < 1.0) ? float3(0.6, 1.0, 0.6) : float3(0.0, brightness * 0.8, 0.0);
+                      
+                      // Draw random glyph
+                      // Shrink UV to add padding between cells
+                      float2 charUv = (cellUv - 0.15) / 0.7;
+                      if (charUv.x >= 0.0 && charUv.x <= 1.0 && charUv.y >= 0.0 && charUv.y <= 1.0) {
+                          // 3x4 pixel grid for characters
+                          float gx = floor(charUv.x * 3.0);
+                          float gy = floor(charUv.y * 4.0);
+                          
+                          // Change character periodically
+                          float charTime = floor(Time * (colHash * 3.0 + 2.0));
+                          float glyphSeed = frac(sin(dot(cell + charTime, float2(12.9898, 78.233))) * 43758.5453);
+                          
+                          // Hash the pixel to see if it's filled
+                          float pixelHash = frac(sin(glyphSeed + gx * 13.0 + gy * 7.0) * 43758.5453);
+                          if (pixelHash > 0.4) {
+                              cellColor = baseColor;
+                          }
+                      }
+                  }
+                  
+                  // Tint with ScreensaverColor if it is not black (allow color overriding)
+                  float colorIntensity = length(ScreensaverColor);
+                  if (colorIntensity > 0.05) {
+                      // Apply custom color but keep brightness
+                      float luma = max(cellColor.r, max(cellColor.g, cellColor.b));
+                      cellColor = luma * normalize(ScreensaverColor) * 1.5;
+                      if (dist < 1.0 && luma > 0.1) cellColor += float3(0.5, 0.5, 0.5); // Keep head somewhat white
+                  }
+                  
+                  color.rgb = cellColor;
               } else if (ScreensaverStyle > 3.5) {
                   // Style 4: Geometric Test Pattern
                   float2 centerUv = uv - 0.5;
