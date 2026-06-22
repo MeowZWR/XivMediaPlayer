@@ -20,6 +20,11 @@ namespace XivMediaPlayer.Server.Models
         public float Opacity { get; set; } = 1.0f;
         public bool IsProjectorMode { get; set; } = false;
 
+        public float ScreensaverColorR { get; set; } = 0.0f;
+        public float ScreensaverColorG { get; set; } = 0.0f;
+        public float ScreensaverColorB { get; set; } = 0.0f;
+        public int ScreensaverStyle { get; set; } = 0;
+
         [NotMapped]
         public bool BypassLock { get; set; } = false;
 

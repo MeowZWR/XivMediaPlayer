@@ -76,6 +76,12 @@ namespace XivMediaPlayer.Server.Controllers
                 existing.RotationZ = placement.RotationZ;
                 existing.ScaleX = placement.ScaleX;
                 existing.ScaleY = placement.ScaleY;
+                existing.Opacity = placement.Opacity;
+                existing.IsProjectorMode = placement.IsProjectorMode;
+                existing.ScreensaverColorR = placement.ScreensaverColorR;
+                existing.ScreensaverColorG = placement.ScreensaverColorG;
+                existing.ScreensaverColorB = placement.ScreensaverColorB;
+                existing.ScreensaverStyle = placement.ScreensaverStyle;
                 existing.IsLocked = placement.IsLocked;
                 // We do NOT update the OwnerId of an existing TV unless they were already the owner, 
                 // but if it wasn't locked they can technically steal it right now.

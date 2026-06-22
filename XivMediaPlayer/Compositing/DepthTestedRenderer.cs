@@ -190,6 +190,12 @@ bool DrawLetter(float2 p, int letter) {
         if (p.y < 0.02 || (p.x > 0.03 && p.x < 0.05)) return true;
     } else if (letter == 8) { // O
         if (p.x < 0.02 || p.x > 0.06 || p.y < 0.02 || p.y > 0.1) return true;
+    } else if (letter == 9) { // N
+        if (p.x < 0.02 || p.x > 0.06 || (p.y > p.x * 1.5 - 0.02 && p.y < p.x * 1.5 + 0.02)) return true;
+    } else if (letter == 10) { // I
+        if (p.y < 0.02 || p.y > 0.1 || (p.x > 0.03 && p.x < 0.05)) return true;
+    } else if (letter == 11) { // G
+        if (p.x < 0.02 || p.y < 0.02 || p.y > 0.1 || (p.x > 0.06 && p.y > 0.06) || (p.y > 0.05 && p.y < 0.07 && p.x > 0.04)) return true;
     }
     return false;
 }
@@ -394,6 +400,97 @@ float4 PS(VS_OUT input) : SV_TARGET {
                       else if (colorIdx == 5) logoColor = float3(0.3, 1.0, 1.0);
                       
                       color.rgb = logoColor;
+                  }
+              } else if (ScreensaverStyle > 2.5) {
+                  // Style 3: TV Static
+                  // Use frac(Time) to avoid huge float precision loss inside sin()
+                  float timeVal = frac(Time) * 1000.0;
+                  float2 noiseUv = floor(uv * float2(320.0, 240.0));
+                  
+                  // Simple pseudo-random
+                  float random = frac(sin(dot(noiseUv + float2(timeVal, -timeVal), float2(12.9898, 78.233))) * 43758.5453);
+                  
+                  // Darken it slightly to look more like typical TV static (grayish rather than harsh white)
+                  float luminance = lerp(0.1, 0.8, random);
+                  float3 staticColor = float3(luminance, luminance, luminance);
+                  
+                  // Tint with ScreensaverColor if it is not black
+                  float colorIntensity = length(ScreensaverColor);
+                  if (colorIntensity > 0.05) {
+                      staticColor = lerp(staticColor, staticColor * ScreensaverColor * 1.5, min(colorIntensity, 1.0));
+                  }
+                  
+                  color.rgb = staticColor;
+              } else if (ScreensaverStyle > 1.5) {
+                  // Style 2: No Signal (SMPTE Color Bars)
+                  
+                  // Noise
+                  float noise = frac(sin(dot(uv * Time, float2(12.9898, 78.233))) * 43758.5453);
+                  float2 uvNoise = uv + float2(noise * 0.005, 0.0);
+                  
+                  // 7 Vertical Bars (Top 67%)
+                  // White, Yellow, Cyan, Green, Magenta, Red, Blue
+                  float3 bars[7];
+                  bars[0] = float3(0.75, 0.75, 0.75);
+                  bars[1] = float3(0.75, 0.75, 0.0);
+                  bars[2] = float3(0.0, 0.75, 0.75);
+                  bars[3] = float3(0.0, 0.75, 0.0);
+                  bars[4] = float3(0.75, 0.0, 0.75);
+                  bars[5] = float3(0.75, 0.0, 0.0);
+                  bars[6] = float3(0.0, 0.0, 0.75);
+                  
+                  int barIndex = clamp(int(uvNoise.x * 7.0), 0, 6);
+                  if (uvNoise.y < 0.67) {
+                      color.rgb = bars[barIndex];
+                  } else if (uvNoise.y < 0.75) {
+                      // Middle small blocks
+                      // Blue, Black, Magenta, Black, Cyan, Black, White
+                      float3 midBars[7];
+                      midBars[0] = float3(0.0, 0.0, 0.75);
+                      midBars[1] = float3(0.0, 0.0, 0.0);
+                      midBars[2] = float3(0.75, 0.0, 0.75);
+                      midBars[3] = float3(0.0, 0.0, 0.0);
+                      midBars[4] = float3(0.0, 0.75, 0.75);
+                      midBars[5] = float3(0.0, 0.0, 0.0);
+                      midBars[6] = float3(0.75, 0.75, 0.75);
+                      color.rgb = midBars[barIndex];
+                  } else {
+                      // Bottom blocks
+                      // -I, White, Q, Black
+                      if (uvNoise.x < 0.18) color.rgb = float3(0.0, 0.2, 0.4);
+                      else if (uvNoise.x < 0.35) color.rgb = float3(1.0, 1.0, 1.0);
+                      else if (uvNoise.x < 0.53) color.rgb = float3(0.2, 0.0, 0.4);
+                      else color.rgb = float3(0.0, 0.0, 0.0);
+                  }
+                  
+                  // Add static/noise over everything
+                  color.rgb += (noise - 0.5) * 0.15;
+                  
+                  // NO SIGNAL text box in center
+                  float2 p = float2(uv.x * aspect - aspect * 0.5 + 0.45, uv.y - 0.45);
+                  
+                  // Black background box for NO SIGNAL
+                  if (uv.x * aspect > aspect * 0.5 - 0.55 && uv.x * aspect < aspect * 0.5 + 0.55 && uv.y > 0.4 && uv.y < 0.6) {
+                      color.rgb = float3(0.0, 0.0, 0.0);
+                      
+                      bool playDraw = false;
+                      // N O   S I G N A L
+                      if (DrawLetter(p, 9)) playDraw = true;
+                      if (DrawLetter(p - float2(0.12, 0.0), 8)) playDraw = true;
+                      
+                      if (DrawLetter(p - float2(0.36, 0.0), 5)) playDraw = true;
+                      if (DrawLetter(p - float2(0.48, 0.0), 10)) playDraw = true;
+                      if (DrawLetter(p - float2(0.60, 0.0), 11)) playDraw = true;
+                      if (DrawLetter(p - float2(0.72, 0.0), 9)) playDraw = true;
+                      if (DrawLetter(p - float2(0.84, 0.0), 2)) playDraw = true;
+                      if (DrawLetter(p - float2(0.96, 0.0), 1)) playDraw = true;
+                      
+                      if (playDraw) {
+                          // Text has some chromatic aberration
+                          color.r = 1.0;
+                          color.g = 1.0;
+                          color.b = 1.0;
+                      }
                   }
               } else {
                   // Style 1: VCR

@@ -2409,7 +2409,7 @@ namespace XivMediaPlayer
                         if (!_screensaverTimer.IsRunning) _screensaverTimer.Start();
                     }
                     
-                    float showScreensaver = _screensaverTimer.ElapsedMilliseconds > 5000 ? 1.0f : 0.0f;
+                    float showScreensaver = (_screensaverTimer.ElapsedMilliseconds > 5000 || _isResolvingMedia) ? 1.0f : 0.0f;
                     float timeSeconds = (float)(((DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + _serverTimeOffsetMs) / 1000.0) % 864000.0);
 
                     var mousePos = ImGui.GetIO().MousePos;
