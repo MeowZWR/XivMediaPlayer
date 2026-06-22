@@ -1590,7 +1590,8 @@ namespace XivMediaPlayer
                         Enabled = true,
                         Opacity = tv.Opacity,
                         IsProjectorMode = tv.IsProjectorMode,
-                        ScreensaverColor = new System.Numerics.Vector3(tv.ScreensaverColorR, tv.ScreensaverColorG, tv.ScreensaverColorB)
+                        ScreensaverColor = new System.Numerics.Vector3(tv.ScreensaverColorR, tv.ScreensaverColorG, tv.ScreensaverColorB),
+                        ScreensaverStyle = tv.ScreensaverStyle
                     };
                     // Also store under the primary key in case they differ (e.g. batch vs single key)
                     if (serverKey != primaryKey)
@@ -1660,6 +1661,7 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.Opacity = 1.0f;
                 _worldRenderer.Transform.IsProjectorMode = false;
                 _worldRenderer.Transform.ScreensaverColor = new System.Numerics.Vector3(0.0f, 0.0f, 0.0f);
+                _worldRenderer.Transform.ScreensaverStyle = 0;
             }
         }
 
@@ -2378,6 +2380,7 @@ namespace XivMediaPlayer
                     System.Numerics.Vector2? hoverUV = null;
                     float progress = 0f;
                     bool isPlaying = false;
+                    float playbackState = 0.0f; // 0 = Stop, 1 = Play, 2 = Paused
 
                     var activeStream = _mediaManager?.ActiveStream;
                     if (activeStream != null)
@@ -2386,10 +2389,17 @@ namespace XivMediaPlayer
                             progress = activeStream.Time / (float)activeStream.Length;
 
                         isPlaying = activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
+                        if (isPlaying) playbackState = 1.0f;
+                        else if (activeStream.PlaybackState == NAudio.Wave.PlaybackState.Paused) playbackState = 2.0f;
                     }
                     if (_mediaManager != null && _mediaManager.IsFFmpegPlaying)
                     {
                         isPlaying = true;
+                        playbackState = 1.0f;
+                    }
+                    
+                    if (_isResolvingMedia) {
+                        playbackState = 1.0f;
                     }
                     
                     if (isPlaying || _isResolvingMedia) {
@@ -2803,7 +2813,7 @@ namespace XivMediaPlayer
                     
                     _worldRenderer.Render(videoSrv, videoWidth, videoHeight, _depthCapture, 
                         _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp, 
-                        fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver, useDifferenceFallback: useDifferenceFallback, 
+                        fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver, useDifferenceFallback: useDifferenceFallback, 
                         viewProjMatrix: _prevViewProjMatrix ?? viewProjMatrix, viewportPos: mainViewport.Pos, viewportSize: mainViewport.Size);
                         
                     _prevCameraPos = cameraPos;

@@ -33,6 +33,7 @@ namespace XivMediaPlayer.Windows {
     private float _opacity = 1.0f;
     private bool _isProjectorMode = false;
     private Vector3 _screensaverColor = new Vector3(0.0f, 0.0f, 0.0f);
+    private int _screensaverStyle = 0;
 
     // Drag state for world-space interaction
     private bool _isDragging;
@@ -70,6 +71,7 @@ namespace XivMediaPlayer.Windows {
       _opacity = _transform.Opacity;
       _isProjectorMode = _transform.IsProjectorMode;
       _screensaverColor = _transform.ScreensaverColor;
+      _screensaverStyle = _transform.ScreensaverStyle;
     }
 
     private void SyncToTransform() {
@@ -80,6 +82,7 @@ namespace XivMediaPlayer.Windows {
       _transform.Opacity = _opacity;
       _transform.IsProjectorMode = _isProjectorMode;
       _transform.ScreensaverColor = _screensaverColor;
+      _transform.ScreensaverStyle = _screensaverStyle;
     }
 
     public override void Draw() {
@@ -296,12 +299,17 @@ namespace XivMediaPlayer.Windows {
       
       appearanceChanged |= ImGui.SliderFloat("Opacity", ref _opacity, 0.05f, 1.0f, "%.2f");
       appearanceChanged |= ImGui.ColorEdit3("Screensaver Color", ref _screensaverColor);
-      bool saveAppearance = ImGui.IsItemDeactivatedAfterEdit();
+
+      string[] screensaverStyles = new string[] { "Bouncing Logo", "VCR" };
+      appearanceChanged |= ImGui.Combo("Screensaver Style", ref _screensaverStyle, screensaverStyles, screensaverStyles.Length);
+      
+      bool saveAppearance = ImGui.IsItemDeactivatedAfterEdit() || ImGui.IsItemDeactivated();
       
       if (appearanceChanged) {
         _transform.Opacity = _opacity;
         _transform.IsProjectorMode = _isProjectorMode;
         _transform.ScreensaverColor = _screensaverColor;
+        _transform.ScreensaverStyle = _screensaverStyle;
       }
       if (saveAppearance || appearanceChanged) {
         _onSave?.Invoke();
@@ -525,6 +533,7 @@ namespace XivMediaPlayer.Windows {
         ScreensaverColorR = _screensaverColor.X,
         ScreensaverColorG = _screensaverColor.Y,
         ScreensaverColorB = _screensaverColor.Z,
+        ScreensaverStyle = _screensaverStyle,
         OwnerId = _plugin.Config.OwnerId,
         IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? (!locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_")),
         BypassLock = _plugin.IsHousingMenuOpen || locationKey.StartsWith("zone_") || locationKey.StartsWith("island_")

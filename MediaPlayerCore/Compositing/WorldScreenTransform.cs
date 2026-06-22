@@ -44,6 +44,9 @@ namespace MediaPlayerCore.Compositing {
     [JsonProperty("screensaverColor")]
     public System.Numerics.Vector3 ScreensaverColor { get; set; } = new System.Numerics.Vector3(0.0f, 0.0f, 0.0f);
 
+    [JsonProperty("screensaverStyle")]
+    public int ScreensaverStyle { get; set; } = 0;
+
     /// <summary>
     /// Returns the four corners of the screen quad in world space.
     /// Order: TopLeft, TopRight, BottomRight, BottomLeft (when facing the screen).
@@ -112,7 +115,8 @@ namespace MediaPlayerCore.Compositing {
         Enabled = Enabled,
         Opacity = Opacity,
         IsProjectorMode = IsProjectorMode,
-        ScreensaverColor = ScreensaverColor
+        ScreensaverColor = ScreensaverColor,
+        ScreensaverStyle = ScreensaverStyle
       };
     }
   }

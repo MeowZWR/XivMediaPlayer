@@ -66,7 +66,7 @@ namespace XivMediaPlayer.Compositing {
       // New fields appended at the end
       public Vector2 HoverUV;
       public float Progress;
-      public float IsPlaying;
+      public float PlaybackState;
       public float DynamicMinDepth;
       public float DynamicMaxDepth;
       public float HasBackBuffer;
@@ -83,7 +83,7 @@ namespace XivMediaPlayer.Compositing {
       public float Opacity;
       public float IsProjectorMode;
       public Vector3 ScreensaverColor;
-      public float _pad6;
+      public float ScreensaverStyle;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -125,7 +125,7 @@ cbuffer Constants : register(b0) {
 
   float2 HoverUV;
   float Progress;
-  float IsPlaying;
+  float PlaybackState;
   float DynamicMinDepth;
   float DynamicMaxDepth;
   float HasBackBuffer;
@@ -143,7 +143,7 @@ cbuffer Constants : register(b0) {
   float IsProjectorMode;
 
   float3 ScreensaverColor;
-  float _pad6;
+  float ScreensaverStyle;
 };
 
 cbuffer UIConsts : register(b1) {
@@ -168,6 +168,31 @@ struct VS_OUT {
   float4 pos : SV_POSITION;
   float2 uv : TEXCOORD;
 };
+
+bool DrawLetter(float2 p, int letter) {
+    if (p.x < 0.0 || p.x > 0.08 || p.y < 0.0 || p.y > 0.12) return false;
+    
+    if (letter == 0) { // P
+        if (p.x < 0.02 || p.y < 0.02 || (p.y > 0.04 && p.y < 0.06) || (p.x > 0.06 && p.y < 0.05)) return true;
+    } else if (letter == 1) { // L
+        if (p.x < 0.02 || p.y > 0.1) return true;
+    } else if (letter == 2) { // A
+        if (p.x < 0.02 || p.x > 0.06 || p.y < 0.02 || (p.y > 0.04 && p.y < 0.06)) return true;
+    } else if (letter == 3) { // Y
+        if ((p.y < 0.06 && (p.x < 0.02 || p.x > 0.06)) || (p.y >= 0.05 && p.x > 0.03 && p.x < 0.05) || (p.y > 0.04 && p.y < 0.06)) return true;
+    } else if (letter == 4) { // U
+        if (p.x < 0.02 || p.x > 0.06 || p.y > 0.1) return true;
+    } else if (letter == 5) { // S
+        if (p.y < 0.02 || p.y > 0.1 || (p.y > 0.05 && p.y < 0.07) || (p.x < 0.02 && p.y < 0.06) || (p.x > 0.06 && p.y > 0.06)) return true;
+    } else if (letter == 6) { // E
+        if (p.x < 0.02 || p.y < 0.02 || p.y > 0.1 || (p.y > 0.05 && p.y < 0.07)) return true;
+    } else if (letter == 7) { // T
+        if (p.y < 0.02 || (p.x > 0.03 && p.x < 0.05)) return true;
+    } else if (letter == 8) { // O
+        if (p.x < 0.02 || p.x > 0.06 || p.y < 0.02 || p.y > 0.1) return true;
+    }
+    return false;
+}
 
 VS_OUT VS(uint id : SV_VertexID) {
   VS_OUT o;
@@ -282,91 +307,190 @@ float4 PS(VS_OUT input) : SV_TARGET {
               float aspect = 16.0 / 9.0;
               if (RenderResolution.y > 0) aspect = RenderResolution.x / RenderResolution.y;
               
-              float speedX = 0.1;
-              float speedY = 0.075;
-              float bx = Time * speedX;
-              float by = Time * speedY;
-              
-              float logoSize = 0.15;
-              float logoW = logoSize * 3.0 / aspect;
-              float logoH = logoSize * 1.0;
-              
-              float rangeX = 1.0 - logoW;
-              float rangeY = 1.0 - logoH;
-              
-              float posX = (logoW / 2.0) + abs(fmod(bx, 2.0) - 1.0) * rangeX;
-              float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
-              
-              float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
-              float2 pText = float2(p.x + p.y * 0.35, p.y);
-              
-              bool draw = false;
-              if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
+              if (ScreensaverStyle < 0.5) {
+                  // Style 0: Bouncing Logo
+                  float speedX = 0.1;
+                  float speedY = 0.075;
+                  float bx = Time * speedX;
+                  float by = Time * speedY;
                   
-                  // Top connection line
-                  if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
+                  float logoSize = 0.15;
+                  float logoW = logoSize * 3.0 / aspect;
+                  float logoH = logoSize * 1.0;
                   
-                  // X
-                  if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
-                      float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
-                      float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
-                      if (dx1 < 0.11 || dx2 < 0.11) draw = true;
-                  }
+                  float rangeX = 1.0 - logoW;
+                  float rangeY = 1.0 - logoH;
                   
-                  // M
-                  if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
-                      if (pText.y < 0.2) {
-                          if (abs(pText.x + 0.4) < 0.11) draw = true;
-                          if (abs(pText.x - 0.4) < 0.11) draw = true;
+                  float posX = (logoW / 2.0) + abs(fmod(bx, 2.0) - 1.0) * rangeX;
+                  float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
+                  
+                  float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
+                  float2 pText = float2(p.x + p.y * 0.35, p.y);
+                  
+                  bool draw = false;
+                  if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
+                      
+                      // Top connection line
+                      if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
+                      
+                      // X
+                      if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
+                          float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
+                          float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
+                          if (dx1 < 0.11 || dx2 < 0.11) draw = true;
                       }
-                      float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
-                      float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
-                      if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
-                      if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
-                  }
-                  
-                  // P
-                  if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
-                      if (abs(pText.x - 0.8) < 0.11) draw = true;
-                      if (pText.x >= 0.8 && pText.x <= 1.25) {
-                          if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
+                      
+                      // M
+                      if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
+                          if (pText.y < 0.2) {
+                              if (abs(pText.x + 0.4) < 0.11) draw = true;
+                              if (abs(pText.x - 0.4) < 0.11) draw = true;
+                          }
+                          float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
+                          float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
+                          if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
+                          if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
                       }
-                      if (pText.x > 1.25) {
-                          if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
-                              if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
-                                  draw = true;
+                      
+                      // P
+                      if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
+                          if (abs(pText.x - 0.8) < 0.11) draw = true;
+                          if (pText.x >= 0.8 && pText.x <= 1.25) {
+                              if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
+                          }
+                          if (pText.x > 1.25) {
+                              if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
+                                  if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
+                                      draw = true;
+                                  }
                               }
                           }
                       }
+                      
+                      // Ellipse (Use original un-slanted p)
+                      if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
+                          float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
+                          float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
+                          float distToV = (pText.x < 0.0) ? dm1 : dm2;
+                          
+                          if (distToV > 0.16) {
+                              draw = true;
+                              // Slit for VIDEO parody
+                              if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
+                          }
+                      }
+                      
+                      if (p.y < -0.6) draw = false;
                   }
                   
-                  // Ellipse (Use original un-slanted p)
-                  if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
-                      float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
-                      float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
-                      float distToV = (pText.x < 0.0) ? dm1 : dm2;
+                  if (draw) {
+                      int colorIdx = (int(floor(bx)) + int(floor(by))) % 6;
+                      float3 logoColor = float3(1, 1, 1);
+                      if (colorIdx == 0) logoColor = float3(1.0, 0.3, 0.3);
+                      else if (colorIdx == 1) logoColor = float3(0.3, 1.0, 0.3);
+                      else if (colorIdx == 2) logoColor = float3(0.3, 0.6, 1.0);
+                      else if (colorIdx == 3) logoColor = float3(1.0, 1.0, 0.3);
+                      else if (colorIdx == 4) logoColor = float3(1.0, 0.3, 1.0);
+                      else if (colorIdx == 5) logoColor = float3(0.3, 1.0, 1.0);
                       
-                      if (distToV > 0.16) {
-                          draw = true;
-                          // Slit for VIDEO parody
-                          if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
+                      color.rgb = logoColor;
+                  }
+              } else {
+                  // Style 1: VCR
+                  // Noise:
+                  float noise = frac(sin(dot(uv * Time, float2(12.9898, 78.233))) * 43758.5453);
+                  color.rgb += noise * 0.05;
+                  
+                  // Scanlines
+                  color.rgb -= sin(uv.y * 800.0) * 0.04;
+                  
+                  // State Text
+                  float2 p = float2(uv.x * aspect - 0.2, uv.y - 0.1);
+                  bool playDraw = false;
+                  
+                  if (PlaybackState == 1.0) { // PLAY
+                      if (DrawLetter(p, 0)) playDraw = true;
+                      if (DrawLetter(p - float2(0.12, 0.0), 1)) playDraw = true;
+                      if (DrawLetter(p - float2(0.24, 0.0), 2)) playDraw = true;
+                      if (DrawLetter(p - float2(0.36, 0.0), 3)) playDraw = true;
+                  } else if (PlaybackState == 2.0) { // PAUSE
+                      if (DrawLetter(p, 0)) playDraw = true;
+                      if (DrawLetter(p - float2(0.12, 0.0), 2)) playDraw = true;
+                      if (DrawLetter(p - float2(0.24, 0.0), 4)) playDraw = true;
+                      if (DrawLetter(p - float2(0.36, 0.0), 5)) playDraw = true;
+                      if (DrawLetter(p - float2(0.48, 0.0), 6)) playDraw = true;
+                  } else { // STOP
+                      if (DrawLetter(p, 5)) playDraw = true;
+                      if (DrawLetter(p - float2(0.12, 0.0), 7)) playDraw = true;
+                      if (DrawLetter(p - float2(0.24, 0.0), 8)) playDraw = true;
+                      if (DrawLetter(p - float2(0.36, 0.0), 0)) playDraw = true;
+                  }
+                  
+                  // [- : - -]
+                  float2 tP = float2(uv.x * aspect - 0.2, uv.y - 0.85);
+                  bool timeDraw = false;
+                  // [
+                  if (tP.x > 0.0 && tP.x < 0.02 && tP.y > 0.0 && tP.y < 0.06) {
+                      if (tP.x < 0.005 || tP.y < 0.01 || tP.y > 0.05) timeDraw = true;
+                  }
+                  // -
+                  if (tP.x > 0.04 && tP.x < 0.06 && tP.y > 0.02 && tP.y < 0.04) timeDraw = true;
+                  // :
+                  if (tP.x > 0.08 && tP.x < 0.09 && tP.y > 0.0 && tP.y < 0.06) {
+                      if ((tP.y > 0.01 && tP.y < 0.02) || (tP.y > 0.04 && tP.y < 0.05)) timeDraw = true;
+                  }
+                  // -
+                  if (tP.x > 0.11 && tP.x < 0.13 && tP.y > 0.02 && tP.y < 0.04) timeDraw = true;
+                  // -
+                  if (tP.x > 0.15 && tP.x < 0.17 && tP.y > 0.02 && tP.y < 0.04) timeDraw = true;
+                  // ]
+                  if (tP.x > 0.19 && tP.x < 0.21 && tP.y > 0.0 && tP.y < 0.06) {
+                      if (tP.x > 0.205 || tP.y < 0.01 || tP.y > 0.05) timeDraw = true;
+                  }
+                  
+                  // [MM-DD-YY]
+                  float2 dP = float2(uv.x * aspect - aspect + 0.5, uv.y - 0.85);
+                  bool dateDraw = false;
+                  // [
+                  if (dP.x > 0.0 && dP.x < 0.02 && dP.y > 0.0 && dP.y < 0.06) {
+                      if (dP.x < 0.005 || dP.y < 0.01 || dP.y > 0.05) dateDraw = true;
+                  }
+                  // M M
+                  if (dP.x > 0.04 && dP.x < 0.14 && dP.y > 0.0 && dP.y < 0.06) {
+                      float2 mP = dP - float2(0.04, 0.0);
+                      if (mP.x < 0.01 || (mP.x > 0.03 && mP.x < 0.04) || (mP.x > 0.06 && mP.x < 0.07) || mP.x > 0.09) dateDraw = true;
+                      if (mP.y < 0.01) dateDraw = true;
+                  }
+                  // -
+                  if (dP.x > 0.16 && dP.x < 0.18 && dP.y > 0.02 && dP.y < 0.04) dateDraw = true;
+                  // D D
+                  if (dP.x > 0.20 && dP.x < 0.30 && dP.y > 0.0 && dP.y < 0.06) {
+                      float2 d2P = dP - float2(0.20, 0.0);
+                      if (d2P.x < 0.01 || (d2P.x > 0.03 && d2P.x < 0.04) || d2P.x > 0.09 || (d2P.x > 0.06 && d2P.x < 0.07)) dateDraw = true;
+                      if (d2P.y < 0.01 || d2P.y > 0.05) dateDraw = true;
+                  }
+                  // -
+                  if (dP.x > 0.32 && dP.x < 0.34 && dP.y > 0.02 && dP.y < 0.04) dateDraw = true;
+                  // Y Y
+                  if (dP.x > 0.36 && dP.x < 0.46 && dP.y > 0.0 && dP.y < 0.06) {
+                      float2 y2P = dP - float2(0.36, 0.0);
+                      if ((y2P.y < 0.03 && (y2P.x < 0.01 || (y2P.x > 0.03 && y2P.x < 0.04) || (y2P.x > 0.06 && y2P.x < 0.07) || y2P.x > 0.09)) || 
+                          (y2P.y >= 0.03 && ((y2P.x > 0.015 && y2P.x < 0.025) || (y2P.x > 0.075 && y2P.x < 0.085))) || 
+                          (y2P.y > 0.02 && y2P.y < 0.03)) dateDraw = true;
+                  }
+                  // ]
+                  if (dP.x > 0.48 && dP.x < 0.50 && dP.y > 0.0 && dP.y < 0.06) {
+                      if (dP.x > 0.495 || dP.y < 0.01 || dP.y > 0.05) dateDraw = true;
+                  }
+
+                  if (playDraw || timeDraw || dateDraw) {
+                      color.rgb = float3(1.0, 1.0, 1.0); // White text
+                      // Add chromatic aberration for VHS look
+                      if (frac(uv.y * 300.0 + Time * 5.0) < 0.5) {
+                          color.r += 0.4;
+                          color.b += 0.4;
                       }
                   }
-                  
-                  if (p.y < -0.6) draw = false;
-              }
-              
-              if (draw) {
-                  int colorIdx = (int(floor(bx)) + int(floor(by))) % 6;
-                  float3 logoColor = float3(1, 1, 1);
-                  if (colorIdx == 0) logoColor = float3(1.0, 0.3, 0.3);
-                  else if (colorIdx == 1) logoColor = float3(0.3, 1.0, 0.3);
-                  else if (colorIdx == 2) logoColor = float3(0.3, 0.6, 1.0);
-                  else if (colorIdx == 3) logoColor = float3(1.0, 1.0, 0.3);
-                  else if (colorIdx == 4) logoColor = float3(1.0, 0.3, 1.0);
-                  else if (colorIdx == 5) logoColor = float3(0.3, 1.0, 1.0);
-                  
-                  color.rgb = logoColor;
               }
           }
 
@@ -514,7 +638,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
       // Play/Pause (0.12 - 0.16)
       if (uv.x > 0.12 && uv.x < 0.16 && uv.y > 0.88 && uv.y < 0.94) {
-         if (IsPlaying > 0.5) {
+         if (PlaybackState == 1.0) {
             float px = (uv.x - 0.12) / 0.04;
             if ((px > 0.2 && px < 0.4) || (px > 0.6 && px < 0.8)) color.rgb = float3(1, 1, 1);
          } else {
@@ -929,12 +1053,12 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float nearPlane, float farPlane,
       int screenWidth, int screenHeight,
       ID3D11ShaderResourceView uiLayerSrv,
-      Vector2? hoverUV, float progress, bool isPlaying, float lockState,
+      Vector2? hoverUV, float progress, float playbackState, float lockState,
       float minDepth, float maxDepth, float volume,
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
       bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
-      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null) {
+      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null, int screensaverStyle = 0) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -972,7 +1096,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           VideoAspectRatio = videoAspectRatio,
 
           Progress = progress,
-          IsPlaying = isPlaying ? 1.0f : 0.0f,
+          PlaybackState = playbackState,
           DynamicMinDepth = minDepth,
           DynamicMaxDepth = maxDepth,
           HasBackBuffer = uiLayerSrv != null ? 1.0f : 0.0f,
@@ -988,7 +1112,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           UseDifferenceFallback = useDifferenceFallback ? 1.0f : 0.0f,
           Opacity = opacity,
           IsProjectorMode = isProjectorMode ? 1.0f : 0.0f,
-          ScreensaverColor = screensaverColor ?? new Vector3(0.0f, 0.0f, 0.0f)
+          ScreensaverColor = screensaverColor ?? new Vector3(0.0f, 0.0f, 0.0f),
+          ScreensaverStyle = screensaverStyle
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

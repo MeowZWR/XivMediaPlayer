@@ -80,7 +80,7 @@ namespace XivMediaPlayer.Compositing {
       IntPtr textureSrv, int textureWidth, int textureHeight, DepthBufferCapture depthCapture = null,
       Vector3? cameraPos = null, Vector3? cameraForward = null, Vector3? cameraRight = null, Vector3? cameraUp = null,
       float fovY = MathF.PI / 4, float aspectRatio = 1.0f, UILayerCapture uiCapture = null, float nearPlane = 0.1f, float farPlane = 10000f,
-      Vector2? hoverUV = null, float progress = 0f, bool isPlaying = false, float lockState = 1.0f, float volume = 1.0f, IntPtr titleSrvPtr = default, bool isLooping = false, bool isShuffle = false, float time = 0f, float showScreensaver = 0f, bool useDifferenceFallback = false,
+      Vector2? hoverUV = null, float progress = 0f, float playbackState = 0f, float lockState = 1.0f, float volume = 1.0f, IntPtr titleSrvPtr = default, bool isLooping = false, bool isShuffle = false, float time = 0f, float showScreensaver = 0f, bool useDifferenceFallback = false,
       Matrix4x4? viewProjMatrix = null, Vector2? viewportPos = null, Vector2? viewportSize = null) {
 
       if (_disposed || !IsActive || textureSrv == IntPtr.Zero) return;
@@ -121,7 +121,7 @@ namespace XivMediaPlayer.Compositing {
         bool allCornersInFront = zTL > 0.1f && zTR > 0.1f && zBR > 0.1f && zBL > 0.1f;
 
         RenderWithOcclusion(textureSrv, depthCapture, cameraPos.Value,
-          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, isPlaying, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize);
+          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize);
       } else {
         RenderScreenSpace(textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize);
       }
@@ -290,7 +290,7 @@ namespace XivMediaPlayer.Compositing {
     /// </summary>
     private unsafe void RenderWithOcclusion(IntPtr textureSrv, DepthBufferCapture depthCapture,
       Vector3 cameraPos, Vector3 cameraForward, Vector3 cameraRight, Vector3 cameraUp, float fovY, float aspectRatio, UILayerCapture uiCapture,
-      float nearPlane, float farPlane, Vector2? hoverUV, float progress, bool isPlaying, float lockState, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver, float videoAspectRatio, bool allCornersInFront, bool useDifferenceFallback,
+      float nearPlane, float farPlane, Vector2? hoverUV, float progress, float playbackState, float lockState, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver, float videoAspectRatio, bool allCornersInFront, bool useDifferenceFallback,
       Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize) {
       var (tl, tr, br, bl) = _transform.Corners;
       
@@ -410,7 +410,7 @@ namespace XivMediaPlayer.Compositing {
           nearPlane, farPlane,
           screenW, screenH,
           uiCapture?.BackBufferSRV,
-          hoverUV, progress, isPlaying, lockState,
+          hoverUV, progress, playbackState, lockState,
           minDepth, maxDepth, volume,
           depthCapture.RenderWidth, depthCapture.RenderHeight,
           uiCapture?.LastAddonRects, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspectRatio,
@@ -421,7 +421,8 @@ namespace XivMediaPlayer.Compositing {
           useDifferenceFallback,
           _transform.Opacity,
           _transform.IsProjectorMode,
-          _transform.ScreensaverColor);
+          _transform.ScreensaverColor,
+          _transform.ScreensaverStyle);
 
         DepthDebugInfo = $"Cam: {cameraPos:F1}\nFwd: {cameraForward:F2}\nFov: {fovY:F3}\nAspect: {aspectRatio:F3}";
 
