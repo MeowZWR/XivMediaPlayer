@@ -212,7 +212,7 @@ namespace MediaPlayerCore.YtDlp
         /// Resolves a URL to a direct stream URL suitable for VLC playback.
         /// Returns null if resolution fails.
         /// </summary>
-        public async Task<string?> ResolveStreamUrl(string url)
+        public async Task<string[]?> ResolveStreamUrl(string url)
         {
             if (!IsAvailable())
             {
@@ -225,16 +225,16 @@ namespace MediaPlayerCore.YtDlp
                 OnStatusUpdate?.Invoke(this, "Resolving stream URL...");
 
                 string formatArg = _preferredMaxHeight > 0
-                  ? $"b[height<={_preferredMaxHeight}]/b"
-                  : "b";
+                  ? $"bv[height<={_preferredMaxHeight}]+ba/b"
+                  : "bv+ba/b";
 
                 string result = await RunYtDlp($"--get-url -f \"{formatArg}\" \"{url}\"");
-                string? streamUrl = result?.Trim().Split('\n').FirstOrDefault()?.Trim();
+                string[]? streamUrls = result?.Trim().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
-                if (!string.IsNullOrEmpty(streamUrl))
+                if (streamUrls != null && streamUrls.Length > 0)
                 {
-                    OnStatusUpdate?.Invoke(this, "Stream URL resolved.");
-                    return streamUrl;
+                    OnStatusUpdate?.Invoke(this, $"Stream URL resolved ({streamUrls.Length} streams).");
+                    return streamUrls;
                 }
 
                 OnError?.Invoke(this, new Exception("yt-dlp returned empty URL for: " + url));
@@ -312,10 +312,10 @@ namespace MediaPlayerCore.YtDlp
                 }
 
                 // Fallback: just get best URL
-                string? bestUrl = await ResolveStreamUrl(url);
-                if (!string.IsNullOrEmpty(bestUrl))
+                string[]? bestUrls = await ResolveStreamUrl(url);
+                if (bestUrls != null && bestUrls.Length > 0 && !string.IsNullOrEmpty(bestUrls[0]))
                 {
-                    return new string[] { bestUrl, bestUrl, bestUrl, bestUrl, bestUrl };
+                    return new string[] { bestUrls[0], bestUrls[0], bestUrls[0], bestUrls[0], bestUrls[0] };
                 }
             } catch (Exception e)
             {

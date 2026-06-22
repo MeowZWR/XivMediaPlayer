@@ -48,7 +48,7 @@ namespace MediaPlayerCore {
       _updateLoop = Task.Run(() => Update());
     }
 
-    public void PlayStream(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false) {
+    public void PlayStream(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false, string? slaveAudioPath = null) {
       Task.Run(() => {
         try {
           if (!audioOnly) {
@@ -56,7 +56,7 @@ namespace MediaPlayerCore {
           }
           OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
           if (!string.IsNullOrEmpty(audioPath)) {
-            ConfigureStream(playerObject, audioPath, spatialAllowed, startTimeMs, httpHeaders, audioOnly);
+            ConfigureStream(playerObject, audioPath, spatialAllowed, startTimeMs, httpHeaders, audioOnly, slaveAudioPath);
           }
         } catch (Exception e) {
           OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
@@ -119,7 +119,7 @@ namespace MediaPlayerCore {
         }
     }
 
-    public void ChangeStream(IMediaGameObject playerObject, string audioPath, float width) {
+    public void ChangeStream(IMediaGameObject playerObject, string audioPath, float width, string? slaveAudioPath = null) {
       Task.Run(() => {
         try {
           OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
@@ -169,7 +169,7 @@ namespace MediaPlayerCore {
       return false;
     }
 
-    public void ConfigureStream(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false) {
+    public void ConfigureStream(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false, string? slaveAudioPath = null) {
       if (playerObject != null) {
           MediaObject stream = null;
           bool isNew = false;
@@ -196,10 +196,10 @@ namespace MediaPlayerCore {
               stream.PlaybackFinished += (s, e) => {
                  OnPlaybackFinished?.Invoke(this, e);
               };
-              stream.Play(audioPath, _livestreamVolume, startTimeMs, httpHeaders);
+              stream.Play(audioPath, _livestreamVolume, startTimeMs, httpHeaders, slaveAudioPath);
             }
           } else {
-             stream.ChangeVideoStream(audioPath, LastFrameWidth, startTimeMs, httpHeaders);
+             stream.ChangeVideoStream(audioPath, LastFrameWidth, startTimeMs, httpHeaders, slaveAudioPath);
           }
       }
     }
@@ -332,5 +332,7 @@ namespace MediaPlayerCore {
     }
   }
 }
+
+
 
 

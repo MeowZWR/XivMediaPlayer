@@ -203,7 +203,7 @@ namespace MediaPlayerCore {
       Invalidated = true;
     }
 
-    public void Play(string mediaPath, float volume, int startTimeMs, Dictionary<string, string>? httpHeaders) {
+    public void Play(string mediaPath, float volume, int startTimeMs, Dictionary<string, string>? httpHeaders, string? slaveAudioPath = null) {
       Task.Run(async delegate {
         try {
           if (!string.IsNullOrEmpty(mediaPath) && PlaybackState == PlaybackState.Stopped) {
@@ -245,6 +245,9 @@ namespace MediaPlayerCore {
               
               if (_audioOnly) {
                   media.AddOption(":no-video");
+              }
+              if (!string.IsNullOrEmpty(slaveAudioPath)) {
+                  media.AddOption($":input-slave={slaveAudioPath}");
               }
 
               if (mediaPath.StartsWith("rtsp")) {
@@ -385,7 +388,7 @@ namespace MediaPlayerCore {
       });
     }
 
-    public void ChangeVideoStream(string soundPath, float width, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null) {
+    public void ChangeVideoStream(string soundPath, float width, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null, string? slaveAudioPath = null) {
       Task.Run(async delegate {
         try {
           if (_vlcPlayer != null) {
@@ -393,8 +396,11 @@ namespace MediaPlayerCore {
                      ? FromType.FromLocation : FromType.FromPath);
             
             if (_audioOnly) {
-                media.AddOption(":no-video");
-            }
+                  media.AddOption(":no-video");
+              }
+              if (!string.IsNullOrEmpty(slaveAudioPath)) {
+                  media.AddOption($":input-slave={slaveAudioPath}");
+              }
 
             if (soundPath.StartsWith("rtsp")) {
                 media.AddOption(":network-caching=30");
@@ -679,6 +685,7 @@ namespace MediaPlayerCore {
     }
   }
 }
+
 
 
 
