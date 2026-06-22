@@ -70,6 +70,7 @@ namespace MediaPlayerCore {
     private float _baseVolume = 1;
     private bool _vlcWasAbleToStart;
     private bool _disposed;
+    private bool _trueDimensionsExtracted;
     private bool _isDisposing;
     private readonly object _disposeLock = new object();
 
@@ -445,6 +446,7 @@ namespace MediaPlayerCore {
                     return;
                 }
                 if (_vlcPlayer != null) {
+                    _trueDimensionsExtracted = false;
                     _vlcPlayer.Media = media;
                 }
             }
@@ -587,6 +589,43 @@ namespace MediaPlayerCore {
             _vlcBuffer = _vlcMappedViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle();
           }
         }
+        
+        if (_parent != null && !_trueDimensionsExtracted) {
+            Task.Run(async () => {
+                while (!_trueDimensionsExtracted && _vlcPlayer != null && !_disposed) {
+                    uint px = 0, py = 0;
+                    if (_vlcPlayer.Size(0, ref px, ref py)) {
+                        if (px > 0 && py > 0) {
+                            _parent.LastFrameTrueWidth = (int)px;
+                            _parent.LastFrameTrueHeight = (int)py;
+                            _trueDimensionsExtracted = true;
+                            System.Diagnostics.Debug.WriteLine($"[MediaObject] MediaPlayer.Size polled true dimensions: {px}x{py}");
+                        }
+                    }
+                    if (!_trueDimensionsExtracted && _vlcPlayer.Media != null) {
+                        var tracks = _vlcPlayer.Media.Tracks;
+                        if (tracks != null) {
+                            foreach (var track in tracks) {
+                                if (track.TrackType == LibVLCSharp.Shared.TrackType.Video) {
+                                    int trueWidth = (int)track.Data.Video.Width;
+                                    int trueHeight = (int)track.Data.Video.Height;
+                                    if (trueWidth > 0 && trueHeight > 0) {
+                                        _parent.LastFrameTrueWidth = trueWidth;
+                                        _parent.LastFrameTrueHeight = trueHeight;
+                                        _trueDimensionsExtracted = true;
+                                        System.Diagnostics.Debug.WriteLine($"[MediaObject] Task extracted true dimensions: {trueWidth}x{trueHeight}");
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (_trueDimensionsExtracted) break;
+                    await Task.Delay(500);
+                }
+            });
+        }
+        
         return 1;
       }
 
@@ -640,6 +679,7 @@ namespace MediaPlayerCore {
     }
   }
 }
+
 
 
 
