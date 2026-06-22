@@ -519,20 +519,24 @@ namespace XivMediaPlayer.Compositing {
         float quadAspect = quadH > 0 ? quadW / quadH : 1.0f;
         
         if (videoAspect > quadAspect) {
-            float scale = quadAspect / videoAspect;
-            float offset = (1.0f - scale) * 0.5f;
-            uvTL.X = offset;
-            uvBL.X = offset;
-            uvTR.X = 1.0f - offset;
-            uvBR.X = 1.0f - offset;
-          } else if (videoAspect < quadAspect) {
-            float scale = videoAspect / quadAspect;
-            float offset = (1.0f - scale) * 0.5f;
-            uvTL.Y = offset;
-            uvTR.Y = offset;
-            uvBL.Y = 1.0f - offset;
-            uvBR.Y = 1.0f - offset;
-          }
+              float scale = quadAspect / videoAspect;
+              float offset = (1.0f - scale) * 0.5f;
+              uvTL.X = offset;
+              uvBL.X = offset;
+              uvTR.X = 1.0f - offset;
+              uvBR.X = 1.0f - offset;
+            } else if (videoAspect < quadAspect) {
+              float scale = videoAspect / quadAspect;
+              float offset = (1.0f - scale) * 0.5f;
+              Vector2 origTL = sTL;
+              Vector2 origTR = sTR;
+              Vector2 origBL = sBL;
+              Vector2 origBR = sBR;
+              sTL = Vector2.Lerp(origTL, origTR, offset);
+              sBL = Vector2.Lerp(origBL, origBR, offset);
+              sTR = Vector2.Lerp(origTR, origTL, offset);
+              sBR = Vector2.Lerp(origBR, origBL, offset);
+            }
       }
 
       byte alpha = (byte)(Math.Clamp(_transform.Opacity, 0f, 1f) * 255f);
@@ -706,6 +710,10 @@ namespace XivMediaPlayer.Compositing {
     }
   }
 }
+
+
+
+
 
 
 

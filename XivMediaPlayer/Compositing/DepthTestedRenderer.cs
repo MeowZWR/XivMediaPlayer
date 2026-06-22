@@ -296,13 +296,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
       sampleUV = uv;
       if (VideoAspectRatio > 0) {
           float tvAspect = length(tvRight) / length(tvDown);
-          if (VideoAspectRatio > tvAspect) {
-                float scale = tvAspect / VideoAspectRatio;
-                sampleUV.x = (sampleUV.x - 0.5) * scale + 0.5;
-            } else {
-                float scale = VideoAspectRatio / tvAspect;
-                sampleUV.y = (sampleUV.y - 0.5) * scale + 0.5;
-            }
+          float scale = tvAspect / VideoAspectRatio;
+            sampleUV.x = (sampleUV.x - 0.5) * scale + 0.5;
       }
   }
   
@@ -1484,6 +1479,9 @@ float4 PS(VS_OUT input) : SV_TARGET {
     }
   }
 }
+
+
+
 
 
 
