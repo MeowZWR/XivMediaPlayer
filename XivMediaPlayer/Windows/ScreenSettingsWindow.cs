@@ -263,30 +263,39 @@ namespace XivMediaPlayer.Windows {
 
       bool aspectChanged = false;
       aspectChanged |= ImGui.RadioButton("16:9", ref _aspectRatio, 0);
-      ImGui.SameLine();
-      aspectChanged |= ImGui.RadioButton("4:3", ref _aspectRatio, 1);
+        ImGui.SameLine();
+        aspectChanged |= ImGui.RadioButton("4:3", ref _aspectRatio, 1);
+        ImGui.SameLine();
+        aspectChanged |= ImGui.RadioButton("Custom / Free", ref _aspectRatio, 2);
       
       bool scaleChanged = false;
-      scaleChanged |= ImGui.DragFloat("Diagonal Size##scale", ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
+        if (_aspectRatio != 2) {
+            scaleChanged |= ImGui.DragFloat("Diagonal Size##scale", ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
+        } else {
+            scaleChanged |= ImGui.DragFloat("Width##scaleX", ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
+            scaleChanged |= ImGui.DragFloat("Height##scaleY", ref _scale.Y, 0.1f, 0.5f, 200f, "%.1f");
+        }
       bool saveScale = ImGui.IsItemDeactivatedAfterEdit();
 
       if (aspectChanged || scaleChanged) {
-        float ratio = _aspectRatio == 0 ? (9f / 16f) : (3f / 4f);
-        _scale.Y = _scale.X * ratio;
-        _transform.Scale = _scale;
-      }
+          if (_aspectRatio != 2) {
+              float ratio = _aspectRatio == 0 ? (9f / 16f) : (3f / 4f);
+              _scale.Y = _scale.X * ratio;
+          }
+          _transform.Scale = _scale;
+        }
       if (saveScale || aspectChanged) {
         _onSave?.Invoke();
       }
 
       // Preset sizes
-      if (ImGui.Button("Small (2m)")) { _scale.X = 2f; _scale.Y = _scale.X * (_aspectRatio == 0 ? (9f/16f) : (3f/4f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button("Small (2m)")) { _scale.X = 2f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Medium (4m)")) { _scale.X = 4f; _scale.Y = _scale.X * (_aspectRatio == 0 ? (9f/16f) : (3f/4f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button("Medium (4m)")) { _scale.X = 4f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Large (8m)")) { _scale.X = 8f; _scale.Y = _scale.X * (_aspectRatio == 0 ? (9f/16f) : (3f/4f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button("Large (8m)")) { _scale.X = 8f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Cinema (12m)")) { _scale.X = 12f; _scale.Y = _scale.X * (_aspectRatio == 0 ? (9f/16f) : (3f/4f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button("Cinema (12m)")) { _scale.X = 12f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
 
       ImGui.Spacing();
       ImGui.Separator();
@@ -572,3 +581,5 @@ namespace XivMediaPlayer.Windows {
 
   }
 }
+
+
