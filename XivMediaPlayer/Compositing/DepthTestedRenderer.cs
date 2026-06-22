@@ -84,6 +84,8 @@ namespace XivMediaPlayer.Compositing {
       public float IsProjectorMode;
       public Vector3 ScreensaverColor;
       public float ScreensaverStyle;
+      public float UIBlendThreshold;
+      public Vector3 _pad6;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -144,6 +146,8 @@ cbuffer Constants : register(b0) {
 
   float3 ScreensaverColor;
   float ScreensaverStyle;
+  float UIBlendThreshold;
+  float3 _pad6;
 };
 
 cbuffer UIConsts : register(b1) {
@@ -293,12 +297,12 @@ float4 PS(VS_OUT input) : SV_TARGET {
       if (VideoAspectRatio > 0) {
           float tvAspect = length(tvRight) / length(tvDown);
           if (VideoAspectRatio > tvAspect) {
-              float scale = tvAspect / VideoAspectRatio;
-              sampleUV.y = (sampleUV.y - 0.5) / scale + 0.5;
-          } else {
-              float scale = VideoAspectRatio / tvAspect;
-              sampleUV.x = (sampleUV.x - 0.5) / scale + 0.5;
-          }
+                float scale = tvAspect / VideoAspectRatio;
+                sampleUV.x = (sampleUV.x - 0.5) * scale + 0.5;
+            } else {
+                float scale = VideoAspectRatio / tvAspect;
+                sampleUV.y = (sampleUV.y - 0.5) * scale + 0.5;
+            }
       }
   }
   
@@ -1190,13 +1194,16 @@ float4 PS(VS_OUT input) : SV_TARGET {
               float3 blendedBlack = color.rgb * saturate(1.0 - bbAlpha);
               color.rgb = blendedBlack + (bbColor.rgb * bbAlpha * isPureWhite);
           } else {
-              // For all other UI (standard game UI)
-              // Standard mode with shadow backdrop
-              float threshold = 152.0 / 255.0;
-              float isPureWhite = smoothstep(threshold - 0.02, 1.0, bbAlpha);
-              float3 shadowColor = float3(0.0, 0.0, 0.0);
-              float3 targetColor = lerp(shadowColor, bbColor.rgb, isPureWhite);
-              color.rgb = color.rgb * saturate(1.0 - bbAlpha) + targetColor * bbAlpha;
+              // For all other UI (standard game UI), use the pure standard alpha blend
+              if (UIBlendThreshold > 0.5) {
+                  float threshold = UIBlendThreshold;
+                  float isPureWhite = smoothstep(threshold - 0.02, 1.0, bbAlpha);
+                  float3 shadowColor = float3(0.0, 0.0, 0.0);
+                  float3 targetColor = lerp(shadowColor, bbColor.rgb, isPureWhite);
+                  color.rgb = color.rgb * saturate(1.0 - bbAlpha) + targetColor * bbAlpha;
+              } else {
+                  color.rgb = color.rgb * saturate(1.0 - bbAlpha) + bbColor.rgb * bbAlpha;
+              }
           }
       }
     }
@@ -1320,7 +1327,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
       bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
-      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null, int screensaverStyle = 0) {
+      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null, int screensaverStyle = 0, float uiBlendThreshold = 0.0f) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -1375,7 +1382,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           Opacity = opacity,
           IsProjectorMode = isProjectorMode ? 1.0f : 0.0f,
           ScreensaverColor = screensaverColor ?? new Vector3(0.0f, 0.0f, 0.0f),
-          ScreensaverStyle = screensaverStyle
+          ScreensaverStyle = screensaverStyle,
+          UIBlendThreshold = uiBlendThreshold
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 
@@ -1476,4 +1484,6 @@ float4 PS(VS_OUT input) : SV_TARGET {
     }
   }
 }
+
+
 

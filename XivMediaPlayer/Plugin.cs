@@ -2265,8 +2265,9 @@ namespace XivMediaPlayer
             if (_config.EnableWanderersCampfireFix && _objectTable != null) {
                 foreach (var obj in _objectTable) {
                     if (obj == null || obj.Name == null) continue;
-                    var name = obj.Name.TextValue;
-                    if (name != null && (name.Contains("Wanderer's Campfire", StringComparison.OrdinalIgnoreCase) || 
+                    var name = obj.Name.ToString();
+                    // Wanderer's Campfire, Feu de camp du vagabond, Wanderers Lagerfeuer
+                    if (obj.DataId == 197274 || (name.Contains("Wanderer's Campfire", StringComparison.OrdinalIgnoreCase) ||
                                          name.Contains("Wanderers Lagerfeuer", StringComparison.OrdinalIgnoreCase) ||
                                          name.Contains("Feu de camp du vagabond", StringComparison.OrdinalIgnoreCase) ||
                                          name.Contains("放浪神の焚き火", StringComparison.OrdinalIgnoreCase))) {
@@ -2814,7 +2815,7 @@ namespace XivMediaPlayer
                     _worldRenderer.Render(videoSrv, videoWidth, videoHeight, _depthCapture, 
                         _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp, 
                         fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver, useDifferenceFallback: useDifferenceFallback, 
-                        viewProjMatrix: _prevViewProjMatrix ?? viewProjMatrix, viewportPos: mainViewport.Pos, viewportSize: mainViewport.Size);
+                        viewProjMatrix: _prevViewProjMatrix ?? viewProjMatrix, viewportPos: mainViewport.Pos, viewportSize: mainViewport.Size, uiBlendThreshold: _config.UIBlendThreshold);
                         
                     _prevCameraPos = cameraPos;
                     _prevCameraForward = cameraForward;

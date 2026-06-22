@@ -73,19 +73,16 @@ namespace XivMediaPlayer.Windows {
       }
 
 
-      /*
       bool strictMasking = _plugin.Config.UIBlendThreshold > 0.5f;
       if (ImGui.Checkbox("Strict UI Masking (AMD Fix / Invisible Drop Shadows)", ref strictMasking)) {
         _plugin.Config.UIBlendThreshold = strictMasking ? (171.0f / 255.0f) : 0.0f;
-        if (_plugin.WorldRenderer != null) {
-            _plugin.WorldRenderer.UIBlendThreshold = _plugin.Config.UIBlendThreshold;
-        }
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
         ImGui.SetTooltip("Enable this if you have an AMD card and notice that the TV does not render. UI dropshadows are lost.");
       }
 
+      /*
       bool reshadeCompat = _plugin.Config.ReShadeCompatibilityMode;
       if (ImGui.Checkbox("ReShade Compatibility Mode", ref reshadeCompat)) {
         _plugin.Config.ReShadeCompatibilityMode = reshadeCompat;

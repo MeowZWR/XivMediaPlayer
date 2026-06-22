@@ -81,7 +81,7 @@ namespace XivMediaPlayer.Compositing {
       Vector3? cameraPos = null, Vector3? cameraForward = null, Vector3? cameraRight = null, Vector3? cameraUp = null,
       float fovY = MathF.PI / 4, float aspectRatio = 1.0f, UILayerCapture uiCapture = null, float nearPlane = 0.1f, float farPlane = 10000f,
       Vector2? hoverUV = null, float progress = 0f, float playbackState = 0f, float lockState = 1.0f, float volume = 1.0f, IntPtr titleSrvPtr = default, bool isLooping = false, bool isShuffle = false, float time = 0f, float showScreensaver = 0f, bool useDifferenceFallback = false,
-      Matrix4x4? viewProjMatrix = null, Vector2? viewportPos = null, Vector2? viewportSize = null) {
+      Matrix4x4? viewProjMatrix = null, Vector2? viewportPos = null, Vector2? viewportSize = null, float uiBlendThreshold = 0.0f) {
 
       if (_disposed || !IsActive || textureSrv == IntPtr.Zero) return;
       
@@ -121,7 +121,7 @@ namespace XivMediaPlayer.Compositing {
         bool allCornersInFront = zTL > 0.1f && zTR > 0.1f && zBR > 0.1f && zBL > 0.1f;
 
         RenderWithOcclusion(textureSrv, depthCapture, cameraPos.Value,
-          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize);
+          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize, uiBlendThreshold);
       } else {
         RenderScreenSpace(textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize);
       }
@@ -291,7 +291,7 @@ namespace XivMediaPlayer.Compositing {
     private unsafe void RenderWithOcclusion(IntPtr textureSrv, DepthBufferCapture depthCapture,
       Vector3 cameraPos, Vector3 cameraForward, Vector3 cameraRight, Vector3 cameraUp, float fovY, float aspectRatio, UILayerCapture uiCapture,
       float nearPlane, float farPlane, Vector2? hoverUV, float progress, float playbackState, float lockState, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver, float videoAspectRatio, bool allCornersInFront, bool useDifferenceFallback,
-      Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize) {
+      Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize, float uiBlendThreshold) {
       var (tl, tr, br, bl) = _transform.Corners;
       
       var rtm = FFXIVClientStructs.FFXIV.Client.Graphics.Render.RenderTargetManager.Instance();
@@ -422,7 +422,8 @@ namespace XivMediaPlayer.Compositing {
           _transform.Opacity,
           _transform.IsProjectorMode,
           _transform.ScreensaverColor,
-          _transform.ScreensaverStyle);
+          _transform.ScreensaverStyle,
+          uiBlendThreshold);
 
         DepthDebugInfo = $"Cam: {cameraPos:F1}\nFwd: {cameraForward:F2}\nFov: {fovY:F3}\nAspect: {aspectRatio:F3}";
 
@@ -517,23 +518,21 @@ namespace XivMediaPlayer.Compositing {
         float quadH = Vector2.Distance(sTL, sBL);
         float quadAspect = quadH > 0 ? quadW / quadH : 1.0f;
         
-        Vector2 origTL = sTL, origTR = sTR, origBL = sBL, origBR = sBR;
-        
         if (videoAspect > quadAspect) {
-          float scale = quadAspect / videoAspect;
-          float offset = (1.0f - scale) * 0.5f;
-          sTL = Vector2.Lerp(origTL, origBL, offset);
-          sTR = Vector2.Lerp(origTR, origBR, offset);
-          sBL = Vector2.Lerp(origBL, origTL, offset);
-          sBR = Vector2.Lerp(origBR, origTR, offset);
-        } else if (videoAspect < quadAspect) {
-          float scale = videoAspect / quadAspect;
-          float offset = (1.0f - scale) * 0.5f;
-          sTL = Vector2.Lerp(origTL, origTR, offset);
-          sBL = Vector2.Lerp(origBL, origBR, offset);
-          sTR = Vector2.Lerp(origTR, origTL, offset);
-          sBR = Vector2.Lerp(origBR, origBL, offset);
-        }
+            float scale = quadAspect / videoAspect;
+            float offset = (1.0f - scale) * 0.5f;
+            uvTL.X = offset;
+            uvBL.X = offset;
+            uvTR.X = 1.0f - offset;
+            uvBR.X = 1.0f - offset;
+          } else if (videoAspect < quadAspect) {
+            float scale = videoAspect / quadAspect;
+            float offset = (1.0f - scale) * 0.5f;
+            uvTL.Y = offset;
+            uvTR.Y = offset;
+            uvBL.Y = 1.0f - offset;
+            uvBR.Y = 1.0f - offset;
+          }
       }
 
       byte alpha = (byte)(Math.Clamp(_transform.Opacity, 0f, 1f) * 255f);
@@ -707,4 +706,7 @@ namespace XivMediaPlayer.Compositing {
     }
   }
 }
+
+
+
 
