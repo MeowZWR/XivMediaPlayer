@@ -82,7 +82,6 @@ namespace XivMediaPlayer.Compositing {
       public float UseDifferenceFallback;
       public float Opacity;
       public float IsProjectorMode;
-      public float _pad6;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -136,10 +135,10 @@ cbuffer Constants : register(b0) {
   float IsShuffle;
   float Time;
   float ShowScreensaver;
+  float HasPreUI;
   float UseDifferenceFallback;
   float Opacity;
   float IsProjectorMode;
-  float _pad6;
 };
 
 cbuffer UIConsts : register(b1) {
