@@ -169,6 +169,53 @@ struct VS_OUT {
   float2 uv : TEXCOORD;
 };
 
+bool DrawXMPLogo(float2 p) {
+    float2 pText = float2(p.x + p.y * 0.35, p.y);
+    bool draw = false;
+    if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
+        if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
+        if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
+            float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
+            float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
+            if (dx1 < 0.11 || dx2 < 0.11) draw = true;
+        }
+        if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
+            if (pText.y < 0.2) {
+                if (abs(pText.x + 0.4) < 0.11) draw = true;
+                if (abs(pText.x - 0.4) < 0.11) draw = true;
+            }
+            float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
+            float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
+            if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
+            if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
+        }
+        if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
+            if (abs(pText.x - 0.8) < 0.11) draw = true;
+            if (pText.x >= 0.8 && pText.x <= 1.25) {
+                if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
+            }
+            if (pText.x > 1.25) {
+                if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
+                    if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
+                        draw = true;
+                    }
+                }
+            }
+        }
+        if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
+            float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
+            float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
+            float distToV = (pText.x < 0.0) ? dm1 : dm2;
+            if (distToV > 0.16) {
+                draw = true;
+                if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
+            }
+        }
+        if (p.y < -0.6) draw = false;
+    }
+    return draw;
+}
+
 bool DrawLetter(float2 p, int letter) {
     if (p.x < 0.0 || p.x > 0.08 || p.y < 0.0 || p.y > 0.12) return false;
     
@@ -302,10 +349,12 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
   if (isInside && occlusion < 0.999) {
       // Draw unoccluded TV
-      if (sampleUV.x < 0 || sampleUV.x > 1 || sampleUV.y < 0 || sampleUV.y > 1) {
+      bool isOutOfBounds = (sampleUV.x < 0 || sampleUV.x > 1 || sampleUV.y < 0 || sampleUV.y > 1);
+      
+      if (isOutOfBounds && ShowScreensaver < 0.5) {
           color = float4(0, 0, 0, IsProjectorMode > 0.5 ? 0.0 : 1.0);
       } else {
-          color = VideoTexture.Sample(VideoSampler, sampleUV);
+          color = isOutOfBounds ? float4(0, 0, 0, 1.0) : VideoTexture.Sample(VideoSampler, sampleUV);
           
           // XMP Screensaver
           if (ShowScreensaver > 0.5) {
@@ -331,63 +380,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
                   float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
                   
                   float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
-                  float2 pText = float2(p.x + p.y * 0.35, p.y);
-                  
-                  bool draw = false;
-                  if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
-                      
-                      // Top connection line
-                      if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
-                      
-                      // X
-                      if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
-                          float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
-                          float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
-                          if (dx1 < 0.11 || dx2 < 0.11) draw = true;
-                      }
-                      
-                      // M
-                      if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
-                          if (pText.y < 0.2) {
-                              if (abs(pText.x + 0.4) < 0.11) draw = true;
-                              if (abs(pText.x - 0.4) < 0.11) draw = true;
-                          }
-                          float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
-                          float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
-                          if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
-                          if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
-                      }
-                      
-                      // P
-                      if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
-                          if (abs(pText.x - 0.8) < 0.11) draw = true;
-                          if (pText.x >= 0.8 && pText.x <= 1.25) {
-                              if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
-                          }
-                          if (pText.x > 1.25) {
-                              if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
-                                  if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
-                                      draw = true;
-                                  }
-                              }
-                          }
-                      }
-                      
-                      // Ellipse (Use original un-slanted p)
-                      if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
-                          float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
-                          float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
-                          float distToV = (pText.x < 0.0) ? dm1 : dm2;
-                          
-                          if (distToV > 0.16) {
-                              draw = true;
-                              // Slit for VIDEO parody
-                              if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
-                          }
-                      }
-                      
-                      if (p.y < -0.6) draw = false;
-                  }
+                  bool draw = DrawXMPLogo(p);
                   
                   if (draw) {
                       int colorIdx = (int(floor(bx)) + int(floor(by))) % 6;
@@ -467,6 +460,13 @@ float4 PS(VS_OUT input) : SV_TARGET {
                       float luma = max(cellColor.r, max(cellColor.g, cellColor.b));
                       cellColor = luma * normalize(ScreensaverColor) * 1.5;
                       if (dist < 1.0 && luma > 0.1) cellColor += float3(0.5, 0.5, 0.5); // Keep head somewhat white
+                  }
+                  
+                  // Add subtle XMP Logo overlay
+                  float logoScale = 0.15;
+                  float2 logoP = float2((uv.x - 0.5) * aspect / logoScale, (uv.y - 0.5) / logoScale);
+                  if (DrawXMPLogo(logoP)) {
+                      cellColor = lerp(cellColor, float3(1.0, 1.0, 1.0), 0.3);
                   }
                   
                   color.rgb = cellColor;
@@ -594,63 +594,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
                       if (dist < 0.078) {
                           float logoScale = 0.038;
                           float2 p = float2(centerUv.x / logoScale, centerUv.y / logoScale);
-                          float2 pText = float2(p.x + p.y * 0.35, p.y);
-                          
-                          bool draw = false;
-                          if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
-                              // Top connection line
-                              if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
-                              
-                              // X
-                              if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
-                                  float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
-                                  float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
-                                  if (dx1 < 0.11 || dx2 < 0.11) draw = true;
-                              }
-                              
-                              // M
-                              if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
-                                  if (pText.y < 0.2) {
-                                      if (abs(pText.x + 0.4) < 0.11) draw = true;
-                                      if (abs(pText.x - 0.4) < 0.11) draw = true;
-                                  }
-                                  float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
-                                  float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
-                                  if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
-                                  if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
-                              }
-                              
-                              // P
-                              if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
-                                  if (abs(pText.x - 0.8) < 0.11) draw = true;
-                                  if (pText.x >= 0.8 && pText.x <= 1.25) {
-                                      if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
-                                  }
-                                  if (pText.x > 1.25) {
-                                      if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
-                                          if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
-                                              draw = true;
-                                          }
-                                      }
-                                  }
-                              }
-                              
-                              // Ellipse
-                              if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
-                                  float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
-                                  float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
-                                  float distToV = (pText.x < 0.0) ? dm1 : dm2;
-                                  
-                                  if (distToV > 0.16) {
-                                      draw = true;
-                                      // Slit
-                                      if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
-                                  }
-                              }
-                              
-                              if (p.y < -0.6) draw = false;
-                          }
-                          
+                          bool draw = DrawXMPLogo(p);
                           testColor = draw ? float3(0.0, 0.0, 0.0) : float3(1.0, 1.0, 1.0);
                       }
                   }
@@ -680,6 +624,11 @@ float4 PS(VS_OUT input) : SV_TARGET {
                   if (colorIntensity > 0.05) {
                       staticColor = lerp(staticColor, staticColor * ScreensaverColor * 1.5, min(colorIntensity, 1.0));
                   }
+                  
+                  // Add subtle faint XMP Logo in center
+                  float logoScale = 0.25;
+                  float2 logoP = float2((uv.x - 0.5) * aspect / logoScale, (uv.y - 0.5) / logoScale);
+                  if (DrawXMPLogo(logoP)) staticColor = lerp(staticColor, float3(1.0, 1.0, 1.0), 0.15);
                   
                   color.rgb = staticColor;
               } else if (ScreensaverStyle > 1.5) {
@@ -753,6 +702,11 @@ float4 PS(VS_OUT input) : SV_TARGET {
                           color.b = 1.0;
                       }
                   }
+                  
+                  // Add XMP logo under the text
+                  float logoScale = 0.05;
+                  float2 logoP = float2((uv.x - 0.5) * aspect / logoScale, (uv.y - 0.65) / logoScale);
+                  if (DrawXMPLogo(logoP)) color.rgb = float3(1.0, 1.0, 1.0);
               } else {
                   // Style 1: VCR
                   // Noise:
@@ -784,64 +738,14 @@ float4 PS(VS_OUT input) : SV_TARGET {
                       if (DrawLetter(p - float2(0.36, 0.0), 0)) playDraw = true;
                   }
                   
-                  // [- : - -]
-                  float2 tP = float2(uv.x * aspect - 0.2, uv.y - 0.85);
-                  bool timeDraw = false;
-                  // [
-                  if (tP.x > 0.0 && tP.x < 0.02 && tP.y > 0.0 && tP.y < 0.06) {
-                      if (tP.x < 0.005 || tP.y < 0.01 || tP.y > 0.05) timeDraw = true;
-                  }
-                  // -
-                  if (tP.x > 0.04 && tP.x < 0.06 && tP.y > 0.02 && tP.y < 0.04) timeDraw = true;
-                  // :
-                  if (tP.x > 0.08 && tP.x < 0.09 && tP.y > 0.0 && tP.y < 0.06) {
-                      if ((tP.y > 0.01 && tP.y < 0.02) || (tP.y > 0.04 && tP.y < 0.05)) timeDraw = true;
-                  }
-                  // -
-                  if (tP.x > 0.11 && tP.x < 0.13 && tP.y > 0.02 && tP.y < 0.04) timeDraw = true;
-                  // -
-                  if (tP.x > 0.15 && tP.x < 0.17 && tP.y > 0.02 && tP.y < 0.04) timeDraw = true;
-                  // ]
-                  if (tP.x > 0.19 && tP.x < 0.21 && tP.y > 0.0 && tP.y < 0.06) {
-                      if (tP.x > 0.205 || tP.y < 0.01 || tP.y > 0.05) timeDraw = true;
-                  }
+                  bool logoDraw = false;
                   
-                  // [MM-DD-YY]
-                  float2 dP = float2(uv.x * aspect - aspect + 0.5, uv.y - 0.85);
-                  bool dateDraw = false;
-                  // [
-                  if (dP.x > 0.0 && dP.x < 0.02 && dP.y > 0.0 && dP.y < 0.06) {
-                      if (dP.x < 0.005 || dP.y < 0.01 || dP.y > 0.05) dateDraw = true;
-                  }
-                  // M M
-                  if (dP.x > 0.04 && dP.x < 0.14 && dP.y > 0.0 && dP.y < 0.06) {
-                      float2 mP = dP - float2(0.04, 0.0);
-                      if (mP.x < 0.01 || (mP.x > 0.03 && mP.x < 0.04) || (mP.x > 0.06 && mP.x < 0.07) || mP.x > 0.09) dateDraw = true;
-                      if (mP.y < 0.01) dateDraw = true;
-                  }
-                  // -
-                  if (dP.x > 0.16 && dP.x < 0.18 && dP.y > 0.02 && dP.y < 0.04) dateDraw = true;
-                  // D D
-                  if (dP.x > 0.20 && dP.x < 0.30 && dP.y > 0.0 && dP.y < 0.06) {
-                      float2 d2P = dP - float2(0.20, 0.0);
-                      if (d2P.x < 0.01 || (d2P.x > 0.03 && d2P.x < 0.04) || d2P.x > 0.09 || (d2P.x > 0.06 && d2P.x < 0.07)) dateDraw = true;
-                      if (d2P.y < 0.01 || d2P.y > 0.05) dateDraw = true;
-                  }
-                  // -
-                  if (dP.x > 0.32 && dP.x < 0.34 && dP.y > 0.02 && dP.y < 0.04) dateDraw = true;
-                  // Y Y
-                  if (dP.x > 0.36 && dP.x < 0.46 && dP.y > 0.0 && dP.y < 0.06) {
-                      float2 y2P = dP - float2(0.36, 0.0);
-                      if ((y2P.y < 0.03 && (y2P.x < 0.01 || (y2P.x > 0.03 && y2P.x < 0.04) || (y2P.x > 0.06 && y2P.x < 0.07) || y2P.x > 0.09)) || 
-                          (y2P.y >= 0.03 && ((y2P.x > 0.015 && y2P.x < 0.025) || (y2P.x > 0.075 && y2P.x < 0.085))) || 
-                          (y2P.y > 0.02 && y2P.y < 0.03)) dateDraw = true;
-                  }
-                  // ]
-                  if (dP.x > 0.48 && dP.x < 0.50 && dP.y > 0.0 && dP.y < 0.06) {
-                      if (dP.x > 0.495 || dP.y < 0.01 || dP.y > 0.05) dateDraw = true;
-                  }
+                  // Add XMP logo in bottom right
+                  float logoScale = 0.08;
+                  float2 logoP = float2((uv.x - 1.0) * aspect / logoScale + 1.8, (uv.y - 1.0) / logoScale + 1.2);
+                  if (DrawXMPLogo(logoP)) logoDraw = true;
 
-                  if (playDraw || timeDraw || dateDraw) {
+                  if (playDraw || logoDraw) {
                       color.rgb = float3(1.0, 1.0, 1.0); // White text
                       // Add chromatic aberration for VHS look
                       if (frac(uv.y * 300.0 + Time * 5.0) < 0.5) {

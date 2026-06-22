@@ -222,45 +222,74 @@ namespace XivMediaPlayer.Server.Controllers
             // Always stamp with the server's exact current time to prevent client drift
             state.TimestampUtc = DateTime.UtcNow;
 
-            var existing = await _db.RoomMediaStates.FindAsync(locationKey);
+            int retries = 3;
             bool isNewPlay = false;
-            if (existing != null)
+            while (retries > 0)
             {
-                if (state.IsBackgroundSync && existing.OwnerId != state.OwnerId)
+                try
                 {
-                    // Stale background push from a deposed DJ!
-                    return Conflict();
-                }
+                    var existing = await _db.RoomMediaStates.FindAsync(locationKey);
+                    isNewPlay = false;
+                    
+                    if (existing != null)
+                    {
+                        if (state.IsBackgroundSync && existing.OwnerId != state.OwnerId)
+                        {
+                            // Stale background push from a deposed DJ!
+                            return Conflict();
+                        }
 
-                if (existing.CurrentUrl != state.CurrentUrl && !string.IsNullOrEmpty(state.CurrentUrl))
-                {
-                    isNewPlay = true;
-                }
+                        if (existing.CurrentUrl != state.CurrentUrl && !string.IsNullOrEmpty(state.CurrentUrl))
+                        {
+                            isNewPlay = true;
+                        }
 
-                existing.CurrentUrl = state.CurrentUrl;
-                existing.TimecodeMs = state.TimecodeMs;
-                existing.IsPlaying = state.IsPlaying;
-                existing.TimestampUtc = state.TimestampUtc;
-                existing.PlaylistJson = state.PlaylistJson;
-                existing.OwnerId = state.OwnerId;
-                existing.DurationMs = state.DurationMs;
-                _db.RoomMediaStates.Update(existing);
-            }
-            else
-            {
-                if (!string.IsNullOrEmpty(state.CurrentUrl))
-                {
-                    isNewPlay = true;
+                        existing.CurrentUrl = state.CurrentUrl;
+                        existing.TimecodeMs = state.TimecodeMs;
+                        existing.IsPlaying = state.IsPlaying;
+                        existing.TimestampUtc = state.TimestampUtc;
+                        existing.PlaylistJson = state.PlaylistJson;
+                        existing.OwnerId = state.OwnerId;
+                        existing.DurationMs = state.DurationMs;
+                        _db.RoomMediaStates.Update(existing);
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrEmpty(state.CurrentUrl))
+                        {
+                            isNewPlay = true;
+                        }
+                        
+                        // We need a fresh instance to avoid EF tracking issues on retry
+                        var newState = new RoomMediaStateSync {
+                            LocationKey = state.LocationKey,
+                            CurrentUrl = state.CurrentUrl,
+                            TimecodeMs = state.TimecodeMs,
+                            IsPlaying = state.IsPlaying,
+                            TimestampUtc = state.TimestampUtc,
+                            PlaylistJson = state.PlaylistJson,
+                            OwnerId = state.OwnerId,
+                            DurationMs = state.DurationMs
+                        };
+                        _db.RoomMediaStates.Add(newState);
+                    }
+
+                    await _db.SaveChangesAsync();
+                    break;
                 }
-                _db.RoomMediaStates.Add(state);
+                catch (DbUpdateException)
+                {
+                    retries--;
+                    if (retries == 0) throw;
+                    _db.ChangeTracker.Clear();
+                }
             }
 
             if (isNewPlay)
             {
                 await RecordMediaPlay(state.CurrentUrl, locationKey, state.OwnerId);
+                await _db.SaveChangesAsync(); // Save the MediaTrackRecord
             }
-
-            await _db.SaveChangesAsync();
             
             if (!state.IsBackgroundSync)
             {
