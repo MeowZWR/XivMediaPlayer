@@ -362,10 +362,6 @@ namespace XivMediaPlayer
             
             _playerCamera?.Update();
             
-            // Decode frames every tick on the framework thread (before rendering)
-            // This is safer for D3D11 device manipulation than doing it in OnDraw.
-            _videoWindow?.UpdateFrame();
-            
             if (_worldRenderer?.Transform.Enabled == true && _tvAudioObject != null) {
                 _tvAudioObject.SetPosition(_worldRenderer.Transform.Position);
             }
@@ -2309,6 +2305,10 @@ namespace XivMediaPlayer
             {
                 _uiCapture.CaptureFrame();
             }
+
+            // Decode frames every tick, even if the video window is closed,
+            // so the world-space renderer always has fresh textures.
+            _videoWindow.UpdateFrame();
 
             _windowSystem.Draw();
 
