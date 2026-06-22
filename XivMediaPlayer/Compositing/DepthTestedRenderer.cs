@@ -82,6 +82,8 @@ namespace XivMediaPlayer.Compositing {
       public float UseDifferenceFallback;
       public float Opacity;
       public float IsProjectorMode;
+      public Vector3 ScreensaverColor;
+      public float _pad6;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -139,6 +141,9 @@ cbuffer Constants : register(b0) {
   float UseDifferenceFallback;
   float Opacity;
   float IsProjectorMode;
+
+  float3 ScreensaverColor;
+  float _pad6;
 };
 
 cbuffer UIConsts : register(b1) {
@@ -270,106 +275,107 @@ float4 PS(VS_OUT input) : SV_TARGET {
           color = float4(0, 0, 0, IsProjectorMode > 0.5 ? 0.0 : 1.0);
       } else {
           color = VideoTexture.Sample(VideoSampler, sampleUV);
+          
+          // XMP Screensaver
+          if (ShowScreensaver > 0.5) {
+              color.rgb = ScreensaverColor; // Fill the backdrop
+              float aspect = 16.0 / 9.0;
+              if (RenderResolution.y > 0) aspect = RenderResolution.x / RenderResolution.y;
+              
+              float speedX = 0.1;
+              float speedY = 0.075;
+              float bx = Time * speedX;
+              float by = Time * speedY;
+              
+              float logoSize = 0.15;
+              float logoW = logoSize * 3.0 / aspect;
+              float logoH = logoSize * 1.0;
+              
+              float rangeX = 1.0 - logoW;
+              float rangeY = 1.0 - logoH;
+              
+              float posX = (logoW / 2.0) + abs(fmod(bx, 2.0) - 1.0) * rangeX;
+              float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
+              
+              float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
+              float2 pText = float2(p.x + p.y * 0.35, p.y);
+              
+              bool draw = false;
+              if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
+                  
+                  // Top connection line
+                  if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
+                  
+                  // X
+                  if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
+                      float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
+                      float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
+                      if (dx1 < 0.11 || dx2 < 0.11) draw = true;
+                  }
+                  
+                  // M
+                  if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
+                      if (pText.y < 0.2) {
+                          if (abs(pText.x + 0.4) < 0.11) draw = true;
+                          if (abs(pText.x - 0.4) < 0.11) draw = true;
+                      }
+                      float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
+                      float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
+                      if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
+                      if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
+                  }
+                  
+                  // P
+                  if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
+                      if (abs(pText.x - 0.8) < 0.11) draw = true;
+                      if (pText.x >= 0.8 && pText.x <= 1.25) {
+                          if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
+                      }
+                      if (pText.x > 1.25) {
+                          if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
+                              if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
+                                  draw = true;
+                              }
+                          }
+                      }
+                  }
+                  
+                  // Ellipse (Use original un-slanted p)
+                  if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
+                      float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
+                      float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
+                      float distToV = (pText.x < 0.0) ? dm1 : dm2;
+                      
+                      if (distToV > 0.16) {
+                          draw = true;
+                          // Slit for VIDEO parody
+                          if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
+                      }
+                  }
+                  
+                  if (p.y < -0.6) draw = false;
+              }
+              
+              if (draw) {
+                  int colorIdx = (int(floor(bx)) + int(floor(by))) % 6;
+                  float3 logoColor = float3(1, 1, 1);
+                  if (colorIdx == 0) logoColor = float3(1.0, 0.3, 0.3);
+                  else if (colorIdx == 1) logoColor = float3(0.3, 1.0, 0.3);
+                  else if (colorIdx == 2) logoColor = float3(0.3, 0.6, 1.0);
+                  else if (colorIdx == 3) logoColor = float3(1.0, 1.0, 0.3);
+                  else if (colorIdx == 4) logoColor = float3(1.0, 0.3, 1.0);
+                  else if (colorIdx == 5) logoColor = float3(0.3, 1.0, 1.0);
+                  
+                  color.rgb = logoColor;
+              }
+          }
+
           if (IsProjectorMode > 0.5 && HasBackBuffer > 0.5) {
               float3 sceneColor = BackBufferTexture.Sample(VideoSampler, screenUV).rgb;
               color.rgb = sceneColor + color.rgb * Opacity;
               color.a = 1.0;
           } else {
               color.a = clamp(Opacity, 0.0, 1.0);
-          }
-      }
-      
-      // XMP Screensaver
-      if (ShowScreensaver > 0.5) {
-          color.rgb *= 0.2; // Dim background
-          float aspect = 16.0 / 9.0;
-          if (RenderResolution.y > 0) aspect = RenderResolution.x / RenderResolution.y;
-          
-          float speedX = 0.1;
-          float speedY = 0.075;
-          float bx = Time * speedX;
-          float by = Time * speedY;
-          
-          float logoSize = 0.15;
-          float logoW = logoSize * 3.0 / aspect;
-          float logoH = logoSize * 1.0;
-          
-          float rangeX = 1.0 - logoW;
-          float rangeY = 1.0 - logoH;
-          
-          float posX = (logoW / 2.0) + abs(fmod(bx, 2.0) - 1.0) * rangeX;
-          float posY = (logoH / 2.0) + abs(fmod(by, 2.0) - 1.0) * rangeY;
-          
-          float2 p = float2((uv.x - posX) * aspect / logoSize, (uv.y - posY) / logoSize);
-          float2 pText = float2(p.x + p.y * 0.35, p.y);
-          
-          bool draw = false;
-          if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
-              
-              // Top connection line
-              if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
-              
-              // X
-              if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
-                  float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
-                  float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
-                  if (dx1 < 0.11 || dx2 < 0.11) draw = true;
-              }
-              
-              // M
-              if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
-                  if (pText.y < 0.2) {
-                      if (abs(pText.x + 0.4) < 0.11) draw = true;
-                      if (abs(pText.x - 0.4) < 0.11) draw = true;
-                  }
-                  float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
-                  float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
-                  if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
-                  if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
-              }
-              
-              // P
-              if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
-                  if (abs(pText.x - 0.8) < 0.11) draw = true;
-                  if (pText.x >= 0.8 && pText.x <= 1.25) {
-                      if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
-                  }
-                  if (pText.x > 1.25) {
-                      if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
-                          if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
-                              draw = true;
-                          }
-                      }
-                  }
-              }
-              
-              // Ellipse (Use original un-slanted p)
-              if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
-                  float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
-                  float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
-                  float distToV = (pText.x < 0.0) ? dm1 : dm2;
-                  
-                  if (distToV > 0.16) {
-                      draw = true;
-                      // Slit for VIDEO parody
-                      if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
-                  }
-              }
-              
-              if (p.y < -0.6) draw = false;
-          }
-          
-          if (draw) {
-              int colorIdx = (int(floor(bx)) + int(floor(by))) % 6;
-              float3 logoColor = float3(1, 1, 1);
-              if (colorIdx == 0) logoColor = float3(1.0, 0.3, 0.3);
-              else if (colorIdx == 1) logoColor = float3(0.3, 1.0, 0.3);
-              else if (colorIdx == 2) logoColor = float3(0.3, 0.6, 1.0);
-              else if (colorIdx == 3) logoColor = float3(1.0, 1.0, 0.3);
-              else if (colorIdx == 4) logoColor = float3(1.0, 0.3, 1.0);
-              else if (colorIdx == 5) logoColor = float3(0.3, 1.0, 1.0);
-              
-              color.rgb = logoColor;
           }
       }
 
@@ -928,7 +934,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       float renderWidth, float renderHeight,
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
       bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
-      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false) {
+      float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -981,7 +987,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
           HasPreUI = transparentUiSrvPtr != IntPtr.Zero ? 1.0f : 0.0f,
           UseDifferenceFallback = useDifferenceFallback ? 1.0f : 0.0f,
           Opacity = opacity,
-          IsProjectorMode = isProjectorMode ? 1.0f : 0.0f
+          IsProjectorMode = isProjectorMode ? 1.0f : 0.0f,
+          ScreensaverColor = screensaverColor ?? new Vector3(1.0f, 0.4f, 0.8f)
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

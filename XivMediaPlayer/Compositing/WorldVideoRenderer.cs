@@ -420,7 +420,8 @@ namespace XivMediaPlayer.Compositing {
           _vignetteExtractor?.ExtrapolatedVignetteSRV?.NativePointer ?? IntPtr.Zero,
           useDifferenceFallback,
           _transform.Opacity,
-          _transform.IsProjectorMode);
+          _transform.IsProjectorMode,
+          _transform.ScreensaverColor);
 
         DepthDebugInfo = $"Cam: {cameraPos:F1}\nFwd: {cameraForward:F2}\nFov: {fovY:F3}\nAspect: {aspectRatio:F3}";
 

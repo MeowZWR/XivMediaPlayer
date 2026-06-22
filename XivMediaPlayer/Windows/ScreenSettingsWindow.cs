@@ -32,6 +32,7 @@ namespace XivMediaPlayer.Windows {
     
     private float _opacity = 1.0f;
     private bool _isProjectorMode = false;
+    private Vector3 _screensaverColor = new Vector3(1.0f, 0.4f, 0.8f);
 
     // Drag state for world-space interaction
     private bool _isDragging;
@@ -68,6 +69,7 @@ namespace XivMediaPlayer.Windows {
       _enabled = _transform.Enabled;
       _opacity = _transform.Opacity;
       _isProjectorMode = _transform.IsProjectorMode;
+      _screensaverColor = _transform.ScreensaverColor;
     }
 
     private void SyncToTransform() {
@@ -77,6 +79,7 @@ namespace XivMediaPlayer.Windows {
       _transform.Enabled = _enabled;
       _transform.Opacity = _opacity;
       _transform.IsProjectorMode = _isProjectorMode;
+      _transform.ScreensaverColor = _screensaverColor;
     }
 
     public override void Draw() {
@@ -292,11 +295,13 @@ namespace XivMediaPlayer.Windows {
       appearanceChanged |= ImGui.Checkbox("Projector Mode (Additive Blend)", ref _isProjectorMode);
       
       appearanceChanged |= ImGui.SliderFloat("Opacity", ref _opacity, 0.05f, 1.0f, "%.2f");
+      appearanceChanged |= ImGui.ColorEdit3("Screensaver Color", ref _screensaverColor);
       bool saveAppearance = ImGui.IsItemDeactivatedAfterEdit();
       
       if (appearanceChanged) {
         _transform.Opacity = _opacity;
         _transform.IsProjectorMode = _isProjectorMode;
+        _transform.ScreensaverColor = _screensaverColor;
       }
       if (saveAppearance || appearanceChanged) {
         _onSave?.Invoke();
@@ -517,6 +522,9 @@ namespace XivMediaPlayer.Windows {
         ScaleY = _scale.Y,
         Opacity = _opacity,
         IsProjectorMode = _isProjectorMode,
+        ScreensaverColorR = _screensaverColor.X,
+        ScreensaverColorG = _screensaverColor.Y,
+        ScreensaverColorB = _screensaverColor.Z,
         OwnerId = _plugin.Config.OwnerId,
         IsLocked = _plugin.CurrentTvPlacement?.IsLocked ?? (!locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_")),
         BypassLock = _plugin.IsHousingMenuOpen || locationKey.StartsWith("zone_") || locationKey.StartsWith("island_")

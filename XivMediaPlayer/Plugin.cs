@@ -1589,7 +1589,8 @@ namespace XivMediaPlayer
                         Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY),
                         Enabled = true,
                         Opacity = tv.Opacity,
-                        IsProjectorMode = tv.IsProjectorMode
+                        IsProjectorMode = tv.IsProjectorMode,
+                        ScreensaverColor = new System.Numerics.Vector3(tv.ScreensaverColorR, tv.ScreensaverColorG, tv.ScreensaverColorB)
                     };
                     // Also store under the primary key in case they differ (e.g. batch vs single key)
                     if (serverKey != primaryKey)
@@ -1648,6 +1649,7 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.Enabled = saved.Enabled;
                 _worldRenderer.Transform.Opacity = saved.Opacity;
                 _worldRenderer.Transform.IsProjectorMode = saved.IsProjectorMode;
+                _worldRenderer.Transform.ScreensaverColor = saved.ScreensaverColor;
             }
             else
             {
@@ -1657,6 +1659,7 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.Enabled = false; // Turn off 3D screen in new zones by default
                 _worldRenderer.Transform.Opacity = 1.0f;
                 _worldRenderer.Transform.IsProjectorMode = false;
+                _worldRenderer.Transform.ScreensaverColor = new System.Numerics.Vector3(1.0f, 0.4f, 0.8f);
             }
         }
 
