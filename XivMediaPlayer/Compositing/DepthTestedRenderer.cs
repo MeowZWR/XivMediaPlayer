@@ -401,6 +401,198 @@ float4 PS(VS_OUT input) : SV_TARGET {
                       
                       color.rgb = logoColor;
                   }
+              } else if (ScreensaverStyle > 3.5) {
+                  // Style 4: Geometric Test Pattern
+                  float2 centerUv = uv - 0.5;
+                  
+                  // Fix aspect ratio (TV is 16:9)
+                  centerUv.x *= 1.7777777;
+                  
+                  // Base color white
+                  float3 testColor = float3(1.0, 1.0, 1.0);
+                  
+                  // 1. Grid background
+                  float gridX = abs(frac((centerUv.x + 0.5) * 8.0 + 0.5) - 0.5) * 16.0;
+                  float gridY = abs(frac((centerUv.y + 0.5) * 8.0 + 0.5) - 0.5) * 16.0;
+                  float grid = min(gridX, gridY);
+                  // Dashed grid logic
+                  float dashed = frac(centerUv.x * 40.0) < 0.5 && frac(centerUv.y * 40.0) < 0.5 ? 1.0 : 0.0;
+                  if (grid < 0.03 && dashed > 0.5) testColor = float3(0.0, 0.0, 0.0);
+                  if (grid < 0.01) testColor = float3(0.0, 0.0, 0.0); // thin solid core line
+                  
+                  float dist = length(centerUv);
+                  
+                  // 1b. Diagonal lines (X pattern) inside the large circle
+                  // In the reference, they stop at the bullseye (dist > 0.25)
+                  if (dist < 0.45 && dist > 0.25) {
+                      float diag1 = abs(centerUv.x - centerUv.y);
+                      float diag2 = abs(centerUv.x + centerUv.y);
+                      if (diag1 < 0.003 || diag2 < 0.003) testColor = float3(0.0, 0.0, 0.0);
+                  }
+                  
+                  // 2. Large Outer Circle
+                  if (abs(dist - 0.45) < 0.006) testColor = float3(0.0, 0.0, 0.0);
+                  if (abs(dist - 0.43) < 0.002) testColor = float3(0.0, 0.0, 0.0);
+                  
+                  // 3. Corner circles
+                  // The corners in the original overlap the outer circle, so draw them AFTER the outer circle
+                  float2 corners[4] = { float2(-0.35, -0.32), float2(0.35, -0.32), float2(-0.35, 0.32), float2(0.35, 0.32) };
+                  for (int i = 0; i < 4; i++) {
+                      float2 cornerUv = centerUv - corners[i];
+                      float cDist = length(cornerUv);
+                      if (cDist < 0.12) {
+                          testColor = float3(1.0, 1.0, 1.0); // fill white
+                          if (abs(cDist - 0.11) < 0.004) testColor = float3(0.0, 0.0, 0.0);
+                          if (abs(cDist - 0.10) < 0.002) testColor = float3(0.0, 0.0, 0.0);
+                          
+                          // Crosshairs in corners
+                          if (abs(cornerUv.x) < 0.003 && cDist < 0.1) testColor = float3(0.0, 0.0, 0.0);
+                          if (abs(cornerUv.y) < 0.003 && cDist < 0.1) testColor = float3(0.0, 0.0, 0.0);
+                          
+                          // Inner tiny circle
+                          if (cDist < 0.04) testColor = float3(1.0, 1.0, 1.0);
+                          if (abs(cDist - 0.04) < 0.004) testColor = float3(0.0, 0.0, 0.0);
+                          if (abs(cDist - 0.035) < 0.002) testColor = float3(0.0, 0.0, 0.0);
+                      }
+                  }
+                  
+                  // 2b. Bottom Horizontal Bars (Low Frequency Response)
+                  if (centerUv.y > 0.28 && centerUv.y < 0.44 && abs(centerUv.x) < 0.25) {
+                      if (centerUv.y < 0.29) {
+                          testColor = float3(0.0, 0.0, 0.0); // Thick top bar
+                      } else {
+                          // 10 distinct rectangular bars
+                          float barDist = (centerUv.y - 0.29) / 0.15; // 0 to 1
+                          float barIndex = floor(barDist * 10.0);
+                          float barWidth = lerp(0.25, 0.02, barIndex / 9.0);
+                          if (abs(centerUv.x) < barWidth) {
+                              float barY = frac(barDist * 10.0);
+                              // Make the bar solid black with a little gap
+                              if (barY < 0.5) testColor = float3(0.0, 0.0, 0.0);
+                          }
+                      }
+                  }
+                  
+                  // 4. Center Bullseye and Wedges
+                  if (dist < 0.25) {
+                      testColor = float3(1.0, 1.0, 1.0); // fill white
+                      
+                      float angle = atan2(centerUv.y, centerUv.x); // -PI to PI
+                      
+                      // Vertical wedges bounded by V-shapes
+                      if (abs(centerUv.x) < abs(centerUv.y) * 0.45 && dist > 0.09) {
+                          // Use a lower frequency to get ~9 thick lines instead of 60 thin ones
+                          float ray = sin(angle * 40.0);
+                          if (ray > 0.0) testColor = float3(0.0, 0.0, 0.0);
+                      }
+                      
+                      // Horizontal wedges bounded by V-shapes
+                      if (abs(centerUv.y) < abs(centerUv.x) * 0.45 && dist > 0.09) {
+                          float ray = sin(angle * 40.0);
+                          if (ray > 0.0) testColor = float3(0.0, 0.0, 0.0);
+                      }
+                      
+                      // Grayscale stepped wedges (Top-Left and Bottom-Right quadrants)
+                      bool inTopLeft = centerUv.x < 0.0 && centerUv.y < 0.0 && abs(centerUv.x) > abs(centerUv.y) * 0.45 && abs(centerUv.y) > abs(centerUv.x) * 0.45;
+                      if (inTopLeft && dist > 0.09 && dist < 0.25) {
+                          // 6 distinct rings
+                          float ringDist = floor((dist - 0.09) / 0.16 * 6.0);
+                          float shade = ringDist / 5.0; // 0 to 1
+                          testColor = float3(shade, shade, shade);
+                          // Black border lines between rings
+                          if (frac((dist - 0.09) / 0.16 * 6.0) < 0.1) testColor = float3(0.0, 0.0, 0.0);
+                      }
+                      
+                      bool inBottomRight = centerUv.x > 0.0 && centerUv.y > 0.0 && abs(centerUv.x) > abs(centerUv.y) * 0.45 && abs(centerUv.y) > abs(centerUv.x) * 0.45;
+                      if (inBottomRight && dist > 0.09 && dist < 0.25) {
+                          float ringDist = floor((dist - 0.09) / 0.16 * 6.0);
+                          float shade = 1.0 - (ringDist / 5.0); // 1 to 0
+                          testColor = float3(shade, shade, shade);
+                          if (frac((dist - 0.09) / 0.16 * 6.0) < 0.1) testColor = float3(0.0, 0.0, 0.0);
+                      }
+                      
+                      // Center inner circles
+                      // Thick outer ring of the center bullseye
+                      if (abs(dist - 0.25) < 0.005) testColor = float3(0.0, 0.0, 0.0);
+                      if (abs(dist - 0.23) < 0.002) testColor = float3(0.0, 0.0, 0.0);
+                      
+                      // Inner ring boundary around the checkerboard
+                      if (dist < 0.09) testColor = float3(1.0, 1.0, 1.0);
+                      if (abs(dist - 0.09) < 0.005) testColor = float3(0.0, 0.0, 0.0);
+                      if (abs(dist - 0.08) < 0.002) testColor = float3(0.0, 0.0, 0.0);
+                      
+                      // XMP Logo target
+                      if (dist < 0.078) {
+                          float logoScale = 0.038;
+                          float2 p = float2(centerUv.x / logoScale, centerUv.y / logoScale);
+                          float2 pText = float2(p.x + p.y * 0.35, p.y);
+                          
+                          bool draw = false;
+                          if (p.x > -2.0 && p.x < 2.0 && p.y > -0.7 && p.y < 0.7) {
+                              // Top connection line
+                              if (pText.x > -1.53 && pText.x < 1.25 && pText.y > -0.6 && pText.y < -0.45) draw = true;
+                              
+                              // X
+                              if (pText.x > -1.5 && pText.x < -0.5 && pText.y > -0.5 && pText.y < 0.2) {
+                                  float dx1 = abs((pText.x + 1.0) - (pText.y + 0.15) * 1.2);
+                                  float dx2 = abs((pText.x + 1.0) + (pText.y + 0.15) * 1.2);
+                                  if (dx1 < 0.11 || dx2 < 0.11) draw = true;
+                              }
+                              
+                              // M
+                              if (pText.x > -0.6 && pText.x < 0.6 && pText.y > -0.5) {
+                                  if (pText.y < 0.2) {
+                                      if (abs(pText.x + 0.4) < 0.11) draw = true;
+                                      if (abs(pText.x - 0.4) < 0.11) draw = true;
+                                  }
+                                  float dm1 = abs(pText.x - (pText.y * 0.4 - 0.2));
+                                  float dm2 = abs(pText.x - (-pText.y * 0.4 + 0.2));
+                                  if (pText.x <= 0.0 && dm1 < 0.12 && pText.y < 0.55) draw = true;
+                                  if (pText.x >= 0.0 && dm2 < 0.12 && pText.y < 0.55) draw = true;
+                              }
+                              
+                              // P
+                              if (pText.x > 0.5 && pText.x < 1.6 && pText.y > -0.61 && pText.y < 0.2) {
+                                  if (abs(pText.x - 0.8) < 0.11) draw = true;
+                                  if (pText.x >= 0.8 && pText.x <= 1.25) {
+                                      if (abs(pText.y - (-0.05)) < 0.11) draw = true; 
+                                  }
+                                  if (pText.x > 1.25) {
+                                      if (distance(float2(pText.x, pText.y), float2(1.25, -0.27)) < 0.33) {
+                                          if (distance(float2(pText.x, pText.y), float2(1.25, -0.305)) >= 0.145) {
+                                              draw = true;
+                                          }
+                                      }
+                                  }
+                              }
+                              
+                              // Ellipse
+                              if (distance(float2(p.x * 0.08, p.y - 0.45), float2(0,0)) < 0.12) {
+                                  float dm1 = abs(pText.x - (pText.y * 0.5 - 0.25));
+                                  float dm2 = abs(pText.x - (-pText.y * 0.5 + 0.25));
+                                  float distToV = (pText.x < 0.0) ? dm1 : dm2;
+                                  
+                                  if (distToV > 0.16) {
+                                      draw = true;
+                                      // Slit
+                                      if (p.x > -0.8 && p.x < 0.8 && abs(p.y - 0.45) < 0.025) draw = false;
+                                  }
+                              }
+                              
+                              if (p.y < -0.6) draw = false;
+                          }
+                          
+                          testColor = draw ? float3(0.0, 0.0, 0.0) : float3(1.0, 1.0, 1.0);
+                      }
+                  }
+                  
+                  // Tint with ScreensaverColor if it is not black
+                  float colorIntensity = length(ScreensaverColor);
+                  if (colorIntensity > 0.05) {
+                      testColor = lerp(testColor, testColor * ScreensaverColor * 1.5, min(colorIntensity, 1.0));
+                  }
+                  
+                  color.rgb = testColor;
               } else if (ScreensaverStyle > 2.5) {
                   // Style 3: TV Static
                   // Use frac(Time) to avoid huge float precision loss inside sin()

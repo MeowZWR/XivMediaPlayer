@@ -300,7 +300,7 @@ namespace XivMediaPlayer.Windows {
       appearanceChanged |= ImGui.SliderFloat("Opacity", ref _opacity, 0.05f, 1.0f, "%.2f");
       appearanceChanged |= ImGui.ColorEdit3("Screensaver Color", ref _screensaverColor);
 
-      string[] screensaverStyles = new string[] { "Bouncing Logo", "VCR", "No Signal", "Static" };
+      string[] screensaverStyles = new string[] { "Bouncing Logo", "VCR", "No Signal", "Static", "Test Pattern" };
       appearanceChanged |= ImGui.Combo("Screensaver Style", ref _screensaverStyle, screensaverStyles, screensaverStyles.Length);
       
       bool saveAppearance = ImGui.IsItemDeactivatedAfterEdit() || ImGui.IsItemDeactivated();
