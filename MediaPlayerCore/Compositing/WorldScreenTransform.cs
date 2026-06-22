@@ -42,7 +42,7 @@ namespace MediaPlayerCore.Compositing {
     public bool IsProjectorMode { get; set; } = false;
 
     [JsonProperty("screensaverColor")]
-    public System.Numerics.Vector3 ScreensaverColor { get; set; } = new System.Numerics.Vector3(1.0f, 0.4f, 0.8f);
+    public System.Numerics.Vector3 ScreensaverColor { get; set; } = new System.Numerics.Vector3(0.0f, 0.0f, 0.0f);
 
     /// <summary>
     /// Returns the four corners of the screen quad in world space.

@@ -19,9 +19,9 @@ namespace XivMediaPlayer.Networking.Models
         public bool BypassLock { get; set; } = false;
         public float Opacity { get; set; } = 1.0f;
         public bool IsProjectorMode { get; set; } = false;
-        public float ScreensaverColorR { get; set; } = 1.0f;
-        public float ScreensaverColorG { get; set; } = 0.4f;
-        public float ScreensaverColorB { get; set; } = 0.8f;
+        public float ScreensaverColorR { get; set; } = 0.0f;
+        public float ScreensaverColorG { get; set; } = 0.0f;
+        public float ScreensaverColorB { get; set; } = 0.0f;
         public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     }
 

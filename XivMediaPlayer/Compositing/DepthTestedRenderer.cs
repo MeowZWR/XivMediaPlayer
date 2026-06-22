@@ -988,7 +988,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           UseDifferenceFallback = useDifferenceFallback ? 1.0f : 0.0f,
           Opacity = opacity,
           IsProjectorMode = isProjectorMode ? 1.0f : 0.0f,
-          ScreensaverColor = screensaverColor ?? new Vector3(1.0f, 0.4f, 0.8f)
+          ScreensaverColor = screensaverColor ?? new Vector3(0.0f, 0.0f, 0.0f)
         };
         _context.UpdateSubresource(constants, _constantBuffer);
 

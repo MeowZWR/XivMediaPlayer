@@ -32,7 +32,7 @@ namespace XivMediaPlayer.Windows {
     
     private float _opacity = 1.0f;
     private bool _isProjectorMode = false;
-    private Vector3 _screensaverColor = new Vector3(1.0f, 0.4f, 0.8f);
+    private Vector3 _screensaverColor = new Vector3(0.0f, 0.0f, 0.0f);
 
     // Drag state for world-space interaction
     private bool _isDragging;

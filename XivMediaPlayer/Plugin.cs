@@ -1659,7 +1659,7 @@ namespace XivMediaPlayer
                 _worldRenderer.Transform.Enabled = false; // Turn off 3D screen in new zones by default
                 _worldRenderer.Transform.Opacity = 1.0f;
                 _worldRenderer.Transform.IsProjectorMode = false;
-                _worldRenderer.Transform.ScreensaverColor = new System.Numerics.Vector3(1.0f, 0.4f, 0.8f);
+                _worldRenderer.Transform.ScreensaverColor = new System.Numerics.Vector3(0.0f, 0.0f, 0.0f);
             }
         }
 
