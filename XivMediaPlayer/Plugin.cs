@@ -1575,6 +1575,10 @@ namespace XivMediaPlayer
                         _worldRenderer.Transform.Position = new System.Numerics.Vector3(tv.PositionX, tv.PositionY, tv.PositionZ);
                         _worldRenderer.Transform.RotationDegrees = new System.Numerics.Vector3(tv.RotationX, tv.RotationY, tv.RotationZ);
                         _worldRenderer.Transform.Scale = new System.Numerics.Vector2(tv.ScaleX, tv.ScaleY);
+                        _worldRenderer.Transform.Opacity = tv.Opacity;
+                        _worldRenderer.Transform.IsProjectorMode = tv.IsProjectorMode;
+                        _worldRenderer.Transform.ScreensaverColor = new System.Numerics.Vector3(tv.ScreensaverColorR, tv.ScreensaverColorG, tv.ScreensaverColorB);
+                        _worldRenderer.Transform.ScreensaverStyle = tv.ScreensaverStyle;
                         
                         _screenSettingsWindow?.SyncFromTransform();
                     }
