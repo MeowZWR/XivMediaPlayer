@@ -279,7 +279,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
   float3 tvRight = CornerTR3D - CornerTL3D;
   float3 tvDown = CornerBL3D - CornerTL3D;
-  float3 tvNormal = normalize(cross(tvRight, tvDown));
+  float3 tvNormal = normalize(cross(tvDown, tvRight));
 
   float denom = dot(tvNormal, rayDir);
   bool isInside = false;
