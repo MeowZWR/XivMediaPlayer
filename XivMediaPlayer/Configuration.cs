@@ -46,6 +46,7 @@ namespace XivMediaPlayer {
     public bool ShowOutdoorGridDebug { get; set; } = false;
     public bool HasAutoDetectedAMD_v2 { get; set; } = false;
     public bool DepthOcclusionEnabled { get; set; } = true;
+    public bool TvGlowEnabled { get; set; } = true;
     public bool DisableUIBlockDetection { get; set; } = false;
     public bool AutoResumeMedia { get; set; } = true;
     public bool VerboseChatLogging { get; set; } = false;

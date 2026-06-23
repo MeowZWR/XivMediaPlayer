@@ -71,6 +71,14 @@ namespace XivMediaPlayer.Windows {
         _plugin.Config.AutoResumeMedia = autoResume;
         _plugin.Config.Save();
       }
+      bool tvGlow = _plugin.Config.TvGlowEnabled;
+      if (ImGui.Checkbox("Enable TV Glow (Ambient Lighting)", ref tvGlow)) {
+        _plugin.Config.TvGlowEnabled = tvGlow;
+        _plugin.Config.Save();
+      }
+      if (ImGui.IsItemHovered()) {
+        ImGui.SetTooltip("Enables the realistic ambient light that shines on the walls around the TV.");
+      }
 
 
       bool strictMasking = _plugin.Config.UIBlendThreshold > 0.5f;
