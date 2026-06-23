@@ -51,6 +51,7 @@ namespace XivMediaPlayer {
     public bool AutoResumeMedia { get; set; } = true;
     public bool VerboseChatLogging { get; set; } = false;
     public bool EnableWanderersCampfireFix { get; set; } = false;
+    public bool EnableUiCulling { get; set; } = true;
     public float UIBlendThreshold { get; set; } = 0.0f;
 
     // yt-dlp settings

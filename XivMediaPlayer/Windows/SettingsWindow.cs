@@ -80,6 +80,15 @@ namespace XivMediaPlayer.Windows {
         ImGui.SetTooltip("Enables the realistic ambient light that shines on the walls around the TV.");
       }
 
+      bool uiCulling = _plugin.Config.EnableUiCulling;
+      if (ImGui.Checkbox("Enable UI Culling", ref uiCulling)) {
+        _plugin.Config.EnableUiCulling = uiCulling;
+        _plugin.Config.Save();
+      }
+      if (ImGui.IsItemHovered()) {
+        ImGui.SetTooltip("When enabled, the TV will render undearneath the games user interface. Disable as a last resort to Reshade ruining the UI buffer.");
+      }
+
 
       bool strictMasking = _plugin.Config.UIBlendThreshold > 0.5f;
       if (ImGui.Checkbox("Strict UI Masking (AMD Fix / Invisible Drop Shadows)", ref strictMasking)) {

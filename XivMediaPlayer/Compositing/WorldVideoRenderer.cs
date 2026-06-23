@@ -24,6 +24,7 @@ namespace XivMediaPlayer.Compositing {
     private bool _disposed;
     private bool _useDepthOcclusion = true;
     private bool _enableGlow = true;
+    private bool _enableUiCulling = true;
     
     private unsafe FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Texture* _lastGBuffer2Tex;
     private unsafe FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Texture* _lastGBuffer3Tex;
@@ -38,6 +39,8 @@ namespace XivMediaPlayer.Compositing {
     /// Whether to render a backlit glow effect around the screen.
     /// </summary>
     public bool EnableGlow { get => _enableGlow; set => _enableGlow = value; }
+
+    public bool EnableUiCulling { get => _enableUiCulling; set => _enableUiCulling = value; }
 
     public WorldScreenTransform Transform => _transform;
 
@@ -413,11 +416,11 @@ namespace XivMediaPlayer.Compositing {
           cornerDepths,
           nearPlane, farPlane,
           screenW, screenH,
-          uiCapture?.BackBufferSRV,
+          _enableUiCulling ? uiCapture?.BackBufferSRV : null,
           hoverUV, progress, playbackState, lockState,
           minDepth, maxDepth, volume,
           depthCapture.RenderWidth, depthCapture.RenderHeight,
-          uiCapture?.LastAddonRects, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspectRatio,
+          _enableUiCulling ? uiCapture?.LastAddonRects : null, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspectRatio,
           _gbuffer2Srv?.NativePointer ?? IntPtr.Zero,
           _gbuffer3Srv?.NativePointer ?? IntPtr.Zero,
           _unk68Srv?.NativePointer ?? IntPtr.Zero,
