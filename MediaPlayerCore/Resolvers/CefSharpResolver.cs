@@ -230,8 +230,8 @@ namespace MediaPlayerCore.Resolvers
         {
             string url = request.Url;
             
-            // Look for m3u8 playlists or raw video files
-            if (url.Contains(".m3u8") || url.Contains(".mp4"))
+            // Look for m3u8 playlists, DASH segments, or raw video files
+            if (url.Contains(".m3u8") || url.Contains(".mp4") || url.Contains(".m4s") || url.Contains(".flv"))
             {
                 if (!_tcs.Task.IsCompleted)
                 {

@@ -19,6 +19,7 @@
   "Chat.PlayingDirectStream": "正在播放直连流！\r\n使用 \"/media video\" 切换视频画面。\r\n使用 \"/media stop\" 停止。",
   "Chat.WaitingYtdlp": "正在等待 yt-dlp 下载/更新完成...",
   "Chat.YouTubeBlocked": "YouTube 阻止了请求（机器人验证）。请通过 VRCVideoCacher 或 cookies.txt 配置 Cookie 后再播放 YouTube 视频！",
+  "Chat.BilibiliBlocked": "Bilibili 拒绝了请求（412）。请先在浏览器打开 bilibili.com，将 Cookie 导出到插件目录的 cookies.txt 后再试。",
   "Chat.YtdlpFallbackBrowser": "yt-dlp 失败，正在回退到嵌入式浏览器解析器...",
   "Chat.BrowserFoundUrl": "嵌入式浏览器已成功找到流 URL。",
   "Chat.ResolveFailedDirect": "无法原生解析 URL，正在尝试直接播放...",

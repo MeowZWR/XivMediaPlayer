@@ -228,7 +228,7 @@ namespace MediaPlayerCore.YtDlp
                   ? $"bv[height<={_preferredMaxHeight}]+ba/b"
                   : "bv+ba/b";
 
-                string result = await RunYtDlp($"--get-url -f \"{formatArg}\" \"{url}\"");
+                string result = await RunYtDlp($"--get-url -f \"{formatArg}\" \"{url}\"", url: url);
                 string[]? streamUrls = result?.Trim().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
                 if (streamUrls != null && streamUrls.Length > 0)
@@ -259,7 +259,7 @@ namespace MediaPlayerCore.YtDlp
 
             try
             {
-                string result = await RunYtDlp($"--dump-json --no-download --no-playlist \"{url}\"");
+                string result = await RunYtDlp($"--dump-json --no-download --no-playlist \"{url}\"", url: url);
                 if (!string.IsNullOrEmpty(result))
                 {
                     var firstJsonLine = result.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
@@ -502,7 +502,7 @@ namespace MediaPlayerCore.YtDlp
         {
             try
             {
-                string result = await RunYtDlp($"--get-url -f \"{format}\" \"{url}\"");
+                string result = await RunYtDlp($"--get-url -f \"{format}\" \"{url}\"", url: url);
                 return result?.Trim().Split('\n').FirstOrDefault()?.Trim();
             } catch
             {
@@ -510,12 +510,12 @@ namespace MediaPlayerCore.YtDlp
             }
         }
 
-        private async Task<string> RunYtDlp(string arguments, bool withCommonArgs = true)
+        private async Task<string> RunYtDlp(string arguments, bool withCommonArgs = true, string? url = null)
         {
             return await Task.Run(() =>
             {
                 // Inject cookies if available (e.g. from VRCVideoCacher browser extension)
-                string fullArgs = (withCommonArgs ? BuildCommonArgs() : "") + arguments;
+                string fullArgs = (withCommonArgs ? BuildCommonArgs() + BuildSiteSpecificArgs(url) : "") + arguments;
                 var psi = new ProcessStartInfo
                 {
                     FileName = _ytDlpPath,
@@ -673,6 +673,35 @@ namespace MediaPlayerCore.YtDlp
             }
 
             return args;
+        }
+
+        /// <summary>
+        /// Bilibili's API rejects yt-dlp with HTTP 412 unless Origin/Referer are set.
+        /// See: https://github.com/yt-dlp/yt-dlp/issues/14830
+        /// </summary>
+        private static string BuildSiteSpecificArgs(string? url)
+        {
+            if (!IsBilibiliUrl(url)) return string.Empty;
+
+            return "--add-header \"Origin:https://www.bilibili.com\" --add-header \"Referer:https://www.bilibili.com\" ";
+        }
+
+        public static bool IsBilibiliUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            try
+            {
+                var host = new Uri(url).Host.ToLowerInvariant();
+                return host == "b23.tv"
+                    || host == "bilibili.com"
+                    || host.EndsWith(".bilibili.com");
+            }
+            catch
+            {
+                return url.Contains("bilibili.com", StringComparison.OrdinalIgnoreCase)
+                    || url.Contains("b23.tv", StringComparison.OrdinalIgnoreCase);
+            }
         }
 
 
