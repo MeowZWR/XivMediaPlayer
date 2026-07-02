@@ -6,6 +6,7 @@ using System;
 using System.Numerics;
 using Dalamud.Plugin.Services;
 using XivMediaPlayer.Networking.Models;
+using XivMediaPlayer.Localization;
 
 namespace XivMediaPlayer.Windows {
   /// <summary>
@@ -47,7 +48,7 @@ namespace XivMediaPlayer.Windows {
         WorldVideoRenderer renderer,
         Action onSave,
         Action onPlaceAtCamera) :
-      base("Screen Placement###ScreenPlacement",
+      base(Loc.T("ScreenWindow.Title") + "###ScreenPlacement",
         ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize,
         false) {
       _plugin = plugin;
@@ -86,6 +87,8 @@ namespace XivMediaPlayer.Windows {
     }
 
     public override void Draw() {
+      WindowName = Loc.T("ScreenWindow.Title") + "###ScreenPlacement";
+
       string locKey = _plugin.LocationKey;
       bool isOutdoors = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("zone_");
       bool isIsland = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("island_");
@@ -93,10 +96,10 @@ namespace XivMediaPlayer.Windows {
       bool hasPrivileges = isOutdoors || isIsland || hasHousingMenuOpen;
 
       if (!hasPrivileges) {
-          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Housing Menu Required");
-          ImGui.TextWrapped("To place or sync a screen, please open the 'Indoor Furnishings' menu in-game.");
+          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), Loc.T("Screen.HousingRequired"));
+          ImGui.TextWrapped(Loc.T("Screen.HousingRequiredBody"));
           ImGui.Spacing();
-          if (ImGui.Button("Tutorial Video")) {
+          if (ImGui.Button(Loc.T("Screen.TutorialVideo"))) {
               System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                   FileName = "https://www.youtube.com/watch?v=ZgLs2OJQ8ks",
                   UseShellExecute = true
@@ -106,13 +109,13 @@ namespace XivMediaPlayer.Windows {
       }
 
       if (isOutdoors && !_plugin.Config.EnableOutdoorPublicScreens) {
-          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "Outdoor Screens Disabled");
-          ImGui.TextWrapped("You must enable 'Enable Outdoor Public Screens' in the main settings menu to place TVs outdoors.");
+          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), Loc.T("Screen.OutdoorDisabled"));
+          ImGui.TextWrapped(Loc.T("Screen.OutdoorDisabledBody"));
           return;
       }
 
       // Enable toggle 
-      if (ImGui.Checkbox("Render in World", ref _enabled)) {
+      if (ImGui.Checkbox(Loc.T("Screen.RenderInWorld"), ref _enabled)) {
         _transform.Enabled = _enabled;
         
         // Auto-delete from server if turning off and we own it or have privileges
@@ -126,7 +129,7 @@ namespace XivMediaPlayer.Windows {
 
       ImGui.SameLine();
       ImGui.SetCursorPosX(ImGui.GetWindowWidth() - 110);
-      if (ImGui.Button("Tutorial Video")) {
+      if (ImGui.Button(Loc.T("Screen.TutorialVideo"))) {
           System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
               FileName = "https://www.youtube.com/watch?v=ZgLs2OJQ8ks",
               UseShellExecute = true
@@ -135,7 +138,7 @@ namespace XivMediaPlayer.Windows {
 
       if (!_enabled) {
         ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f),
-          "Enable to place the video in the game world.");
+          Loc.T("Screen.EnableHint"));
         return;
       }
 
@@ -164,23 +167,23 @@ namespace XivMediaPlayer.Windows {
       _wasShiftPressed = isSnapKeyPressed;
 
       // Quick actions 
-      if (ImGui.Button("Place at Camera")) {
+      if (ImGui.Button(Loc.T("Screen.PlaceAtCamera"))) {
         _onPlaceAtCamera?.Invoke();
         SyncFromTransform();
         _onSave?.Invoke();
       }
       
       ImGui.Spacing();
-      ImGui.TextColored(new Vector4(0.7f, 1f, 0.7f, 1f), "Quick Snap:");
-      ImGui.TextWrapped("Hold CTRL + SHIFT while hovering over or selecting a furnishing in Edit Mode to instantly snap the TV to it.");
+      ImGui.TextColored(new Vector4(0.7f, 1f, 0.7f, 1f), Loc.T("Screen.QuickSnap"));
+      ImGui.TextWrapped(Loc.T("Screen.QuickSnapBody"));
       ImGui.Spacing();
       
-      if (ImGui.Button("Save")) {
+      if (ImGui.Button(Loc.T("Screen.Save"))) {
         SyncToTransform();
         _onSave?.Invoke();
       }
       ImGui.SameLine();
-      if (ImGui.Button("Reset")) {
+      if (ImGui.Button(Loc.T("Screen.Reset"))) {
         _transform.Enabled = false;
         _enabled = false;
         SyncFromTransform();
@@ -197,7 +200,7 @@ namespace XivMediaPlayer.Windows {
       ImGui.Separator();
 
       // Position 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Position");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), Loc.T("Screen.Section.Position"));
 
       bool posChanged = false;
       posChanged |= ImGui.DragFloat("X##pos", ref _position.X, 0.05f, -1000f, 1000f, "%.2f");
@@ -224,15 +227,15 @@ namespace XivMediaPlayer.Windows {
       ImGui.SameLine();
       if (ImGui.Button("\u2191##posY")) { _position.Y += nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Near##posZ")) { _position.Z -= nudge; _transform.Position = _position; _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.Near"))) { _position.Z -= nudge; _transform.Position = _position; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Far##posZ")) { _position.Z += nudge; _transform.Position = _position; _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.Far"))) { _position.Z += nudge; _transform.Position = _position; _onSave?.Invoke(); }
 
       ImGui.Spacing();
       ImGui.Separator();
 
       // Rotation 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Rotation");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), Loc.T("Screen.Section.Rotation"));
 
       bool rotChanged = false;
       rotChanged |= ImGui.SliderFloat("Yaw##rot", ref _rotation.X, -180f, 180f, "%.1f\u00b0");
@@ -247,33 +250,33 @@ namespace XivMediaPlayer.Windows {
       }
 
       // Quick rotation presets
-      if (ImGui.Button("Face North")) { _rotation.X = 0; _transform.RotationDegrees = new Vector3(_rotation.Y, 0, 0); _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.FaceNorth"))) { _rotation.X = 0; _transform.RotationDegrees = new Vector3(_rotation.Y, 0, 0); _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Face East")) { _rotation.X = 90; _transform.RotationDegrees = new Vector3(_rotation.Y, 90, 0); _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.FaceEast"))) { _rotation.X = 90; _transform.RotationDegrees = new Vector3(_rotation.Y, 90, 0); _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Face South")) { _rotation.X = 180; _transform.RotationDegrees = new Vector3(_rotation.Y, 180, 0); _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.FaceSouth"))) { _rotation.X = 180; _transform.RotationDegrees = new Vector3(_rotation.Y, 180, 0); _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Face West")) { _rotation.X = -90; _transform.RotationDegrees = new Vector3(_rotation.Y, -90, 0); _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.FaceWest"))) { _rotation.X = -90; _transform.RotationDegrees = new Vector3(_rotation.Y, -90, 0); _onSave?.Invoke(); }
 
       ImGui.Spacing();
       ImGui.Separator();
 
       // Scale 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Size (world units)");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), Loc.T("Screen.Section.Size"));
 
       bool aspectChanged = false;
-      aspectChanged |= ImGui.RadioButton("16:9", ref _aspectRatio, 0);
+      aspectChanged |= ImGui.RadioButton(Loc.T("Screen.Aspect169"), ref _aspectRatio, 0);
         ImGui.SameLine();
-        aspectChanged |= ImGui.RadioButton("4:3", ref _aspectRatio, 1);
+        aspectChanged |= ImGui.RadioButton(Loc.T("Screen.Aspect43"), ref _aspectRatio, 1);
         ImGui.SameLine();
-        aspectChanged |= ImGui.RadioButton("Custom / Free", ref _aspectRatio, 2);
+        aspectChanged |= ImGui.RadioButton(Loc.T("Screen.AspectCustom"), ref _aspectRatio, 2);
       
       bool scaleChanged = false;
         if (_aspectRatio != 2) {
-            scaleChanged |= ImGui.DragFloat("Diagonal Size##scale", ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
+            scaleChanged |= ImGui.DragFloat(Loc.T("Screen.DiagonalSize"), ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
         } else {
-            scaleChanged |= ImGui.DragFloat("Width##scaleX", ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
-            scaleChanged |= ImGui.DragFloat("Height##scaleY", ref _scale.Y, 0.1f, 0.5f, 200f, "%.1f");
+            scaleChanged |= ImGui.DragFloat(Loc.T("Screen.Width"), ref _scale.X, 0.1f, 0.5f, 200f, "%.1f");
+            scaleChanged |= ImGui.DragFloat(Loc.T("Screen.Height"), ref _scale.Y, 0.1f, 0.5f, 200f, "%.1f");
         }
       bool saveScale = ImGui.IsItemDeactivatedAfterEdit();
 
@@ -289,28 +292,35 @@ namespace XivMediaPlayer.Windows {
       }
 
       // Preset sizes
-      if (ImGui.Button("Small (2m)")) { _scale.X = 2f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.SizeSmall"))) { _scale.X = 2f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Medium (4m)")) { _scale.X = 4f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.SizeMedium"))) { _scale.X = 4f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Large (8m)")) { _scale.X = 8f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.SizeLarge"))) { _scale.X = 8f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
       ImGui.SameLine();
-      if (ImGui.Button("Cinema (12m)")) { _scale.X = 12f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
+      if (ImGui.Button(Loc.T("Screen.SizeCinema"))) { _scale.X = 12f; _scale.Y = _scale.X * (_aspectRatio == 1 ? (3f/4f) : (9f/16f)); _transform.Scale = _scale; _onSave?.Invoke(); }
 
       ImGui.Spacing();
       ImGui.Separator();
 
       // Projector & Transparency
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Projector & Transparency");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), Loc.T("Screen.Section.Projector"));
       
       bool appearanceChanged = false;
-      appearanceChanged |= ImGui.Checkbox("Projector Mode (Additive Blend)", ref _isProjectorMode);
+      appearanceChanged |= ImGui.Checkbox(Loc.T("Screen.ProjectorMode"), ref _isProjectorMode);
       
-      appearanceChanged |= ImGui.SliderFloat("Opacity", ref _opacity, 0.05f, 1.0f, "%.2f");
-      appearanceChanged |= ImGui.ColorEdit3("Screensaver Color", ref _screensaverColor);
+      appearanceChanged |= ImGui.SliderFloat(Loc.T("Screen.Opacity"), ref _opacity, 0.05f, 1.0f, "%.2f");
+      appearanceChanged |= ImGui.ColorEdit3(Loc.T("Screen.ScreensaverColor"), ref _screensaverColor);
 
-      string[] screensaverStyles = new string[] { "Bouncing Logo", "VCR", "No Signal", "Static", "Test Pattern", "Matrix Rain" };
-      appearanceChanged |= ImGui.Combo("Screensaver Style", ref _screensaverStyle, screensaverStyles, screensaverStyles.Length);
+      string[] screensaverStyles = new string[] {
+        Loc.T("Screen.Screensaver.BouncingLogo"),
+        Loc.T("Screen.Screensaver.Vcr"),
+        Loc.T("Screen.Screensaver.NoSignal"),
+        Loc.T("Screen.Screensaver.Static"),
+        Loc.T("Screen.Screensaver.TestPattern"),
+        Loc.T("Screen.Screensaver.MatrixRain")
+      };
+      appearanceChanged |= ImGui.Combo(Loc.T("Screen.ScreensaverStyle"), ref _screensaverStyle, screensaverStyles, screensaverStyles.Length);
       
       bool saveAppearance = ImGui.IsItemDeactivatedAfterEdit() || ImGui.IsItemDeactivated();
       
@@ -329,49 +339,49 @@ namespace XivMediaPlayer.Windows {
 
       // Info 
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        $"Screen: {_scale.X:F1}m x {_scale.Y:F1}m at ({_position.X:F1}, {_position.Y:F1}, {_position.Z:F1})");
+        Loc.T("Screen.InfoFormat", _scale.X, _scale.Y, _position.X, _position.Y, _position.Z));
 
       var depthDebug = _renderer.DepthDebugInfo;
       if (!string.IsNullOrEmpty(depthDebug)) {
         ImGui.Spacing();
         ImGui.Separator();
-        ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 1f), "Depth Debug");
+        ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 1f), Loc.T("Screen.DepthDebug"));
         ImGui.TextWrapped(depthDebug);
       }
       var rendererError = _renderer.DepthRendererError;
       if (!string.IsNullOrEmpty(rendererError)) {
-        ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), $"GPU Error: {rendererError}");
+        ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), Loc.T("Screen.GpuError", rendererError));
       }
 
       ImGui.Spacing();
       ImGui.Separator();
 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Room Sync");
-      ImGui.TextWrapped("Saving above only saves locally. To make the TV visible to other players, you must sync it to the room.");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), Loc.T("Screen.Section.RoomSync"));
+      ImGui.TextWrapped(Loc.T("Screen.RoomSyncBody"));
       
       string locationKey = _plugin.LocationKey;
       bool isOutdoorsSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("zone_");
       bool isIslandSync = !string.IsNullOrEmpty(locationKey) && locationKey.StartsWith("island_");
       
       if (string.IsNullOrEmpty(locationKey) || (!locationKey.StartsWith("house_") && !locationKey.StartsWith("zone_") && !locationKey.StartsWith("island_"))) {
-          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "You must be inside a housing area or valid outdoor zone to sync TVs.");
+          ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), Loc.T("Screen.MustBeInHousing"));
       } else {
           unsafe
           {
               var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
               if (housingMgr != null && !housingMgr->IsInside() && housingMgr->GetCurrentPlot() >= 0 && housingMgr->GetCurrentWard() >= 0)
               {
-                  ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), $"You are standing in Plot {housingMgr->GetCurrentPlot() + 1}");
+                  ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), Loc.T("Settings.StandingInPlot", housingMgr->GetCurrentPlot() + 1));
               }
           }
           
-          ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Placement Key:");
+          ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), Loc.T("Settings.PlacementKey"));
           ImGui.SameLine();
           ImGui.Text(locationKey);
 
           if (_plugin.CurrentTvPlacement != null)
           {
-              ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), "Synced TV Key:");
+              ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), Loc.T("Settings.SyncedTvKey"));
               ImGui.SameLine();
               ImGui.Text(_plugin.CurrentTvPlacement.LocationKey);
           }
@@ -379,7 +389,7 @@ namespace XivMediaPlayer.Windows {
           if (_plugin.CurrentTvPlacement == null || _plugin.CurrentTvPlacement.OwnerId == _plugin.Config.OwnerId) {
               bool isLocked = _plugin.CurrentTvPlacement?.IsLocked ?? !isOutdoorsSync;
               if (!isOutdoorsSync) {
-                  if (ImGui.Checkbox("Lock TV to Owner Only", ref isLocked)) {
+                  if (ImGui.Checkbox(Loc.T("Screen.LockTv"), ref isLocked)) {
                       if (_plugin.CurrentTvPlacement != null) {
                           _plugin.CurrentTvPlacement.IsLocked = isLocked;
                       } else {
@@ -393,22 +403,22 @@ namespace XivMediaPlayer.Windows {
               }
               
               ImGui.Spacing();
-              if (ImGui.Button("Sync Placements to Area")) {
+              if (ImGui.Button(Loc.T("Screen.SyncPlacements"))) {
                   RegisterTvAsync(locationKey);
               }
               ImGui.SameLine();
-              if (ImGui.Button("Remove TV from Area")) {
+              if (ImGui.Button(Loc.T("Screen.RemoveTv"))) {
                   _ = DeleteTvAsync(locationKey);
               }
           } else {
               if (_plugin.IsHousingMenuOpen || isOutdoorsSync || isIslandSync) {
-                  if (ImGui.Button("Take Ownership of TV")) {
+                  if (ImGui.Button(Loc.T("Screen.TakeOwnership"))) {
                       RegisterTvAsync(locationKey);
                   }
-                  ImGui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f), "You can override this locked TV because you have privileges here.");
+                  ImGui.TextColored(new Vector4(1f, 0.8f, 0.2f, 1f), Loc.T("Screen.CanOverrideLocked"));
               } else {
                   if (_plugin.CurrentTvPlacement.IsLocked) {
-                      ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), "This TV is locked by its owner.");
+                      ImGui.TextColored(new Vector4(1f, 0.4f, 0.4f, 1f), Loc.T("Screen.LockedByOwner"));
                   }
               }
           }
@@ -424,7 +434,7 @@ namespace XivMediaPlayer.Windows {
         var currentPlacement = _plugin.CurrentTvPlacement;
         var serverLocationKey = string.IsNullOrEmpty(currentPlacement.LocationKey) ? locationKey : currentPlacement.LocationKey;
         
-        _statusMessage = "Deleting TV from server...";
+        _statusMessage = Loc.T("Screen.DeletingTv");
         _statusColor = new Vector4(1, 1, 1, 1);
         
         try {
@@ -438,27 +448,27 @@ namespace XivMediaPlayer.Windows {
                 _transform.Enabled = false;
                 _enabled = false;
                 _plugin.Config.Save();
-                _statusMessage = "Successfully removed TV from the room!";
+                _statusMessage = Loc.T("Screen.RemovedTv");
                 _statusColor = new Vector4(0.3f, 1f, 0.3f, 1);
-                _plugin.Chat.Print("[Media Player] " + _statusMessage);
+                _plugin.Chat.Print(Loc.T("Chat.Prefix") + Loc.T("Screen.RemovedTv"));
                 return true;
             } else {
                 RestoreEnabledAfterDeleteFailure(restoreOnFailure);
-                _statusMessage = "Failed to remove TV.";
+                _statusMessage = Loc.T("Screen.RemoveFailed");
                 _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
-                _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+                _plugin.Chat.PrintError(Loc.T("Chat.Prefix") + Loc.T("Screen.RemoveFailed"));
                 return false;
             }
         } catch (UnauthorizedAccessException) {
             RestoreEnabledAfterDeleteFailure(restoreOnFailure);
-            _statusMessage = "Cannot delete TV: It is locked by its owner.";
+            _statusMessage = Loc.T("Screen.CannotDeleteLocked");
             _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
-            _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+            _plugin.Chat.PrintError(Loc.T("Chat.Prefix") + Loc.T("Screen.CannotDeleteLocked"));
         } catch (Exception) {
             RestoreEnabledAfterDeleteFailure(restoreOnFailure);
-            _statusMessage = "Network error while deleting TV.";
+            _statusMessage = Loc.T("Screen.DeleteNetworkError");
             _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
-            _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+            _plugin.Chat.PrintError(Loc.T("Chat.Prefix") + Loc.T("Screen.DeleteNetworkError"));
         }
 
         return false;
@@ -514,7 +524,7 @@ namespace XivMediaPlayer.Windows {
 
     public async void RegisterTvAsync(string locationKey) {
       if (!_enabled) {
-        _statusMessage = "World screen is not enabled!";
+        _statusMessage = Loc.T("Screen.NotEnabled");
         _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
         return;
       }
@@ -524,7 +534,7 @@ namespace XivMediaPlayer.Windows {
       }
       _lastRegistrationTime = DateTime.UtcNow;
 
-      _statusMessage = "Registering TV on server...";
+      _statusMessage = Loc.T("Screen.RegisteringTv");
       _statusColor = new Vector4(1, 1, 1, 1);
 
       var placement = new TvPlacement {
@@ -556,26 +566,26 @@ namespace XivMediaPlayer.Windows {
         var result = await _plugin.ServerClient.RegisterTvAsync(locationKey, placement);
         if (result != null) {
           _plugin.CurrentTvPlacement = result;
-          _statusMessage = "Successfully registered TV for all visitors!";
+          _statusMessage = Loc.T("Screen.RegisteredTv");
           _statusColor = new Vector4(0.3f, 1f, 0.3f, 1);
-          _plugin.Chat.Print("[Media Player] " + _statusMessage);
+          _plugin.Chat.Print(Loc.T("Chat.Prefix") + Loc.T("Screen.RegisteredTv"));
         } else {
-          _statusMessage = "Saved locally, but failed to reach the sync server.";
+          _statusMessage = Loc.T("Screen.RegisterFailed");
           _statusColor = new Vector4(1, 0.6f, 0.2f, 1);
-          _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+          _plugin.Chat.PrintError(Loc.T("Chat.Prefix") + Loc.T("Screen.RegisterFailed"));
         }
       } 
       catch (UnauthorizedAccessException) 
       {
-        _statusMessage = "Cannot move TV: It is locked by its owner.";
+        _statusMessage = Loc.T("Screen.CannotMoveLocked");
         _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
-        _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+        _plugin.Chat.PrintError(Loc.T("Chat.Prefix") + Loc.T("Screen.CannotMoveLocked"));
       }
       catch (Exception)
       {
-        _statusMessage = "Network error while syncing TV.";
+        _statusMessage = Loc.T("Screen.SyncNetworkError");
         _statusColor = new Vector4(1, 0.3f, 0.3f, 1);
-        _plugin.Chat.PrintError("[Media Player] " + _statusMessage);
+        _plugin.Chat.PrintError(Loc.T("Chat.Prefix") + Loc.T("Screen.SyncNetworkError"));
       }
     }
 

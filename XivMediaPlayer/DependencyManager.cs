@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Dalamud.Plugin.Services;
+using XivMediaPlayer.Localization;
 
 namespace XivMediaPlayer
 {
@@ -15,7 +16,7 @@ namespace XivMediaPlayer
         public bool IsReady { get; private set; }
         public bool IsDownloading { get; private set; }
         public float DownloadProgress { get; private set; }
-        public string Status { get; private set; } = "Initializing...";
+        public string Status { get; private set; } = string.Empty;
         public bool HasError { get; private set; }
         public string ErrorMessage { get; private set; } = string.Empty;
 
@@ -25,13 +26,14 @@ namespace XivMediaPlayer
         {
             _version = version;
             _pluginLog = pluginLog;
+            Status = Loc.T("Deps.Initializing");
 
             // Check if dependencies exist in the plugin folder (e.g. for local developer compiles)
             if (Directory.Exists(Path.Combine(pluginDir, "cef")) && Directory.Exists(Path.Combine(pluginDir, "libvlc")))
             {
                 DependenciesDir = pluginDir;
                 CheckDependencies();
-                if (IsReady) Status = "Ready (Local Build)";
+                if (IsReady) Status = Loc.T("Deps.ReadyLocal");
             }
             else
             {
@@ -49,12 +51,12 @@ namespace XivMediaPlayer
             if (File.Exists(cefPath) && File.Exists(vlcPath))
             {
                 IsReady = true;
-                Status = "Ready";
+                Status = Loc.T("Deps.Ready");
             }
             else
             {
                 IsReady = false;
-                Status = "Missing media dependencies. Click to download.";
+                Status = Loc.T("Deps.Missing");
             }
 
             if (!File.Exists(ffmpegPath) && !IsDownloading)
@@ -71,7 +73,7 @@ namespace XivMediaPlayer
             IsDownloading = true;
             HasError = false;
             DownloadProgress = 0f;
-            Status = "Starting download...";
+            Status = Loc.T("Deps.StartingDownload");
 
             try
             {
@@ -105,7 +107,7 @@ namespace XivMediaPlayer
                     throw new Exception("Failed to download dependencies. The server returned 404 Not Found for all available URLs. Please try downloading manually from the GitHub releases page.");
                 }
 
-                Status = "Extracting dependencies... (This may take a minute)";
+                Status = Loc.T("Deps.Extracting");
                 _pluginLog.Information("Extracting Dependencies.zip...");
 
                 await Task.Run(() =>
@@ -136,13 +138,13 @@ namespace XivMediaPlayer
                 }
 
                 IsReady = true;
-                Status = "Dependencies installed successfully!";
+                Status = Loc.T("Deps.Installed");
             }
             catch (Exception ex)
             {
                 HasError = true;
                 ErrorMessage = ex.Message;
-                Status = "Download failed.";
+                Status = Loc.T("Deps.DownloadFailed");
                 _pluginLog.Error(ex, "Failed to download media dependencies.");
             }
             finally
@@ -231,11 +233,11 @@ namespace XivMediaPlayer
                                     if (canReportProgress)
                                     {
                                         DownloadProgress = (float)totalRead / totalBytes;
-                                        Status = $"Downloading: {(totalRead / 1024 / 1024)}MB / {(totalBytes / 1024 / 1024)}MB";
+                                        Status = Loc.T("Deps.DownloadingProgress", totalRead / 1024 / 1024, totalBytes / 1024 / 1024);
                                     }
                                     else
                                     {
-                                        Status = $"Downloading: {(totalRead / 1024 / 1024)}MB";
+                                        Status = Loc.T("Deps.DownloadingUnknownSize", totalRead / 1024 / 1024);
                                     }
                                 }
                             } while (isMoreToRead);
@@ -252,7 +254,7 @@ namespace XivMediaPlayer
         {
             try
             {
-                Status = "Downloading FFmpeg...";
+                Status = Loc.T("Deps.DownloadingFFmpeg");
                 _pluginLog.Information("Downloading FFmpeg...");
                 string zipPath = Path.Combine(DependenciesDir, "ffmpeg.zip");
                 string url = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-win-64.zip";
@@ -265,7 +267,7 @@ namespace XivMediaPlayer
                     await stream.CopyToAsync(fileStream);
                 }
 
-                Status = "Extracting FFmpeg...";
+                Status = Loc.T("Deps.ExtractingFFmpeg");
                 await Task.Run(() =>
                 {
                     ZipFile.ExtractToDirectory(zipPath, DependenciesDir, true);

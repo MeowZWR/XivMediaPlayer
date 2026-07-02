@@ -2,6 +2,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.Bindings.ImGui;
 using System;
 using System.Numerics;
+using XivMediaPlayer.Localization;
 
 namespace XivMediaPlayer.Windows {
   internal class SettingsWindow : Window {
@@ -9,7 +10,7 @@ namespace XivMediaPlayer.Windows {
     private Action _onVolumeFix;
 
     public SettingsWindow(Plugin plugin, Action onVolumeFix = null) :
-      base("Media Player Settings", ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize, false) {
+      base(Loc.T("SettingsWindow.Title") + "###SettingsWindow", ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.AlwaysAutoResize, false) {
       _plugin = plugin;
       _onVolumeFix = onVolumeFix;
       Size = new Vector2(420, 0);
@@ -17,12 +18,14 @@ namespace XivMediaPlayer.Windows {
     }
 
     public override void Draw() {
+      WindowName = Loc.T("SettingsWindow.Title") + "###SettingsWindow";
+
       // Volume 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Audio");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Audio"));
       ImGui.Separator();
 
       float volume = _plugin.Config.LivestreamVolume;
-      if (ImGui.SliderFloat("Stream Volume", ref volume, 0f, 3f)) {
+      if (ImGui.SliderFloat(Loc.T("Settings.StreamVolume"), ref volume, 0f, 3f)) {
         _plugin.Config.LivestreamVolume = volume;
         if (_plugin.MediaManager != null) {
             _plugin.MediaManager.LiveStreamVolume = volume;
@@ -30,7 +33,7 @@ namespace XivMediaPlayer.Windows {
         _plugin.Config.Save();
       }
 
-      if (_onVolumeFix != null && ImGui.Button("Fix Game Volume")) {
+      if (_onVolumeFix != null && ImGui.Button(Loc.T("Settings.FixGameVolume"))) {
         _onVolumeFix.Invoke();
       }
 
@@ -38,17 +41,17 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
 
       // Twitch 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Twitch");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Twitch"));
       ImGui.Separator();
 
       bool tuneInto = _plugin.Config.TuneIntoTwitchStreams;
-      if (ImGui.Checkbox("Auto-tune into Twitch streams (in residential areas)", ref tuneInto)) {
+      if (ImGui.Checkbox(Loc.T("Settings.AutoTuneTwitch"), ref tuneInto)) {
         _plugin.Config.TuneIntoTwitchStreams = tuneInto;
         _plugin.Config.Save();
       }
 
       bool streamPrompt = _plugin.Config.TuneIntoTwitchStreamPrompt;
-      if (ImGui.Checkbox("Show stream prompts in chat", ref streamPrompt)) {
+      if (ImGui.Checkbox(Loc.T("Settings.StreamPrompts"), ref streamPrompt)) {
         _plugin.Config.TuneIntoTwitchStreamPrompt = streamPrompt;
         _plugin.Config.Save();
       }
@@ -57,127 +60,116 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
 
       // Video 
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Video");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Video"));
       ImGui.Separator();
 
       bool defaultOpen = _plugin.Config.DefaultVideoOpen == 0;
-      if (ImGui.Checkbox("Open video window by default when stream starts", ref defaultOpen)) {
+      if (ImGui.Checkbox(Loc.T("Settings.DefaultVideoOpen"), ref defaultOpen)) {
         _plugin.Config.DefaultVideoOpen = defaultOpen ? 0 : 1;
         _plugin.Config.Save();
       }
 
       bool autoResume = _plugin.Config.AutoResumeMedia;
-      if (ImGui.Checkbox("Auto-resume media when entering locations", ref autoResume)) {
+      if (ImGui.Checkbox(Loc.T("Settings.AutoResume"), ref autoResume)) {
         _plugin.Config.AutoResumeMedia = autoResume;
         _plugin.Config.Save();
       }
       bool tvGlow = _plugin.Config.TvGlowEnabled;
-      if (ImGui.Checkbox("Enable TV Glow (Ambient Lighting)", ref tvGlow)) {
+      if (ImGui.Checkbox(Loc.T("Settings.TvGlow"), ref tvGlow)) {
         _plugin.Config.TvGlowEnabled = tvGlow;
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Enables the realistic ambient light that shines on the walls around the TV.");
+        ImGui.SetTooltip(Loc.T("Settings.TvGlowTooltip"));
       }
 
       bool uiCulling = _plugin.Config.EnableUiCulling;
-      if (ImGui.Checkbox("Enable UI Culling", ref uiCulling)) {
+      if (ImGui.Checkbox(Loc.T("Settings.UiCulling"), ref uiCulling)) {
         _plugin.Config.EnableUiCulling = uiCulling;
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("When enabled, the TV will render undearneath the games user interface. Disable as a last resort to Reshade ruining the UI buffer.");
+        ImGui.SetTooltip(Loc.T("Settings.UiCullingTooltip"));
       }
 
 
       bool strictMasking = _plugin.Config.UIBlendThreshold > 0.5f;
-      if (ImGui.Checkbox("Strict UI Masking (AMD Fix / Invisible Drop Shadows)", ref strictMasking)) {
+      if (ImGui.Checkbox(Loc.T("Settings.StrictUiMasking"), ref strictMasking)) {
         _plugin.Config.UIBlendThreshold = strictMasking ? (171.0f / 255.0f) : 0.0f;
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Enable this if you have an AMD card and notice that the TV does not render. UI dropshadows are lost.");
+        ImGui.SetTooltip(Loc.T("Settings.StrictUiMaskingTooltip"));
       }
-
-      /*
-      bool reshadeCompat = _plugin.Config.ReShadeCompatibilityMode;
-      if (ImGui.Checkbox("ReShade Compatibility Mode", ref reshadeCompat)) {
-        _plugin.Config.ReShadeCompatibilityMode = reshadeCompat;
-        _plugin.Config.Save();
-      }
-      if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Enable this if you use ReShade and the TV disapears using the lightroom effect.\nThis bypasses the UI alpha channel it breaks by comparing game depth to a grayscale game render to mask out the UI. This fix is very rough.");
-      }
-      */
 
       bool disableUiBlock = _plugin.Config.DisableUIBlockDetection;
-      if (ImGui.Checkbox("Disable UI Block Detection", ref disableUiBlock)) {
+      if (ImGui.Checkbox(Loc.T("Settings.DisableUiBlock"), ref disableUiBlock)) {
         _plugin.Config.DisableUIBlockDetection = disableUiBlock;
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Allows clicking the TV even if the game UI overlaps it. Useful if your visual mods heavily interfere with UI mask detection.");
+        ImGui.SetTooltip(Loc.T("Settings.DisableUiBlockTooltip"));
       }
 
       bool enableWanderersCampfireFix = _plugin.Config.EnableWanderersCampfireFix;
-      if (ImGui.Checkbox("Enable Wanderer's Campfire Fix (For Modded Campfires)", ref enableWanderersCampfireFix)) {
+      if (ImGui.Checkbox(Loc.T("Settings.WanderersCampfireFix"), ref enableWanderersCampfireFix)) {
         _plugin.Config.EnableWanderersCampfireFix = enableWanderersCampfireFix;
         _plugin.Config.Save();
       }
       if (ImGui.IsItemHovered()) {
-        ImGui.SetTooltip("Enable this if you use modded skybox mods that replace Wanderer's Campfire.");
+        ImGui.SetTooltip(Loc.T("Settings.WanderersCampfireFixTooltip"));
       }
 
-      if (ImGui.Button("Clear Watch History")) {
+      if (ImGui.Button(Loc.T("Settings.ClearWatchHistory"))) {
         _plugin.Config.WatchHistory.Clear();
         _plugin.Config.Save();
-        _plugin.Chat.Print("[Media Player] Watch history cleared.");
+        _plugin.Chat.Print(Loc.Chat("WatchHistoryCleared"));
       }
 
       ImGui.Spacing();
       ImGui.Spacing();
 
       // Outdoor TVs
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Outdoor TVs");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.OutdoorTvs"));
       ImGui.Separator();
 
       bool enableOutdoor = _plugin.Config.EnableOutdoorPublicScreens;
-      if (ImGui.Checkbox("Enable Public Outdoor Screens", ref enableOutdoor)) {
+      if (ImGui.Checkbox(Loc.T("Settings.EnableOutdoorScreens"), ref enableOutdoor)) {
         _plugin.Config.EnableOutdoorPublicScreens = enableOutdoor;
         _plugin.Config.Save();
         _plugin.HandleOutdoorSettingToggled();
       }
 
       bool safeMode = _plugin.Config.OnlySafeDomainsPublicScreens;
-      if (ImGui.Checkbox("Safe Mode (Only allow safe domains outside)", ref safeMode)) {
+      if (ImGui.Checkbox(Loc.T("Settings.SafeMode"), ref safeMode)) {
         if (!safeMode) {
-            ImGui.OpenPopup("Disable Safe Mode Warning");
+            ImGui.OpenPopup(Loc.T("Settings.SafeModePopupTitle"));
         } else {
             _plugin.Config.OnlySafeDomainsPublicScreens = true;
             _plugin.Config.Save();
         }
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        "Blocks unverified URLs on outdoor screens to prevent abuse.");
+        Loc.T("Settings.SafeModeHint"));
 
       var viewportCenter = ImGui.GetMainViewport().GetCenter();
       ImGui.SetNextWindowPos(viewportCenter, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-      if (ImGui.BeginPopupModal("Disable Safe Mode Warning", ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)) {
-          ImGui.Text("WARNING: Disabling Safe Mode will allow almost any domain to play on outdoor screens (unless otherwise blacklisted by your current server).");
-          ImGui.Text("You may be exposed to content that you may not wish to see from unmoderated domains.");
+      if (ImGui.BeginPopupModal(Loc.T("Settings.SafeModePopupTitle"), ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings)) {
+          ImGui.Text(Loc.T("Settings.SafeModeWarning1"));
+          ImGui.Text(Loc.T("Settings.SafeModeWarning2"));
           ImGui.Spacing();
-          ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "By clicking 'I Agree', you accept full responsibility for your own screen,");
-          ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "and you explicitly agree that you WILL NOT play illegal content.");
+          ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), Loc.T("Settings.SafeModeAgree1"));
+          ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), Loc.T("Settings.SafeModeAgree2"));
           ImGui.Separator();
           ImGui.Spacing();
           
-          if (ImGui.Button("I Agree, Disable Safe Mode", new Vector2(250, 0))) {
+          if (ImGui.Button(Loc.T("Settings.SafeModeAgreeButton"), new Vector2(250, 0))) {
               _plugin.Config.OnlySafeDomainsPublicScreens = false;
               _plugin.Config.Save();
               ImGui.CloseCurrentPopup();
           }
           ImGui.SameLine();
-          if (ImGui.Button("Cancel", new Vector2(120, 0))) {
+          if (ImGui.Button(Loc.T("Settings.Cancel"), new Vector2(120, 0))) {
               ImGui.CloseCurrentPopup();
           }
           ImGui.EndPopup();
@@ -186,18 +178,18 @@ namespace XivMediaPlayer.Windows {
       ImGui.Separator();
 
       bool spatialAudio = _plugin.Config.SpatialAudioEnabled;
-      if (ImGui.Checkbox("Enable 3D Spatial Audio", ref spatialAudio)) {
+      if (ImGui.Checkbox(Loc.T("Settings.SpatialAudio"), ref spatialAudio)) {
         _plugin.Config.SpatialAudioEnabled = spatialAudio;
         _plugin.Config.Save();
         _plugin.DoRefreshCurrentMedia();
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        "Dynamically pans audio to simulate physical TV locations. If you experience A/V sync issues, disable this.");
+        Loc.T("Settings.SpatialAudioHint"));
 
       ImGui.Separator();
       
       bool showGrid = _plugin.Config.ShowOutdoorGridDebug;
-      if (ImGui.Checkbox("Show Outdoor Grid Overlay (Debug)", ref showGrid)) {
+      if (ImGui.Checkbox(Loc.T("Settings.OutdoorGridDebug"), ref showGrid)) {
         _plugin.Config.ShowOutdoorGridDebug = showGrid;
         _plugin.Config.Save();
       }
@@ -206,22 +198,22 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
 
       // Playback
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Playback");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Playback"));
       ImGui.Separator();
 
       int seekIncrement = _plugin.Config.SeekIncrementSeconds;
-      if (ImGui.SliderInt("Seek Increment (seconds)", ref seekIncrement, 1, 60)) {
+      if (ImGui.SliderInt(Loc.T("Settings.SeekIncrement"), ref seekIncrement, 1, 60)) {
         _plugin.Config.SeekIncrementSeconds = seekIncrement;
         _plugin.Config.Save();
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        "How many seconds the << and >> buttons skip.");
+        Loc.T("Settings.SeekIncrementHint"));
 
       ImGui.Spacing();
       ImGui.Spacing();
 
       // Debug
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Debug");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Debug"));
       ImGui.Separator();
 
       unsafe
@@ -229,66 +221,66 @@ namespace XivMediaPlayer.Windows {
           var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
           if (housingMgr != null && !housingMgr->IsInside() && housingMgr->GetCurrentPlot() >= 0 && housingMgr->GetCurrentWard() >= 0)
           {
-              ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), $"You are standing in Plot {housingMgr->GetCurrentPlot() + 1}");
+              ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), Loc.T("Settings.StandingInPlot", housingMgr->GetCurrentPlot() + 1));
           }
       }
 
       string locationKey = _plugin.LocationKey;
-      ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Placement Key:");
+      ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), Loc.T("Settings.PlacementKey"));
       ImGui.SameLine();
-      ImGui.Text(locationKey ?? "Unknown");
+      ImGui.Text(locationKey ?? Loc.T("Settings.Unknown"));
       if (locationKey != null) {
           ImGui.SameLine();
-          if (ImGui.Button("Copy##copyloc")) {
+          if (ImGui.Button(Loc.T("Settings.Copy"))) {
               ImGui.SetClipboardText(locationKey);
           }
       }
 
       if (_plugin.CurrentTvPlacement != null)
       {
-          ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), "Synced TV Key:");
+          ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), Loc.T("Settings.SyncedTvKey"));
           ImGui.SameLine();
           ImGui.Text(_plugin.CurrentTvPlacement.LocationKey);
           ImGui.SameLine();
-          if (ImGui.Button("Copy##copysyncloc")) {
+          if (ImGui.Button(Loc.T("Settings.CopySynced"))) {
               ImGui.SetClipboardText(_plugin.CurrentTvPlacement.LocationKey);
           }
       }
       ImGui.Spacing();
 
       bool verboseChat = _plugin.Config.VerboseChatLogging;
-      if (ImGui.Checkbox("Enable Verbose Chat Logging", ref verboseChat)) {
+      if (ImGui.Checkbox(Loc.T("Settings.VerboseChat"), ref verboseChat)) {
         _plugin.Config.VerboseChatLogging = verboseChat;
         _plugin.Config.Save();
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        "Shows detailed plugin status messages in the chat.");
+        Loc.T("Settings.VerboseChatHint"));
 
       ImGui.Spacing();
       ImGui.Spacing();
 
       // yt-dlp quality
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "yt-dlp");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Ytdlp"));
       ImGui.Separator();
 
       string[] qualityLabels = new string[] { "360p", "480p", "720p", "1080p", "Best" };
       int[] qualityValues = new int[] { 360, 480, 720, 1080, 0 };
       int currentQualityIdx = Array.IndexOf(qualityValues, _plugin.Config.PreferredQuality);
       if (currentQualityIdx < 0) currentQualityIdx = 2; // default 720p
-      if (ImGui.Combo("Preferred Quality", ref currentQualityIdx, qualityLabels, qualityLabels.Length)) {
+      if (ImGui.Combo(Loc.T("Settings.PreferredQuality"), ref currentQualityIdx, qualityLabels, qualityLabels.Length)) {
         _plugin.Config.PreferredQuality = qualityValues[currentQualityIdx];
         _plugin.Config.Save();
       }
 
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        "yt-dlp is automatically downloaded and updated.");
+        Loc.T("Settings.YtdlpHint"));
 
       if (_plugin.YtDlpManager != null && !_plugin.YtDlpManager.HasCookiesFile) {
         ImGui.Spacing();
-        ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Warning: No cookies.txt found!");
-        ImGui.TextWrapped("YouTube now heavily blocks players without cookies. To fix this, you must install the VRCVideoCacher extension in your browser, which locally syncs your cookie data.");
+        ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), Loc.T("Settings.NoCookiesWarning"));
+        ImGui.TextWrapped(Loc.T("Settings.NoCookiesBody"));
         
-        if (ImGui.Button("Chrome/Edge/Brave Extension")) {
+        if (ImGui.Button(Loc.T("Settings.ChromeExtension"))) {
             try {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                     FileName = "https://chromewebstore.google.com/detail/vrcvideocacher-cookies-ex/kfgelknbegappcajiflgfbjbdpbpokge",
@@ -297,7 +289,7 @@ namespace XivMediaPlayer.Windows {
             } catch { }
         }
         ImGui.SameLine();
-        if (ImGui.Button("Firefox Extension")) {
+        if (ImGui.Button(Loc.T("Settings.FirefoxExtension"))) {
             try {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                     FileName = "https://addons.mozilla.org/en-US/firefox/addon/vrcvideocachercookiesexporter/",
@@ -311,25 +303,25 @@ namespace XivMediaPlayer.Windows {
       ImGui.Spacing();
 
       // Server Sync
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Server Sync");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.ServerSync"));
       ImGui.Separator();
 
       string serverUrl = _plugin.Config.ServerUrl;
-      if (ImGui.InputText("Server URL", ref serverUrl, 256)) {
+      if (ImGui.InputText(Loc.T("Settings.ServerUrl"), ref serverUrl, 256)) {
         _plugin.Config.ServerUrl = serverUrl;
         _plugin.Config.Save();
       }
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
-        "URL of the backend server used to sync TVs.");
+        Loc.T("Settings.ServerUrlHint"));
 
       ImGui.Spacing();
       ImGui.Spacing();
 
       // Help & Support
-      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Help & Support");
+      ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), Loc.T("Settings.Section.Help"));
       ImGui.Separator();
 
-      if (ImGui.Button("Tutorial Video (How to Place TVs)")) {
+      if (ImGui.Button(Loc.T("Settings.TutorialVideo"))) {
           try {
               System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                   FileName = "https://www.youtube.com/watch?v=ZgLs2OJQ8ks",
@@ -340,7 +332,7 @@ namespace XivMediaPlayer.Windows {
 
       ImGui.SameLine();
 
-      if (ImGui.Button("Join Support Discord")) {
+      if (ImGui.Button(Loc.T("Settings.JoinDiscord"))) {
           try {
               System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                   FileName = "https://discord.gg/rtGXwMn7pX",
@@ -351,7 +343,7 @@ namespace XivMediaPlayer.Windows {
 
       ImGui.Spacing();
 
-      if (ImGui.Button("Support the Developer on Ko-fi")) {
+      if (ImGui.Button(Loc.T("Settings.SupportKofi"))) {
           try {
               System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
                   FileName = "https://ko-fi.com/sebastina",

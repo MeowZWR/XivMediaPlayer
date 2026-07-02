@@ -28,6 +28,9 @@
   <None Update="XivMediaPlayer.json">
    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </None>
+  <None Include="Localization\Strings\*.json">
+   <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </None>
  </ItemGroup>
 
  <ItemGroup>

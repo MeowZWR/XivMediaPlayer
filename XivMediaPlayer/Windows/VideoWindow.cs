@@ -10,6 +10,7 @@ using MediaPlayerCore.Twitch;
 using System;
 using System.Diagnostics;
 using Vector2 = System.Numerics.Vector2;
+using XivMediaPlayer.Localization;
 
 namespace XivMediaPlayer.Windows {
   internal class VideoWindow : Window {
@@ -41,7 +42,7 @@ namespace XivMediaPlayer.Windows {
     private float _seekDragProgress;
 
     public VideoWindow(Plugin plugin, IDalamudPluginInterface pluginInterface, ITextureProvider textureProvider, IPluginLog pluginLog) :
-      base("Media Player", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoFocusOnAppearing, false) {
+      base(Loc.T("VideoWindow.Title") + "###VideoWindow", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoFocusOnAppearing, false) {
       windowSize = Size = new Vector2(640, 360 + 60);
       this.SizeCondition = ImGuiCond.FirstUseEver;
       this.SizeConstraints = new WindowSizeConstraints() { MinimumSize = new Vector2(360, 260), MaximumSize = new Vector2(3840, 2160) };
@@ -135,6 +136,8 @@ namespace XivMediaPlayer.Windows {
     }
 
     public override void Draw() {
+      WindowName = Loc.T("VideoWindow.Title") + "###VideoWindow";
+
       bool betweenAreas = false;
       unsafe {
         betweenAreas = !Conditions.Instance()->BetweenAreas;
@@ -248,7 +251,7 @@ namespace XivMediaPlayer.Windows {
           if (ImGui.Button("<<", btnSize)) {
             _plugin.SeekRelative(-_plugin.Config.SeekIncrementSeconds);
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Rewind {_plugin.Config.SeekIncrementSeconds}s");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.Rewind", _plugin.Config.SeekIncrementSeconds));
 
           ImGui.SameLine();
 
@@ -258,7 +261,7 @@ namespace XivMediaPlayer.Windows {
           if (ImGui.Button(playPauseLabel, btnSize)) {
             _plugin.TogglePlayPause();
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip(isPaused ? "Resume" : "Pause");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(isPaused ? Loc.T("Video.Tooltip.Resume") : Loc.T("Video.Tooltip.Pause"));
 
           ImGui.SameLine();
 
@@ -266,7 +269,7 @@ namespace XivMediaPlayer.Windows {
           if (ImGui.Button(">>", btnSize)) {
             _plugin.SeekRelative(_plugin.Config.SeekIncrementSeconds);
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip($"Fast Forward {_plugin.Config.SeekIncrementSeconds}s");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.FastForward", _plugin.Config.SeekIncrementSeconds));
 
           ImGui.SameLine();
           ImGui.Dummy(new Vector2(8, 0));
@@ -276,7 +279,7 @@ namespace XivMediaPlayer.Windows {
           if (ImGui.Button("|<", btnSize)) {
             _plugin.PlayPrevious();
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip("Previous Track");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.Previous"));
 
           ImGui.SameLine();
 
@@ -284,14 +287,14 @@ namespace XivMediaPlayer.Windows {
           if (ImGui.Button(">|", btnSize)) {
             _plugin.PlayNext();
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip("Next Track");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.Next"));
 
           ImGui.SameLine();
           ImGui.Dummy(new Vector2(8, 0));
           ImGui.SameLine();
 
           // Mute
-          string muteLabel = _plugin.IsMuted ? "Unmute" : "Mute";
+          string muteLabel = _plugin.IsMuted ? Loc.T("Video.Unmute") : Loc.T("Video.Mute");
           if (ImGui.Button(muteLabel, wideBtnSize)) {
             _plugin.ToggleMute();
           }
@@ -301,69 +304,69 @@ namespace XivMediaPlayer.Windows {
           // Loop
           bool loopOn = _plugin.Config.LoopEnabled;
           if (loopOn) ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.2f, 0.6f, 0.9f, 1f));
-          if (ImGui.Button("Loop", wideBtnSize)) {
+          if (ImGui.Button(Loc.T("Video.Loop"), wideBtnSize)) {
             _plugin.Config.LoopEnabled = !_plugin.Config.LoopEnabled;
             _plugin.Config.Save();
           }
           if (loopOn) ImGui.PopStyleColor();
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip(loopOn ? "Loop: ON" : "Loop: OFF");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(loopOn ? Loc.T("Video.Tooltip.LoopOn") : Loc.T("Video.Tooltip.LoopOff"));
 
           ImGui.SameLine();
 
           // Shuffle
           bool shuffleOn = _plugin.Config.ShuffleEnabled;
           if (shuffleOn) ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.2f, 0.6f, 0.9f, 1f));
-          if (ImGui.Button("Shuf", wideBtnSize)) {
+          if (ImGui.Button(Loc.T("Video.Shuffle"), wideBtnSize)) {
             _plugin.Config.ShuffleEnabled = !_plugin.Config.ShuffleEnabled;
             _plugin.Config.Save();
           }
           if (shuffleOn) ImGui.PopStyleColor();
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip(shuffleOn ? "Shuffle: ON" : "Shuffle: OFF");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(shuffleOn ? Loc.T("Video.Tooltip.ShuffleOn") : Loc.T("Video.Tooltip.ShuffleOff"));
 
           ImGui.SameLine();
 
           // Refresh
-          if (ImGui.Button("Refresh", new Vector2(56, btnH))) {
+          if (ImGui.Button(Loc.T("Video.Refresh"), new Vector2(56, btnH))) {
             _plugin.RefreshCurrentMedia();
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip("Re-resolve and replay the current media");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.Refresh"));
           ImGui.SameLine();
 
           // DMCA
-          if (ImGui.Button("DMCA", wideBtnSize)) {
+          if (ImGui.Button(Loc.T("Video.Dmca"), wideBtnSize)) {
               string url = _plugin.LastStreamURL;
               if (!string.IsNullOrEmpty(url)) {
-                  string domain = "the site administrator";
+                  string domain = Loc.T("Video.DmcaSiteAdmin");
                   try {
                       Uri uri = new Uri(url);
                       domain = uri.Host;
                   } catch { }
                   
-                  string dmcaText = $"Content URL: {url}\n\nPlease contact {domain} to report this content.";
+                  string dmcaText = Loc.T("Video.DmcaClipboardFormat", url, domain);
                   ImGui.SetClipboardText(dmcaText);
-                  _plugin.Chat.Print("[Media Player] DMCA contact info and URL copied to clipboard.");
+                  _plugin.Chat.Print(Loc.Chat("DmcaCopied"));
               } else {
-                  _plugin.Chat.PrintError("[Media Player] No active media URL to copy.");
+                  _plugin.Chat.PrintError(Loc.Chat("NoActiveUrl"));
               }
           }
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip("Copy DMCA info & media URL to clipboard");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.Dmca"));
           ImGui.SameLine();
 
           // Kill
           ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.7f, 0.15f, 0.15f, 1f));
           ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new System.Numerics.Vector4(0.9f, 0.2f, 0.2f, 1f));
-          if (ImGui.Button("Kill", wideBtnSize)) {
+          if (ImGui.Button(Loc.T("Video.Kill"), wideBtnSize)) {
             _plugin.RequestKillAndRestart();
           }
           ImGui.PopStyleColor(2);
-          if (ImGui.IsItemHovered()) ImGui.SetTooltip("Kill the media pipeline and restart it");
+          if (ImGui.IsItemHovered()) ImGui.SetTooltip(Loc.T("Video.Tooltip.Kill"));
         }
 
         //  Volume Slider 
         if (_mediaManager != null) {
-          ImGui.SetNextItemWidth(-(ImGui.CalcTextSize("Volume").X + ImGui.GetStyle().ItemInnerSpacing.X));
+          ImGui.SetNextItemWidth(-(ImGui.CalcTextSize(Loc.T("Video.Volume")).X + ImGui.GetStyle().ItemInnerSpacing.X));
           int vol = (int)(_mediaManager.LiveStreamVolume * 100f);
-          if (ImGui.SliderInt("Volume", ref vol, 0, 300)) {
+          if (ImGui.SliderInt(Loc.T("Video.Volume"), ref vol, 0, 300)) {
               _mediaManager.LiveStreamVolume = vol / 100f;
           }
         }
@@ -373,7 +376,12 @@ namespace XivMediaPlayer.Windows {
           ImGui.Separator();
           ImGui.SetNextItemWidth(100f);
           int comboIdx = _plugin.ControllerService.PlayerSlot == 255 ? 4 : _plugin.ControllerService.PlayerSlot;
-          if (ImGui.Combo("Controller Slot", ref comboIdx, "Player 1\0Player 2\0Player 3\0Player 4\0None\0")) {
+          if (ImGui.Combo(Loc.T("Video.ControllerSlot"), ref comboIdx,
+              Loc.T("Video.Controller.Player1") + "\0" +
+              Loc.T("Video.Controller.Player2") + "\0" +
+              Loc.T("Video.Controller.Player3") + "\0" +
+              Loc.T("Video.Controller.Player4") + "\0" +
+              Loc.T("Video.Controller.None") + "\0")) {
               _plugin.ControllerService.PlayerSlot = comboIdx == 4 ? (byte)255 : (byte)comboIdx;
           }
         }
