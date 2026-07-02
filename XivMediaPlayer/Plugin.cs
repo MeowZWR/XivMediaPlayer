@@ -1183,6 +1183,12 @@ namespace XivMediaPlayer
                             EnqueueFrameworkAction(() => _chat.PrintError(Loc.Chat("YouTubeBlocked")));
                             return;
                         }
+
+                        if (errorStr.Contains("HTTP Error 412", StringComparison.OrdinalIgnoreCase)
+                            && MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliUrl(url))
+                        {
+                            EnqueueFrameworkAction(() => _chat.PrintError(Loc.Chat("BilibiliBlocked")));
+                        }
                         
                         if (errorStr.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase) || errorStr.Contains("HTTP Error 403", StringComparison.OrdinalIgnoreCase))
                         {
@@ -1204,6 +1210,12 @@ namespace XivMediaPlayer
                         {
                             EnqueueFrameworkAction(() => _chat.PrintError(Loc.Chat("YouTubeBlocked")));
                             return;
+                        }
+
+                        if (errorStr.Contains("HTTP Error 412", StringComparison.OrdinalIgnoreCase)
+                            && MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliUrl(url))
+                        {
+                            EnqueueFrameworkAction(() => _chat.PrintError(Loc.Chat("BilibiliBlocked")));
                         }
                         
                         if (errorStr.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase) || errorStr.Contains("HTTP Error 403", StringComparison.OrdinalIgnoreCase))

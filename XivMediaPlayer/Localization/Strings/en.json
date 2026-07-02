@@ -21,6 +21,7 @@
   "Chat.PlayingDirectStream": "Playing direct stream!\r\nUse \"/media video\" to toggle the video feed.\r\nUse \"/media stop\" to stop.",
   "Chat.WaitingYtdlp": "Waiting for yt-dlp download/update to finish...",
   "Chat.YouTubeBlocked": "YouTube blocked the request (bot check). Please configure cookies via VRCVideoCacher or cookies.txt to play YouTube videos!",
+  "Chat.BilibiliBlocked": "Bilibili rejected the request (412). Open bilibili.com in your browser, export cookies to cookies.txt in the plugin folder, then try again.",
   "Chat.YtdlpFallbackBrowser": "yt-dlp failed. Falling back to embedded browser resolver...",
   "Chat.BrowserFoundUrl": "Embedded browser successfully found stream URL.",
   "Chat.ResolveFailedDirect": "Failed to resolve URL natively. Trying direct playback...",
