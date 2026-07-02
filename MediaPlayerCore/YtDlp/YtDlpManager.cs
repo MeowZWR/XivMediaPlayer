@@ -714,6 +714,21 @@ namespace MediaPlayerCore.YtDlp
         }
 
         /// <summary>
+        /// Detects URLs that represent live streams rather than seekable VODs.
+        /// Live streams should always resume from the live edge (timecode 0).
+        /// </summary>
+        public static bool IsLiveStreamUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            string urlWithoutQuery = url.Split('?')[0];
+            if (urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)) return true;
+            if (url.Contains("twitch.tv", StringComparison.OrdinalIgnoreCase)
+                && !url.Contains("/videos/", StringComparison.OrdinalIgnoreCase)) return true;
+            return IsBilibiliLiveUrl(url);
+        }
+
+        /// <summary>
         /// Bilibili live room URLs (e.g. live.bilibili.com/8178490).
         /// Used as a fallback when yt-dlp metadata is missing, similar to Twitch channel URLs.
         /// </summary>

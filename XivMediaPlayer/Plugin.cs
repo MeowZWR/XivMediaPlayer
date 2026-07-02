@@ -1733,7 +1733,9 @@ namespace XivMediaPlayer
                 // Never save local StreamProxy URLs they are ephemeral and won't work on next launch or for other players
                 if (fallbackPath != null && fallbackPath.Contains("127.0.0.1")) fallbackPath = "";
                 state.CurrentUrl = !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : fallbackPath;
-                state.TimecodeMs = activeStream.Time;
+                state.TimecodeMs = (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(state.CurrentUrl))
+                    ? 0
+                    : activeStream.Time;
             }
 
             state.Playlist = new System.Collections.Generic.List<string>(_mediaQueue);
@@ -1773,7 +1775,8 @@ namespace XivMediaPlayer
                 {
                     _chat.Print(Loc.Chat("ResumingPlayback"));
                     _lastStreamObject = CurrentAudioSource;
-                    PlayRouted(state.CurrentUrl, CurrentAudioSource, (int)state.TimecodeMs, isAutoSync: true);
+                    int startTimeMs = YtDlpManager.IsLiveStreamUrl(state.CurrentUrl) ? 0 : (int)state.TimecodeMs;
+                    PlayRouted(state.CurrentUrl, CurrentAudioSource, startTimeMs, isAutoSync: true);
                 }
             }
         }
@@ -1788,6 +1791,10 @@ namespace XivMediaPlayer
             // Never let local StreamProxy URLs (e.g. http://127.0.0.1:xxxxx/stream.m3u8?sid=...) leak as fallback
             if (soundPath.Contains("127.0.0.1")) soundPath = "";
             long activeTime = overrideTimeMs ?? (long)(activeStream?.Time ?? 0);
+            if (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(lastUrl))
+            {
+                activeTime = 0;
+            }
             bool isIntentionallyPaused = _isIntentionallyPaused;
             var mediaQueueArray = _mediaQueue.ToArray();
             var duration = _currentMediaDurationMs;
@@ -1950,6 +1957,11 @@ namespace XivMediaPlayer
             // Use the DataAgeMs calculated purely by the server to completely eliminate client clock drift issues!
             // We only add the age if the video is currently playing.
             var targetTimeMs = sync.IsPlaying ? sync.TimecodeMs + (long)sync.DataAgeMs : sync.TimecodeMs;
+            bool isLiveUrl = YtDlpManager.IsLiveStreamUrl(sync.CurrentUrl);
+            if (isLiveUrl)
+            {
+                targetTimeMs = 0;
+            }
 
             if (sync.DurationMs.HasValue && sync.DurationMs.Value > 0)
             {
@@ -1985,7 +1997,7 @@ namespace XivMediaPlayer
             bool isLocalEnded = activeStream != null && activeStream.VlcState == LibVLCSharp.Shared.VLCState.Ended;
             bool isDifferentUrl = activeStream == null || (!string.IsNullOrEmpty(_lastStreamURL) && _lastStreamURL != sync.CurrentUrl) || (isLocalEnded && sync.IsPlaying);
             // Only sync VODs. Live streams cannot be reliably timecode-synced.
-            bool isOutofSync = !_lastStreamIsLive && activeStream != null && Math.Abs(activeStream.Time - targetTimeMs) > 2500;
+            bool isOutofSync = !isLiveUrl && !_lastStreamIsLive && activeStream != null && Math.Abs(activeStream.Time - targetTimeMs) > 2500;
             bool localIsPlaying = activeStream != null && activeStream.PlaybackState == NAudio.Wave.PlaybackState.Playing;
 
             if (isDifferentUrl)
@@ -3508,7 +3520,9 @@ namespace XivMediaPlayer
             if (string.IsNullOrEmpty(_lastStreamURL) || _playerObject == null) return;
 
             var activeStream = _mediaManager?.ActiveStream;
-            int currentTimeMs = activeStream != null ? (int)activeStream.Time : 0;
+            int currentTimeMs = (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(_lastStreamURL))
+                ? 0
+                : (activeStream != null ? (int)activeStream.Time : 0);
 
             PrintVerbose("[Media Player] Refreshing media...");
             _mediaManager?.StopStream();
