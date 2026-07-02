@@ -225,8 +225,8 @@ namespace MediaPlayerCore.YtDlp
                 OnStatusUpdate?.Invoke(this, "Resolving stream URL...");
 
                 string formatArg = _preferredMaxHeight > 0
-                  ? $"bv[height<={_preferredMaxHeight}]+ba/b"
-                  : "bv+ba/b";
+                  ? $"bv*[height<={_preferredMaxHeight}]+ba/b[height<={_preferredMaxHeight}]/b"
+                  : "bv*+ba/b";
 
                 string result = await RunYtDlp($"--get-url -f \"{formatArg}\" \"{url}\"", url: url);
                 string[]? streamUrls = result?.Trim().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -250,7 +250,7 @@ namespace MediaPlayerCore.YtDlp
         /// Fetches metadata (title, duration, uploader, thumbnail, etc.) for a URL.
         /// Returns null if fetching fails.
         /// </summary>
-        public async Task<YtDlpMetadata?> GetMetadata(string url)
+        public async Task<YtDlpMetadata?> GetMetadata(string url, bool reportErrors = true)
         {
             if (!IsAvailable())
             {
@@ -271,7 +271,10 @@ namespace MediaPlayerCore.YtDlp
                 }
             } catch (Exception e)
             {
-                OnError?.Invoke(this, e);
+                if (reportErrors)
+                {
+                    OnError?.Invoke(this, e);
+                }
             }
             return null;
         }
@@ -515,7 +518,7 @@ namespace MediaPlayerCore.YtDlp
             return await Task.Run(() =>
             {
                 // Inject cookies if available (e.g. from VRCVideoCacher browser extension)
-                string fullArgs = (withCommonArgs ? BuildCommonArgs() + BuildSiteSpecificArgs(url) : "") + arguments;
+                string fullArgs = (withCommonArgs ? BuildCommonArgs(url) + BuildSiteSpecificArgs(url) : "") + arguments;
                 var psi = new ProcessStartInfo
                 {
                     FileName = _ytDlpPath,
@@ -659,20 +662,26 @@ namespace MediaPlayerCore.YtDlp
         /// <summary>
         /// Builds the common argument prefix (cookies, etc.) for all yt-dlp calls.
         /// </summary>
-        private string BuildCommonArgs()
+        private string BuildCommonArgs(string? url)
         {
-            string args = $"--impersonate chrome --extractor-args \"youtube:player_client=ios,tv,web\" --extractor-args \"youtubetab:skip=authcheck\" --js-runtimes \"deno:{DenoPath.Replace(".zip", ".exe")}\" --socket-timeout 30 ";
+            var args = new StringBuilder();
+            if (!IsBilibiliUrl(url))
+            {
+                args.Append($"--impersonate chrome --extractor-args \"youtube:player_client=ios,tv,web\" --extractor-args \"youtubetab:skip=authcheck\" --js-runtimes \"deno:{DenoPath.Replace(".zip", ".exe")}\" ");
+            }
+
+            args.Append("--socket-timeout 30 ");
 
             // Cookie injection
             if (!string.IsNullOrEmpty(CookieBrowser))
             {
-                args += $"--cookies-from-browser {CookieBrowser} ";
+                args.Append($"--cookies-from-browser {CookieBrowser} ");
             } else if (HasCookies)
              {
-                args += $"--cookies \"{_cookiesPath}\" ";
+                args.Append($"--cookies \"{_cookiesPath}\" ");
             }
 
-            return args;
+            return args.ToString();
         }
 
         /// <summary>

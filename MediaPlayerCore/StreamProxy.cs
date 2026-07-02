@@ -23,8 +23,8 @@ namespace MediaPlayerCore
         public class ProxySession
         {
             public string OriginalM3u8Url { get; set; }
-            public string PreFetchedM3u8Content { get; set; }
-            public Dictionary<string, string> Headers { get; set; }
+            public string? PreFetchedM3u8Content { get; set; }
+            public Dictionary<string, string>? Headers { get; set; }
             public HttpClient Client { get; set; }
         }
 
@@ -50,7 +50,7 @@ namespace MediaPlayerCore
             }
         }
 
-        public string RegisterStream(string m3u8Url, Dictionary<string, string> headers, string preFetchedM3u8Content = null)
+        public string RegisterStream(string m3u8Url, Dictionary<string, string>? headers, string? preFetchedM3u8Content = null)
         {
             Start();
             string sessionId = Guid.NewGuid().ToString("N");
@@ -100,6 +100,7 @@ namespace MediaPlayerCore
         public string RegisterDirectMediaSession(string mediaUrl, Dictionary<string, string>? headers = null)
         {
             if (string.IsNullOrEmpty(mediaUrl)) return string.Empty;
+            Start();
             string sessionId = Guid.NewGuid().ToString("N");
             
             var handler = new HttpClientHandler { UseCookies = true, AutomaticDecompression = DecompressionMethods.All };
@@ -205,7 +206,7 @@ namespace MediaPlayerCore
                     {
                         if (line.StartsWith("#"))
                         {
-                            sb.AppendLine(line);
+                            sb.AppendLine(RewriteHlsAttributeUris(line, baseUri, sid));
                         }
                         else
                         {
@@ -217,16 +218,7 @@ namespace MediaPlayerCore
                                 continue;
                             }
 
-                            if (absoluteUrl.ToString().Contains(".m3u8"))
-                            {
-                                string targetBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(absoluteUrl.ToString()));
-                                sb.AppendLine($"http://127.0.0.1:{_port}/stream.m3u8?sid={sid}&target={Uri.EscapeDataString(targetBase64)}");
-                            }
-                            else
-                            {
-                                // Let VLC fetch .ts files directly
-                                sb.AppendLine(absoluteUrl.ToString());
-                            }
+                            sb.AppendLine(BuildProxiedHlsUrl(absoluteUrl, sid));
                         }
                     }
 
@@ -328,6 +320,47 @@ namespace MediaPlayerCore
             {
                 try { context.Response.Close(); } catch { }
             }
+        }
+
+        private string RewriteHlsAttributeUris(string line, Uri baseUri, string sid)
+        {
+            const string uriPrefix = "URI=\"";
+            int searchStart = 0;
+
+            while (true)
+            {
+                int uriStart = line.IndexOf(uriPrefix, searchStart, StringComparison.OrdinalIgnoreCase);
+                if (uriStart < 0) return line;
+
+                int valueStart = uriStart + uriPrefix.Length;
+                int valueEnd = line.IndexOf('"', valueStart);
+                if (valueEnd < 0) return line;
+
+                string uriValue = line.Substring(valueStart, valueEnd - valueStart);
+                if (Uri.TryCreate(baseUri, uriValue, out var absoluteUri))
+                {
+                    string proxiedUri = BuildProxiedHlsUrl(absoluteUri, sid);
+                    line = line.Substring(0, valueStart) + proxiedUri + line.Substring(valueEnd);
+                    searchStart = valueStart + proxiedUri.Length;
+                }
+                else
+                {
+                    searchStart = valueEnd + 1;
+                }
+            }
+        }
+
+        private string BuildProxiedHlsUrl(Uri absoluteUrl, string sid)
+        {
+            string targetBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(absoluteUrl.ToString()));
+            string escapedTarget = Uri.EscapeDataString(targetBase64);
+
+            if (absoluteUrl.ToString().Contains(".m3u8", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"http://127.0.0.1:{_port}/stream.m3u8?sid={sid}&target={escapedTarget}";
+            }
+
+            return $"http://127.0.0.1:{_port}/stream.ts?sid={sid}&target={escapedTarget}";
         }
 
         public void Dispose()

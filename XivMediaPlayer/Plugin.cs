@@ -1164,7 +1164,7 @@ namespace XivMediaPlayer
                     _lastStreamURL = url; // Save the original requested URL so PushMediaToServerAsync pushes it instead of the raw .m3u8
 
                     // Try to get metadata for a nice chat message
-                    var metadataTask = _ytDlpManager.GetMetadata(url);
+                    var metadataTask = _ytDlpManager.GetMetadata(url, reportErrors: false);
                     var resolveTask = _ytDlpManager.ResolveStreamUrl(url);
 
                     if (!Uri.TryCreate(url, UriKind.Absolute, out _))
@@ -1277,7 +1277,10 @@ namespace XivMediaPlayer
                             // Proxy the stream so VLC can bypass Cloudflare using our extracted Cookies and Headers
                             try
                             {
-                                streamUrls[0] = MediaPlayerCore.StreamProxy.Instance.RegisterStream(cefResult.Url, metadata.HttpHeaders, cefResult.M3u8Content);
+                                bool isHlsPlaylist = cefResult.Url.Contains(".m3u8", StringComparison.OrdinalIgnoreCase);
+                                streamUrls[0] = isHlsPlaylist
+                                    ? MediaPlayerCore.StreamProxy.Instance.RegisterStream(cefResult.Url, metadata.HttpHeaders, cefResult.M3u8Content)
+                                    : MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(cefResult.Url, metadata.HttpHeaders);
                                 _pluginLog.Info($"[Media Player] Proxying stream URL: {streamUrls[0]}");
                             }
                             catch (Exception proxyEx)
@@ -1307,6 +1310,13 @@ namespace XivMediaPlayer
                     var resolvedStreamUrl = streamUrls[0];
                     var resolvedSlaveAudioUrl = streamUrls.Length > 1 ? streamUrls[1] : null;
                     var resolvedHeaders = metadata?.HttpHeaders;
+                    if (MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliUrl(url))
+                    {
+                        resolvedHeaders ??= new Dictionary<string, string>();
+                        if (!resolvedHeaders.ContainsKey("Origin")) resolvedHeaders["Origin"] = "https://www.bilibili.com";
+                        if (!resolvedHeaders.ContainsKey("Referer")) resolvedHeaders["Referer"] = MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliLiveUrl(url) ? "https://live.bilibili.com/" : "https://www.bilibili.com/";
+                        if (!resolvedHeaders.ContainsKey("User-Agent")) resolvedHeaders["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+                    }
                     var resolvedDurationMs = metadata?.Duration * 1000.0;
                     string statusMsg = isLive ? "LIVE" : (metadata?.Duration.HasValue == true
                       ? TimeSpan.FromSeconds(metadata.Duration.Value).ToString(@"mm\:ss") : "");
@@ -1323,7 +1333,10 @@ namespace XivMediaPlayer
                         string playUrl = resolvedStreamUrl;
                         if (playUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase) && !playUrl.Contains("127.0.0.1"))
                         {
-                            playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(resolvedStreamUrl, resolvedHeaders);
+                            bool isHlsPlaylist = playUrl.Contains(".m3u8", StringComparison.OrdinalIgnoreCase);
+                            playUrl = isHlsPlaylist
+                                ? MediaPlayerCore.StreamProxy.Instance.RegisterStream(resolvedStreamUrl, resolvedHeaders)
+                                : MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(resolvedStreamUrl, resolvedHeaders);
                         }
 
                         int finalStartTimeMs = startTimeMs;
