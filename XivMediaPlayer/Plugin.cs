@@ -961,6 +961,11 @@ namespace XivMediaPlayer
 
             url = CleanUrl(url);
 
+            string urlWithoutQuery = url.Split('?')[0];
+            _lastStreamIsLive = urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
+                || (url.Contains("twitch.tv") && !url.Contains("/videos/"))
+                || MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliLiveUrl(url);
+
             if (!isAutoSync && CurrentTvPlacement?.IsLocked == true && CurrentTvPlacement?.OwnerId != _config.OwnerId && !IsHousingMenuOpen)
             {
                 _chat.PrintError(Loc.Chat("CannotPlayStreamLocked"));
@@ -1294,10 +1299,10 @@ namespace XivMediaPlayer
                     if (string.IsNullOrWhiteSpace(title) || title == "Unknown") title = url;
                     string uploader = metadata?.Uploader ?? "";
 
-                    // Twitch streams often don't explicitly return is_live=true, but they lack a duration!
-                    // Also explicitly check if it's a twitch channel URL (not a video)
+                    // Twitch/Bilibili live streams may not return is_live=true; also check URL patterns.
                     bool isTwitchLive = url.Contains("twitch.tv") && !url.Contains("/videos/");
-                    bool isLive = (metadata?.IsLive == true) || (metadata != null && metadata.Duration == null) || isTwitchLive;
+                    bool isBilibiliLive = MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliLiveUrl(url);
+                    bool isLive = (metadata?.IsLive == true) || (metadata != null && metadata.Duration == null) || isTwitchLive || isBilibiliLive;
                     var resolvedStreamUrl = streamUrls[0];
                     var resolvedSlaveAudioUrl = streamUrls.Length > 1 ? streamUrls[1] : null;
                     var resolvedHeaders = metadata?.HttpHeaders;

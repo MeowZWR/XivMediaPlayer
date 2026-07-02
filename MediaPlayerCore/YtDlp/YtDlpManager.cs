@@ -704,6 +704,24 @@ namespace MediaPlayerCore.YtDlp
             }
         }
 
+        /// <summary>
+        /// Bilibili live room URLs (e.g. live.bilibili.com/8178490).
+        /// Used as a fallback when yt-dlp metadata is missing, similar to Twitch channel URLs.
+        /// </summary>
+        public static bool IsBilibiliLiveUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            try
+            {
+                return new Uri(url).Host.Equals("live.bilibili.com", StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
+                return url.Contains("live.bilibili.com", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
 
 
         #endregion
