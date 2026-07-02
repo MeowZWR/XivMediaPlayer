@@ -83,7 +83,7 @@ jobs:
           $tag = '${{ github.ref_name }}'
           $ver = $tag -replace '-cn$',''
           $repo = '${{ github.repository }}'
-          $downloadUrl = "https://github.com/$repo/releases/download/$tag/XivMediaPlayer.zip"
+          $downloadUrl = "https://meowrs.com/https://github.com/$repo/releases/download/$tag/XivMediaPlayer.zip"
           $path = './repo.json'
           $json = Get-Content -Raw $path | ConvertFrom-Json
           $json[0].AssemblyVersion = $ver

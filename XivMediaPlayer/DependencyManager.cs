@@ -80,12 +80,24 @@ namespace XivMediaPlayer
                 Directory.CreateDirectory(DependenciesDir);
                 string zipPath = Path.Combine(DependenciesDir, "Dependencies.zip");
 
-                // Download URL for the dependencies zip from the GitHub release
-                string url = $"https://github.com/Sebane1/XivMediaPlayer/releases/download/{_version}/XivMediaPlayer-Dependencies.zip";
-                
-                _pluginLog.Information($"Downloading dependencies from: {url}");
+                string cnUrl = $"https://github.com/MeowZWR/XivMediaPlayer/releases/download/{_version}-cn/XivMediaPlayer-Dependencies.zip";
+                _pluginLog.Information($"Downloading dependencies from: https://meowrs.com/{cnUrl}");
+                bool success = await TryDownloadDependencies($"https://meowrs.com/{cnUrl}", zipPath);
+                if (!success)
+                {
+                    _pluginLog.Information($"Downloading dependencies from: {cnUrl}");
+                    success = await TryDownloadDependencies(cnUrl, zipPath);
+                }
 
-                bool success = await TryDownloadDependencies(url, zipPath);
+                // Download URL for the dependencies zip from the GitHub release
+                if (!success)
+                {
+                    string url = $"https://github.com/Sebane1/XivMediaPlayer/releases/download/{_version}/XivMediaPlayer-Dependencies.zip";
+                    
+                    _pluginLog.Information($"Downloading dependencies from: {url}");
+
+                    success = await TryDownloadDependencies(url, zipPath);
+                }
                 
                 if (!success) {
                     string fallbackUrl = "https://github.com/Sebane1/XivMediaPlayer/releases/latest/download/XivMediaPlayer-Dependencies.zip";
