@@ -14,10 +14,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.RELEASE }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v1
@@ -78,7 +77,6 @@ jobs:
           omitBodyDuringUpdate: true
           allowUpdates: true
           replacesArtifacts: true
-          token: ${{ secrets.RELEASE }}
 
       - name: Write out repo.json
         run: |
@@ -98,7 +96,10 @@ jobs:
           set-content -Path $path -Value $content
 
       - name: Commit repo.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
           git config --global user.name "Actions User"
           git config --global user.email "actions@github.com"
           git fetch origin cn
