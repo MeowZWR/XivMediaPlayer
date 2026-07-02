@@ -130,7 +130,7 @@ namespace XivMediaPlayer.Compositing {
         RenderWithOcclusion(textureSrv, depthCapture, cameraPos.Value,
           cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize, uiBlendThreshold, uvBottom, uvRight);
       } else {
-        RenderScreenSpace(textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize, uvBottom);
+        RenderScreenSpace(textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
       }
       
       PushCommandsToFront(drawList, initialCmdSize);
@@ -496,7 +496,7 @@ namespace XivMediaPlayer.Compositing {
     /// <summary>
     /// Renders using ImGui screen-space projection (no occlusion).
     /// </summary>
-    private void RenderScreenSpace(IntPtr textureSrv, float videoAspect, Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize, float uvBottom = 1.0f) {
+    private void RenderScreenSpace(IntPtr textureSrv, float videoAspect, Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize, float uvBottom = 1.0f, float uvRight = 1.0f) {
       var (tl, tr, br, bl) = _transform.Corners;
 
       WorldToScreenClamped(tl, out var sTL, out _, viewProjMatrix, viewportPos, viewportSize);
@@ -516,8 +516,8 @@ namespace XivMediaPlayer.Compositing {
       // Build the TV texture coordinates based on aspect ratio
       var texId = textureSrv;
       var uvTL = new Vector2(0, 0);
-        var uvTR = new Vector2(1, 0);
-        var uvBR = new Vector2(1, uvBottom);
+        var uvTR = new Vector2(uvRight, 0);
+        var uvBR = new Vector2(uvRight, uvBottom);
         var uvBL = new Vector2(0, uvBottom);
 
       if (videoAspect > 0) {

@@ -281,21 +281,6 @@ namespace MediaPlayerCore {
               await media.Parse(mediaPath.StartsWith("http") || mediaPath.StartsWith("rtmp") || mediaPath.StartsWith("rtsp")
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
               Debug.WriteLine($"[MediaObject] Media parsed. Duration: {media.Duration}ms");
-              
-              if (media.Tracks != null) {
-                  foreach (var track in media.Tracks) {
-                      if (track.TrackType == TrackType.Video) {
-                          int trueWidth = (int)track.Data.Video.Width;
-                          int trueHeight = (int)track.Data.Video.Height;
-                          if (trueWidth > 0 && trueHeight > 0 && _parent != null) {
-                              _parent.LastFrameTrueWidth = trueWidth;
-                              _parent.LastFrameTrueHeight = trueHeight;
-                              Debug.WriteLine($"[MediaObject] Extracted true video dimensions from track: {trueWidth}x{trueHeight}");
-                          }
-                          break;
-                      }
-                  }
-              }
 
               lock (_disposeLock) {
                 if (_disposed) {
@@ -558,10 +543,11 @@ namespace MediaPlayerCore {
                 
                 _parent.LastFrameWidth = (int)(_pitch / _bytePerPixel);
                 _parent.LastFrameHeight = (int)_lines;
-                if (_parent.LastFrameTrueWidth == 0 || _parent.LastFrameTrueHeight == 0) {
-              _parent.LastFrameTrueWidth = (int)_width;
-              _parent.LastFrameTrueHeight = (int)_height;
-          }
+                // Use VLC output format dimensions (not native track size) so UV/aspect
+                // match the scaled frame buffer — track metadata can be smaller (e.g. 480p
+                // coded size in a 720p output buffer) and would clip subtitles at the bottom.
+                _parent.LastFrameTrueWidth = (int)_width;
+                _parent.LastFrameTrueHeight = (int)_height;
                 _parent.LastFrameCount++;
               }
             } catch (Exception ex) {
@@ -606,24 +592,6 @@ namespace MediaPlayerCore {
                             _parent.LastFrameTrueHeight = (int)py;
                             _trueDimensionsExtracted = true;
                             System.Diagnostics.Debug.WriteLine($"[MediaObject] MediaPlayer.Size polled true dimensions: {px}x{py}");
-                        }
-                    }
-                    if (!_trueDimensionsExtracted && _vlcPlayer.Media != null) {
-                        var tracks = _vlcPlayer.Media.Tracks;
-                        if (tracks != null) {
-                            foreach (var track in tracks) {
-                                if (track.TrackType == LibVLCSharp.Shared.TrackType.Video) {
-                                    int trueWidth = (int)track.Data.Video.Width;
-                                    int trueHeight = (int)track.Data.Video.Height;
-                                    if (trueWidth > 0 && trueHeight > 0) {
-                                        _parent.LastFrameTrueWidth = trueWidth;
-                                        _parent.LastFrameTrueHeight = trueHeight;
-                                        _trueDimensionsExtracted = true;
-                                        System.Diagnostics.Debug.WriteLine($"[MediaObject] Task extracted true dimensions: {trueWidth}x{trueHeight}");
-                                    }
-                                    break;
-                                }
-                            }
                         }
                     }
                     if (_trueDimensionsExtracted) break;
