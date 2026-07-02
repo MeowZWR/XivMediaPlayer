@@ -1396,6 +1396,23 @@ namespace XivMediaPlayer
         {
             PrintVerbose("[Media Player] Playback finished.");
 
+            if (_config.LoopEnabled && e != "Emulation" && !_lastStreamIsLive && !string.IsNullOrEmpty(_lastStreamURL))
+            {
+                string urlToLoop = _lastStreamURL;
+                var audioSource = _lastStreamObject;
+
+                EnqueueFrameworkAction(() =>
+                {
+                    if (_disposed || string.IsNullOrEmpty(urlToLoop)) return;
+
+                    PrintVerbose("[Media Player] Loop enabled — restarting playback.");
+                    _mediaManager?.StopStream();
+                    PlayRouted(urlToLoop, audioSource ?? CurrentAudioSource, 0);
+                    try { MuteBgm(); } catch (Exception ex) { _pluginLog.Warning(ex, ex.Message); }
+                });
+                return;
+            }
+
             if (!string.IsNullOrEmpty(_lastStreamURL))
             {
                 _config.WatchHistory.Remove(_lastStreamURL);
