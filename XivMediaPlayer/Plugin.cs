@@ -1099,9 +1099,11 @@ namespace XivMediaPlayer
         private bool _isIntentionallyPaused = false;
         private DateTime _lastUrlLoadTime = DateTime.MinValue;
 
-        // Frame stall watchdog (P0)
+        // Playback stall watchdog (P0)
         private ulong _stallWatchLastFrameCount = 0;
         private DateTime _stallWatchLastUpdate = DateTime.MinValue;
+        private long _stallWatchLastTimeMs = -1;
+        private DateTime _stallWatchLastTimeUpdate = DateTime.MinValue;
         private int _stallRecoveryCount = 0;
         private DateTime _lastStallRecoveryTime = DateTime.MinValue;
         private const int StallThresholdMs = 4000;
@@ -1755,12 +1757,19 @@ namespace XivMediaPlayer
 
         private void ResetStallWatchdog()
         {
-            _stallWatchLastFrameCount = 0;
-            _stallWatchLastUpdate = DateTime.MinValue;
+            ResetStallWatchTimers();
             _stallRecoveryCount = 0;
             _lastStallRecoveryTime = DateTime.MinValue;
             _savedPlaybackTimeMs = -1;
             _mediaRecoveryGraceUntil = DateTime.MinValue;
+        }
+
+        private void ResetStallWatchTimers()
+        {
+            _stallWatchLastFrameCount = 0;
+            _stallWatchLastUpdate = DateTime.MinValue;
+            _stallWatchLastTimeMs = -1;
+            _stallWatchLastTimeUpdate = DateTime.MinValue;
         }
 
         private void CheckFrameStall()
@@ -1769,12 +1778,26 @@ namespace XivMediaPlayer
             if (_isIntentionallyPaused || _refreshQueued || _killRestartQueued || _isResolvingMedia) return;
 
             var activeStream = _mediaManager.ActiveStream;
-            if (activeStream == null || activeStream.PlaybackState != NAudio.Wave.PlaybackState.Playing)
+            if (activeStream == null)
             {
-                _stallWatchLastFrameCount = 0;
-                _stallWatchLastUpdate = DateTime.MinValue;
+                ResetStallWatchTimers();
                 return;
             }
+
+            var vlcState = activeStream.VlcState;
+            bool isActivelyStreaming = vlcState == LibVLCSharp.Shared.VLCState.Playing
+                || vlcState == LibVLCSharp.Shared.VLCState.Buffering
+                || vlcState == LibVLCSharp.Shared.VLCState.Opening;
+
+            if (!isActivelyStreaming || DateTime.UtcNow < _mediaRecoveryGraceUntil)
+            {
+                ResetStallWatchTimers();
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            bool frameStalled = false;
+            bool timeStalled = false;
 
             ulong currentCount;
             lock (_mediaManager.FrameLock)
@@ -1785,25 +1808,57 @@ namespace XivMediaPlayer
             if (currentCount != _stallWatchLastFrameCount)
             {
                 _stallWatchLastFrameCount = currentCount;
-                _stallWatchLastUpdate = DateTime.UtcNow;
-                return;
+                _stallWatchLastUpdate = now;
             }
-
-            if (_stallWatchLastUpdate == DateTime.MinValue)
+            else
             {
-                _stallWatchLastUpdate = DateTime.UtcNow;
-                return;
+                if (_stallWatchLastUpdate == DateTime.MinValue)
+                    _stallWatchLastUpdate = now;
+                else if ((now - _stallWatchLastUpdate).TotalMilliseconds >= StallThresholdMs)
+                    frameStalled = true;
             }
 
-            if ((DateTime.UtcNow - _stallWatchLastUpdate).TotalMilliseconds < StallThresholdMs) return;
-            if ((DateTime.UtcNow - _lastStallRecoveryTime).TotalMilliseconds < StallRecoveryCooldownMs) return;
+            if (!_lastStreamIsLive && !YtDlpManager.IsLiveStreamUrl(_lastStreamURL))
+            {
+                long length = activeStream.Length;
+                long currentTime = activeStream.Time;
+
+                if (length > 0 && currentTime >= length - 2000)
+                {
+                    _stallWatchLastTimeMs = currentTime;
+                    _stallWatchLastTimeUpdate = now;
+                }
+                else if (_stallWatchLastTimeMs < 0 || currentTime != _stallWatchLastTimeMs)
+                {
+                    _stallWatchLastTimeMs = currentTime;
+                    _stallWatchLastTimeUpdate = now;
+                }
+                else
+                {
+                    if (_stallWatchLastTimeUpdate == DateTime.MinValue)
+                        _stallWatchLastTimeUpdate = now;
+                    else if ((now - _stallWatchLastTimeUpdate).TotalMilliseconds >= StallThresholdMs)
+                        timeStalled = true;
+                }
+            }
+
+            if (!frameStalled && !timeStalled) return;
+            if ((now - _lastStallRecoveryTime).TotalMilliseconds < StallRecoveryCooldownMs) return;
 
             _stallRecoveryCount++;
-            _lastStallRecoveryTime = DateTime.UtcNow;
-            _stallWatchLastUpdate = DateTime.UtcNow;
+            _lastStallRecoveryTime = now;
+            _stallWatchLastUpdate = now;
+            _stallWatchLastTimeUpdate = now;
 
-            _pluginLog.Warning($"[Media Player] Frame stall detected ({StallThresholdMs}ms). Recovery attempt {_stallRecoveryCount}.");
+            _pluginLog.Warning(
+                $"[Media Player] Playback stall detected (frame={frameStalled}, time={timeStalled}, vlc={vlcState}, timeMs={activeStream.Time}). Recovery attempt {_stallRecoveryCount}.");
 
+            TriggerStallRecovery();
+        }
+
+        private void TriggerStallRecovery()
+        {
+            CapturePlaybackPositionForRefresh();
             if (_stallRecoveryCount >= MaxStallRecoveries)
             {
                 _stallRecoveryCount = 0;
@@ -1859,8 +1914,11 @@ namespace XivMediaPlayer
         {
             if (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(_lastStreamURL)) return;
             var activeStream = _mediaManager?.ActiveStream;
-            if (activeStream != null && activeStream.Time > 1000)
-                _savedPlaybackTimeMs = (int)activeStream.Time;
+            long timeMs = activeStream?.Time ?? 0;
+            if (timeMs <= 1000 && _stallWatchLastTimeMs > 1000)
+                timeMs = _stallWatchLastTimeMs;
+            if (timeMs > 1000)
+                _savedPlaybackTimeMs = (int)timeMs;
         }
 
         private void BeginMediaRecoveryGracePeriod()
