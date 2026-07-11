@@ -1108,6 +1108,11 @@ namespace XivMediaPlayer
         private const int StallRecoveryCooldownMs = 10000;
         private const int MaxStallRecoveries = 3;
 
+        // Media error recovery grace period — ignore VLC teardown noise after refresh/kill
+        private DateTime _mediaRecoveryGraceUntil = DateTime.MinValue;
+        private int _savedPlaybackTimeMs = -1;
+        private const int MediaRecoveryGraceSeconds = 20;
+
         private bool IsUrlSafeForPublic(string url)
         {
             if (string.IsNullOrEmpty(url)) return false;
@@ -1754,6 +1759,8 @@ namespace XivMediaPlayer
             _stallWatchLastUpdate = DateTime.MinValue;
             _stallRecoveryCount = 0;
             _lastStallRecoveryTime = DateTime.MinValue;
+            _savedPlaybackTimeMs = -1;
+            _mediaRecoveryGraceUntil = DateTime.MinValue;
         }
 
         private void CheckFrameStall()
@@ -1816,18 +1823,49 @@ namespace XivMediaPlayer
         {
             if (string.IsNullOrEmpty(errorMsg)) return false;
 
-            string[] patterns = {
-                "demux", "http", "connection", "timeout", "timed out",
-                "403", "404", "segment", "discontinuity", "end of file",
-                "eof", "access denied", "failed to connect", "network"
+            // Errors emitted while stopping/restarting streams — never auto-recover
+            string[] ignorePatterns = {
+                "cancellation", "(0x8)", "interrupted function call",
+                "seek failed for slave", "local stream"
             };
+            foreach (var pattern in ignorePatterns)
+            {
+                if (errorMsg.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    return false;
+            }
 
-            foreach (var pattern in patterns)
+            if (errorMsg.Contains("demux", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Specific upstream/network failures only — not bare "http" or "connection"
+            string[] recoverPatterns = {
+                "peer stream", "internal error (0x2)",
+                "connection refused", "connection timed out",
+                "403", "404",
+                "segment", "discontinuity",
+                "end of file",
+                "access denied",
+                "failed to connect",
+            };
+            foreach (var pattern in recoverPatterns)
             {
                 if (errorMsg.Contains(pattern, StringComparison.OrdinalIgnoreCase))
                     return true;
             }
             return false;
+        }
+
+        private void CapturePlaybackPositionForRefresh()
+        {
+            if (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(_lastStreamURL)) return;
+            var activeStream = _mediaManager?.ActiveStream;
+            if (activeStream != null && activeStream.Time > 1000)
+                _savedPlaybackTimeMs = (int)activeStream.Time;
+        }
+
+        private void BeginMediaRecoveryGracePeriod()
+        {
+            _mediaRecoveryGraceUntil = DateTime.UtcNow.AddSeconds(MediaRecoveryGraceSeconds);
         }
 
         private async Task FetchServerDataForCurrentLocationAsync()
@@ -2493,6 +2531,9 @@ namespace XivMediaPlayer
 
         private void OnMediaError(object? sender, MediaError e)
         {
+            if (DateTime.UtcNow < _mediaRecoveryGraceUntil) return;
+            if (_refreshQueued || _killRestartQueued || _isResolvingMedia) return;
+
             string errorMsg = e.Exception?.Message ?? string.Empty;
             if (!IsRecoverableMediaError(errorMsg))
             {
@@ -3831,6 +3872,8 @@ namespace XivMediaPlayer
         public void RequestRefreshCurrentMedia()
         {
             if (_refreshQueued) return;
+            CapturePlaybackPositionForRefresh();
+            BeginMediaRecoveryGracePeriod();
             _refreshQueued = true;
             EnqueueFrameworkAction(() =>
             {
@@ -3846,7 +3889,10 @@ namespace XivMediaPlayer
             var activeStream = _mediaManager?.ActiveStream;
             int currentTimeMs = (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(_lastStreamURL))
                 ? 0
-                : (activeStream != null ? (int)activeStream.Time : 0);
+                : (_savedPlaybackTimeMs >= 0
+                    ? _savedPlaybackTimeMs
+                    : (activeStream != null ? (int)activeStream.Time : 0));
+            _savedPlaybackTimeMs = -1;
 
             PrintVerbose("[Media Player] Refreshing media...");
             _mediaManager?.StopStream();
@@ -3873,6 +3919,8 @@ namespace XivMediaPlayer
         public void RequestKillAndRestart()
         {
             UpdateWatchHistory();
+            CapturePlaybackPositionForRefresh();
+            BeginMediaRecoveryGracePeriod();
             _killRestartQueued = true;
             EnqueueFrameworkAction(() =>
             {
@@ -3887,8 +3935,11 @@ namespace XivMediaPlayer
 
             // Save what we were playing
             string savedUrl = _lastStreamURL;
-            var activeStream = _mediaManager?.ActiveStream;
-            int savedTimeMs = activeStream != null ? (int)activeStream.Time : 0;
+            bool isLive = _lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(savedUrl);
+            int savedTimeMs = isLive ? 0 : (_savedPlaybackTimeMs >= 0
+                ? _savedPlaybackTimeMs
+                : (_mediaManager?.ActiveStream != null ? (int)_mediaManager.ActiveStream.Time : 0));
+            _savedPlaybackTimeMs = -1;
 
             // Tear down
             _mediaManager?.Dispose();
