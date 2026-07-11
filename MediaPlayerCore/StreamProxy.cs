@@ -24,9 +24,13 @@ namespace MediaPlayerCore
         {
             public string OriginalM3u8Url { get; set; }
             public string? PreFetchedM3u8Content { get; set; }
+            public bool IsLive { get; set; }
             public Dictionary<string, string>? Headers { get; set; }
             public HttpClient Client { get; set; }
         }
+
+        private const int FetchMaxAttempts = 3;
+        private static readonly TimeSpan FetchTimeout = TimeSpan.FromSeconds(15);
 
         private StreamProxy()
         {
@@ -50,7 +54,7 @@ namespace MediaPlayerCore
             }
         }
 
-        public string RegisterStream(string m3u8Url, Dictionary<string, string>? headers, string? preFetchedM3u8Content = null)
+        public string RegisterStream(string m3u8Url, Dictionary<string, string>? headers = null, string? preFetchedM3u8Content = null, bool isLive = false)
         {
             Start();
             string sessionId = Guid.NewGuid().ToString("N");
@@ -90,7 +94,8 @@ namespace MediaPlayerCore
             _sessions[sessionId] = new ProxySession
             {
                 OriginalM3u8Url = m3u8Url,
-                PreFetchedM3u8Content = preFetchedM3u8Content,
+                PreFetchedM3u8Content = isLive ? null : preFetchedM3u8Content,
+                IsLive = isLive,
                 Headers = headers,
                 Client = client
             };
@@ -177,21 +182,16 @@ namespace MediaPlayerCore
                         : session.OriginalM3u8Url;
 
                     string text = "";
-                    if (req.QueryString["target"] == null && !string.IsNullOrEmpty(session.PreFetchedM3u8Content))
+                    if (req.QueryString["target"] == null && !session.IsLive && !string.IsNullOrEmpty(session.PreFetchedM3u8Content))
                     {
                         text = session.PreFetchedM3u8Content;
                     }
                     else
                     {
-                        try 
+                        text = await TryFetchM3u8TextAsync(session.Client, m3u8Url);
+                        if (text == null)
                         {
-                            var response = await session.Client.GetAsync(m3u8Url);
-                            response.EnsureSuccessStatusCode();
-                            text = await response.Content.ReadAsStringAsync();
-                        } 
-                        catch (Exception netEx)
-                        {
-                            res.StatusCode = 502; // Bad Gateway
+                            res.StatusCode = 502;
                             res.Close();
                             return;
                         }
@@ -230,12 +230,11 @@ namespace MediaPlayerCore
                 else if (path == "/stream.ts")
                 {
                     string targetUrl = Encoding.UTF8.GetString(Convert.FromBase64String(req.QueryString["target"]));
-                    using var response = await session.Client.GetAsync(targetUrl, HttpCompletionOption.ResponseHeadersRead);
-                    res.ContentType = response.Content.Headers.ContentType?.ToString() ?? "video/MP2T";
-                    if (response.Content.Headers.ContentLength.HasValue)
-                        res.ContentLength64 = response.Content.Headers.ContentLength.Value;
-
-                    await response.Content.CopyToAsync(res.OutputStream);
+                    if (!await TryFetchToStreamAsync(session.Client, targetUrl, res, "video/MP2T"))
+                    {
+                        if (res.OutputStream.CanWrite && !res.SendChunked && res.ContentLength64 == 0)
+                            res.StatusCode = 502;
+                    }
                 }
                 else if (path == "/proxy_media")
                 {
@@ -348,6 +347,89 @@ namespace MediaPlayerCore
                     searchStart = valueEnd + 1;
                 }
             }
+        }
+
+        private static async Task<string?> TryFetchM3u8TextAsync(HttpClient client, string url)
+        {
+            for (int attempt = 0; attempt < FetchMaxAttempts; attempt++)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(FetchTimeout);
+                    using var response = await client.GetAsync(url, cts.Token);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        int code = (int)response.StatusCode;
+                        if (code < 500 && response.StatusCode != HttpStatusCode.RequestTimeout)
+                            return null;
+
+                        if (attempt < FetchMaxAttempts - 1)
+                        {
+                            await Task.Delay(500 * (attempt + 1));
+                            continue;
+                        }
+                        return null;
+                    }
+
+                    return await response.Content.ReadAsStringAsync();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[StreamProxy] m3u8 fetch attempt {attempt + 1} failed: {ex.Message}");
+                    if (attempt < FetchMaxAttempts - 1)
+                    {
+                        await Task.Delay(500 * (attempt + 1));
+                        continue;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private static async Task<bool> TryFetchToStreamAsync(HttpClient client, string url, HttpListenerResponse res, string contentTypeFallback)
+        {
+            for (int attempt = 0; attempt < FetchMaxAttempts; attempt++)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(FetchTimeout);
+                    using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        int code = (int)response.StatusCode;
+                        if (code < 500 && response.StatusCode != HttpStatusCode.RequestTimeout)
+                        {
+                            res.StatusCode = (int)response.StatusCode;
+                            return false;
+                        }
+
+                        if (attempt < FetchMaxAttempts - 1)
+                        {
+                            await Task.Delay(500 * (attempt + 1));
+                            continue;
+                        }
+                        return false;
+                    }
+
+                    res.StatusCode = (int)response.StatusCode;
+                    res.ContentType = response.Content.Headers.ContentType?.ToString() ?? contentTypeFallback;
+                    if (response.Content.Headers.ContentLength.HasValue)
+                        res.ContentLength64 = response.Content.Headers.ContentLength.Value;
+
+                    await response.Content.CopyToAsync(res.OutputStream);
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[StreamProxy] segment fetch attempt {attempt + 1} failed: {ex.Message}");
+                    if (attempt < FetchMaxAttempts - 1)
+                    {
+                        await Task.Delay(500 * (attempt + 1));
+                        continue;
+                    }
+                }
+            }
+            return false;
         }
 
         private string BuildProxiedHlsUrl(Uri absoluteUrl, string sid)

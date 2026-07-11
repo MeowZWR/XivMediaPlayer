@@ -1050,6 +1050,7 @@ namespace XivMediaPlayer
             _lastStreamIsLive = urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
                 || (url.Contains("twitch.tv") && !url.Contains("/videos/"))
                 || MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliLiveUrl(url);
+            ResetStallWatchdog();
 
             if (!isAutoSync && CurrentTvPlacement?.IsLocked == true && CurrentTvPlacement?.OwnerId != _config.OwnerId && !IsHousingMenuOpen)
             {
@@ -1097,6 +1098,15 @@ namespace XivMediaPlayer
         private bool _lastStreamIsLive = false;
         private bool _isIntentionallyPaused = false;
         private DateTime _lastUrlLoadTime = DateTime.MinValue;
+
+        // Frame stall watchdog (P0)
+        private ulong _stallWatchLastFrameCount = 0;
+        private DateTime _stallWatchLastUpdate = DateTime.MinValue;
+        private int _stallRecoveryCount = 0;
+        private DateTime _lastStallRecoveryTime = DateTime.MinValue;
+        private const int StallThresholdMs = 4000;
+        private const int StallRecoveryCooldownMs = 10000;
+        private const int MaxStallRecoveries = 3;
 
         private bool IsUrlSafeForPublic(string url)
         {
@@ -1216,7 +1226,7 @@ namespace XivMediaPlayer
                 {
                     if (urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase))
                     {
-                        playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterStream(url, null);
+                        playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterStream(url, null, isLive: _lastStreamIsLive);
                     }
                     else
                     {
@@ -1369,8 +1379,13 @@ namespace XivMediaPlayer
                             try
                             {
                                 bool isHlsPlaylist = cefResult.Url.Contains(".m3u8", StringComparison.OrdinalIgnoreCase);
+                                bool isLiveForProxy = DetectIsLiveStream(url, metadata);
                                 streamUrls[0] = isHlsPlaylist
-                                    ? MediaPlayerCore.StreamProxy.Instance.RegisterStream(cefResult.Url, metadata.HttpHeaders, cefResult.M3u8Content)
+                                    ? MediaPlayerCore.StreamProxy.Instance.RegisterStream(
+                                        cefResult.Url,
+                                        metadata.HttpHeaders,
+                                        isLiveForProxy ? null : cefResult.M3u8Content,
+                                        isLive: isLiveForProxy)
                                     : MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(cefResult.Url, metadata.HttpHeaders);
                                 _pluginLog.Info($"[Media Player] Proxying stream URL: {streamUrls[0]}");
                             }
@@ -1395,9 +1410,7 @@ namespace XivMediaPlayer
                     string uploader = metadata?.Uploader ?? "";
 
                     // Twitch/Bilibili live streams may not return is_live=true; also check URL patterns.
-                    bool isTwitchLive = url.Contains("twitch.tv") && !url.Contains("/videos/");
-                    bool isBilibiliLive = MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliLiveUrl(url);
-                    bool isLive = (metadata?.IsLive == true) || (metadata != null && metadata.Duration == null) || isTwitchLive || isBilibiliLive;
+                    bool isLive = DetectIsLiveStream(url, metadata);
                     var resolvedStreamUrl = streamUrls[0];
                     var resolvedSlaveAudioUrl = streamUrls.Length > 1 ? streamUrls[1] : null;
                     var resolvedHeaders = metadata?.HttpHeaders;
@@ -1426,7 +1439,7 @@ namespace XivMediaPlayer
                         {
                             bool isHlsPlaylist = playUrl.Contains(".m3u8", StringComparison.OrdinalIgnoreCase);
                             playUrl = isHlsPlaylist
-                                ? MediaPlayerCore.StreamProxy.Instance.RegisterStream(resolvedStreamUrl, resolvedHeaders)
+                                ? MediaPlayerCore.StreamProxy.Instance.RegisterStream(resolvedStreamUrl, resolvedHeaders, isLive: isLive)
                                 : MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(resolvedStreamUrl, resolvedHeaders);
                         }
 
@@ -1724,6 +1737,97 @@ namespace XivMediaPlayer
             _lastStreamObject = null;
             _streamWasPlaying = false;
             _lastStreamIsLive = false;
+            ResetStallWatchdog();
+        }
+
+        private static bool DetectIsLiveStream(string pageUrl, MediaPlayerCore.YtDlp.YtDlpMetadata? metadata)
+        {
+            if (MediaPlayerCore.YtDlp.YtDlpManager.IsLiveStreamUrl(pageUrl)) return true;
+            bool isTwitchLive = pageUrl.Contains("twitch.tv") && !pageUrl.Contains("/videos/");
+            bool isBilibiliLive = MediaPlayerCore.YtDlp.YtDlpManager.IsBilibiliLiveUrl(pageUrl);
+            return (metadata?.IsLive == true) || (metadata != null && metadata.Duration == null) || isTwitchLive || isBilibiliLive;
+        }
+
+        private void ResetStallWatchdog()
+        {
+            _stallWatchLastFrameCount = 0;
+            _stallWatchLastUpdate = DateTime.MinValue;
+            _stallRecoveryCount = 0;
+            _lastStallRecoveryTime = DateTime.MinValue;
+        }
+
+        private void CheckFrameStall()
+        {
+            if (_mediaManager == null || string.IsNullOrEmpty(_lastStreamURL)) return;
+            if (_isIntentionallyPaused || _refreshQueued || _killRestartQueued || _isResolvingMedia) return;
+
+            var activeStream = _mediaManager.ActiveStream;
+            if (activeStream == null || activeStream.PlaybackState != NAudio.Wave.PlaybackState.Playing)
+            {
+                _stallWatchLastFrameCount = 0;
+                _stallWatchLastUpdate = DateTime.MinValue;
+                return;
+            }
+
+            ulong currentCount;
+            lock (_mediaManager.FrameLock)
+            {
+                currentCount = _mediaManager.LastFrameCount;
+            }
+
+            if (currentCount != _stallWatchLastFrameCount)
+            {
+                _stallWatchLastFrameCount = currentCount;
+                _stallWatchLastUpdate = DateTime.UtcNow;
+                return;
+            }
+
+            if (_stallWatchLastUpdate == DateTime.MinValue)
+            {
+                _stallWatchLastUpdate = DateTime.UtcNow;
+                return;
+            }
+
+            if ((DateTime.UtcNow - _stallWatchLastUpdate).TotalMilliseconds < StallThresholdMs) return;
+            if ((DateTime.UtcNow - _lastStallRecoveryTime).TotalMilliseconds < StallRecoveryCooldownMs) return;
+
+            _stallRecoveryCount++;
+            _lastStallRecoveryTime = DateTime.UtcNow;
+            _stallWatchLastUpdate = DateTime.UtcNow;
+
+            _pluginLog.Warning($"[Media Player] Frame stall detected ({StallThresholdMs}ms). Recovery attempt {_stallRecoveryCount}.");
+
+            if (_stallRecoveryCount >= MaxStallRecoveries)
+            {
+                _stallRecoveryCount = 0;
+                RequestKillAndRestart();
+            }
+            else if (_lastStreamIsLive || YtDlpManager.IsLiveStreamUrl(_lastStreamURL))
+            {
+                RequestKillAndRestart();
+            }
+            else
+            {
+                RequestRefreshCurrentMedia();
+            }
+        }
+
+        private static bool IsRecoverableMediaError(string errorMsg)
+        {
+            if (string.IsNullOrEmpty(errorMsg)) return false;
+
+            string[] patterns = {
+                "demux", "http", "connection", "timeout", "timed out",
+                "403", "404", "segment", "discontinuity", "end of file",
+                "eof", "access denied", "failed to connect", "network"
+            };
+
+            foreach (var pattern in patterns)
+            {
+                if (errorMsg.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
 
         private async Task FetchServerDataForCurrentLocationAsync()
@@ -2390,7 +2494,7 @@ namespace XivMediaPlayer
         private void OnMediaError(object? sender, MediaError e)
         {
             string errorMsg = e.Exception?.Message ?? string.Empty;
-            if (!errorMsg.Contains("demux", StringComparison.OrdinalIgnoreCase))
+            if (!IsRecoverableMediaError(errorMsg))
             {
                 return;
             }
@@ -2589,6 +2693,7 @@ namespace XivMediaPlayer
             // Decode frames every tick, even if the video window is closed,
             // so the world-space renderer always has fresh textures.
             _videoWindow.UpdateFrame();
+            CheckFrameStall();
 
             _windowSystem.Draw();
 
