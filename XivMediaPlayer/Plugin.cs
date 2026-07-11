@@ -25,6 +25,8 @@ using System.Threading.Tasks;
 using System.Linq;
 using System.Collections.Concurrent;
 using XivMediaPlayer.Localization;
+using XivMediaPlayer.NativeUI;
+using KamiToolKit;
 
 namespace XivMediaPlayer
 {
@@ -56,6 +58,7 @@ namespace XivMediaPlayer
         private readonly SettingsWindow _settingsWindow;
         private readonly ScreenSettingsWindow _screenSettingsWindow;
         internal ScreenSettingsWindow ScreenSettingsWindow => _screenSettingsWindow;
+        private HousingScreenPlacementButton? _housingScreenPlacementButton;
         private WorldVideoRenderer _worldRenderer;
         internal WorldVideoRenderer WorldRenderer => _worldRenderer;
         internal string CurrentStreamer => _currentStreamer;
@@ -120,6 +123,7 @@ namespace XivMediaPlayer
         public YtDlpManager YtDlpManager => _ytDlpManager;
         public bool IsHousingMenuOpen => _wasHousingMenuOpen;
         public Dalamud.Plugin.Services.IObjectTable ObjectTable => _objectTable;
+        public Dalamud.Plugin.Services.IGameGui GameGui => _gameGui;
         public Dalamud.Plugin.Services.IPluginLog PluginLog => _pluginLog;
         public Dalamud.Plugin.Services.IChatGui Chat => _chat;
         public string LastStreamURL => _lastStreamURL;
@@ -205,6 +209,8 @@ namespace XivMediaPlayer
 
             Loc.Initialize(_pluginInterface);
             Loc.OnLanguageChanged += UpdateCommandHelp;
+
+            KamiToolKitLibrary.Initialize(_pluginInterface, "XivMediaPlayer");
 
             // Initialize dependency manager to download large binaries (libvlc, cef)
             string configDir = _pluginInterface.ConfigDirectory.FullName;
@@ -292,6 +298,9 @@ namespace XivMediaPlayer
             _windowSystem.AddWindow(_settingsWindow);
             _windowSystem.AddWindow(_screenSettingsWindow);
             _windowSystem.AddWindow(_depthPreviewWindow);
+
+            _housingScreenPlacementButton = new HousingScreenPlacementButton(this);
+            _frameworkActions.Enqueue(() => _housingScreenPlacementButton.Enable());
 
             // Register draw + config UI
             _pluginInterface.UiBuilder.Draw += OnDraw;
@@ -487,8 +496,12 @@ namespace XivMediaPlayer
                 if (isHousingMenuOpen && !_wasHousingMenuOpen)
                 {
                     _wasHousingMenuOpen = isHousingMenuOpen;
-                    _screenSettingsWindow.IsOpen = true;
-                    _screenSettingsWindow.SyncFromTransform();
+
+                    if (_config.AutoOpenScreenPlacementOnHousingMenu)
+                    {
+                        _screenSettingsWindow.IsOpen = true;
+                        _screenSettingsWindow.SyncFromTransform();
+                    }
 
                     if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId != _config.OwnerId && !string.IsNullOrEmpty(LocationKey))
                     {
@@ -915,7 +928,7 @@ namespace XivMediaPlayer
                     bool isOutdoors = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("zone_");
                     bool isIsland = !string.IsNullOrEmpty(locKey) && locKey.StartsWith("island_");
                     bool hasPrivileges = isOutdoors || isIsland || IsHousingMenuOpen;
-                    
+
                     if (!hasPrivileges)
                     {
                         _chat.PrintError(Loc.Chat("ScreenMenuRequiresHousing"));
@@ -924,8 +937,7 @@ namespace XivMediaPlayer
 
                     if (splitArgs.Length < 2)
                     {
-                        // No subcommand: toggle the settings window
-                        _screenSettingsWindow.Toggle();
+                        ToggleScreenSettingsWindow();
                     }
                     else
                     {
@@ -1749,6 +1761,23 @@ namespace XivMediaPlayer
             transform.Enabled = _worldRenderer.Transform.Enabled;
             _config.ScreenPlacements[key] = transform;
             _config.Save();
+        }
+
+        internal void ToggleScreenSettingsWindow() {
+            _screenSettingsWindow.Toggle();
+            _screenSettingsWindow.SyncFromTransform();
+            _housingScreenPlacementButton?.SyncButtonState();
+        }
+
+        internal void OnScreenPlacementSettingsChanged() {
+            _frameworkActions.Enqueue(() => {
+                if (_config.ShowScreenPlacementNativeButton) {
+                    _housingScreenPlacementButton?.Enable();
+                    _housingScreenPlacementButton?.RefreshForConfigChange();
+                } else {
+                    _housingScreenPlacementButton?.RefreshForConfigChange();
+                }
+            });
         }
 
         /// <summary>
@@ -3736,6 +3765,19 @@ namespace XivMediaPlayer
             _worldRenderer?.Dispose();
             _depthCapture?.Dispose();
             _depthPreviewWindow?.Dispose();
+            if (Dalamud.Utility.ThreadSafety.IsMainThread) {
+                _housingScreenPlacementButton?.Dispose();
+                KamiToolKitLibrary.Cleanup();
+            } else {
+                try {
+                    _framework.RunOnFrameworkThread(() => {
+                        _housingScreenPlacementButton?.Dispose();
+                        KamiToolKitLibrary.Cleanup();
+                    }).GetAwaiter().GetResult();
+                } catch {
+                    // Framework may already be unloading.
+                }
+            }
             ServerClient?.Dispose();
             _mediaManager?.Dispose();
             _ytDlpManager?.Dispose();

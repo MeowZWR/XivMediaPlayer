@@ -22,6 +22,10 @@
    <ReferenceOutputAssembly>True</ReferenceOutputAssembly>
    <Private>True</Private>
   </ProjectReference>
+  <ProjectReference Include="..\external\KamiToolKit\KamiToolKit.csproj">
+   <ReferenceOutputAssembly>True</ReferenceOutputAssembly>
+   <Private>True</Private>
+  </ProjectReference>
  </ItemGroup>
 
  <ItemGroup>

@@ -304,6 +304,9 @@
         "resolved": "1.7.8",
         "contentHash": "hpVlfej54yC6Qaq9AYXWgTgF8SDz2dtKbDNZGO8msjn3NjdkUBnFcIzYfOWyvwvpr3aqZPKh4WSSnJ78GxyIWg=="
       },
+      "kamitoolkit": {
+        "type": "Project"
+      },
       "mediaplayercore": {
         "type": "Project",
         "dependencies": {

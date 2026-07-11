@@ -39,6 +39,11 @@ namespace XivMediaPlayer.Windows {
           ImGui.EndTabItem();
         }
 
+        if (ImGui.BeginTabItem(Loc.T("Settings.Tab.ScreenPlacement"))) {
+          DrawScreenPlacementSettings();
+          ImGui.EndTabItem();
+        }
+
         if (ImGui.BeginTabItem(Loc.T("Settings.Tab.Cookies"))) {
           DrawCookiesSettings();
           ImGui.EndTabItem();

@@ -54,6 +54,10 @@ namespace XivMediaPlayer {
     public bool EnableUiCulling { get; set; } = true;
     public float UIBlendThreshold { get; set; } = 0.0f;
 
+    // Screen placement housing UI integration
+    public bool AutoOpenScreenPlacementOnHousingMenu { get; set; } = true;
+    public bool ShowScreenPlacementNativeButton { get; set; } = true;
+
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;
 
