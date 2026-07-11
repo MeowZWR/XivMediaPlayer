@@ -292,7 +292,6 @@ namespace XivMediaPlayer.Windows {
 
     private void DrawStandardPreviews() {
       if (Capture != null) {
-          Capture.ReadDepthEnabled = true;
           Capture.GeneratePreview();
       }
       var data = Capture?.LastRgbaData;

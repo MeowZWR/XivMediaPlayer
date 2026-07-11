@@ -189,7 +189,7 @@ namespace XivMediaPlayer.Compositing {
     /// Reads the pixel from the captured backbuffer to determine if the game UI is occluding this point.
     /// Uses the same difference math as the shader to ignore modded skyboxes and handle translucent UI.
     /// </summary>
-    public bool IsPixelOccluding(int x, int y, IntPtr unk68Ptr, DepthBufferCapture depthCapture, bool useDifferenceFallback) {
+    public bool IsPixelOccluding(int x, int y, IntPtr unk68Ptr, DepthBufferCapture? depthCapture, bool useDifferenceFallback) {
       if (_disposed || !_initialized || !_frameCaptured || _backBufferCopy == null || _stagingTexture == null) return false;
       if (x < 0 || y < 0 || x >= _width || y >= _height) return false;
 
@@ -210,7 +210,7 @@ namespace XivMediaPlayer.Compositing {
 
         float trueAlpha = nativeAlpha;
         
-        if (unk68Ptr != IntPtr.Zero && depthCapture != null && depthCapture.LastDepthData != null) {
+        if (unk68Ptr != IntPtr.Zero) {
             System.Runtime.InteropServices.Marshal.AddRef(unk68Ptr);
             using var unk68Srv = new ID3D11ShaderResourceView(unk68Ptr);
             using var unk68Tex = unk68Srv.Resource.QueryInterface<ID3D11Texture2D>();
@@ -246,9 +246,6 @@ namespace XivMediaPlayer.Compositing {
             }
             _context.Unmap(_unk68StagingTexture, 0);
 
-            float gameDepth = depthCapture.LastDepthData[y * depthCapture.DepthWidth + x];
-            bool isSkybox = (gameDepth < 0.00001f);
-
             // Estimated Alpha Math
             float estR = (bR > uR) ? (bR - uR) / Math.Max(0.0001f, 1.0f - uR) : 1.0f - (bR / Math.Max(0.0001f, uR));
             float estG = (bG > uG) ? (bG - uG) / Math.Max(0.0001f, 1.0f - uG) : 1.0f - (bG / Math.Max(0.0001f, uG));
@@ -258,15 +255,9 @@ namespace XivMediaPlayer.Compositing {
             float diffMax2 = Math.Max(Math.Max(Math.Abs(bR - uR), Math.Abs(bG - uG)), Math.Abs(bB - uB));
             float alphaDiff = Math.Abs(nativeAlpha - uA);
 
-            if (isSkybox) {
-                if (useDifferenceFallback) {
-                    trueAlpha = (diffMax2 > 0.02f) ? estimatedAlpha : 0.0f;
-                } else {
-                    trueAlpha = nativeAlpha;
-                }
-            } else {
-                trueAlpha = Math.Clamp(Math.Max(estimatedAlpha, alphaDiff), 0f, 1f);
-            }
+            trueAlpha = useDifferenceFallback && diffMax2 <= 0.02f
+                ? 0.0f
+                : Math.Clamp(Math.Max(estimatedAlpha, alphaDiff), 0f, 1f);
         }
         
         return trueAlpha > 0.1f;

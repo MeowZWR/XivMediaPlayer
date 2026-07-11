@@ -198,7 +198,6 @@ namespace XivMediaPlayer.Compositing {
         System.Runtime.InteropServices.Marshal.AddRef(_gameDepthTexturePtr);
         using var depthTexture = new ID3D11Texture2D(_gameDepthTexturePtr);
         CopyDepthBuffer(depthTexture);
-        ReadDepthToArray();
       } catch (Exception e) {
         _debugInfo = $"BeginFrame Error: {e.Message}";
       }

@@ -564,7 +564,7 @@ namespace XivMediaPlayer
             bool isHouse = !string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("house_");
             bool isZone = !string.IsNullOrEmpty(LocationKey) && LocationKey.StartsWith("zone_");
 
-            if (isHouse || (isZone && _config.EnableOutdoorPublicScreens))
+            if (isHouse || (isZone && IsWorldScreenAllowedForLocation(LocationKey)))
             {
                 bool isMediaOwner = _isLocalDj;
 
@@ -1652,11 +1652,66 @@ namespace XivMediaPlayer
             SaveMediaStateForCurrentLocation();
             _videoWindow.IsOpen = false;
             if (_screenSettingsWindow != null) _screenSettingsWindow.IsOpen = false;
+            _currentResolutionId = Guid.NewGuid();
+            _isResolvingMedia = false;
+            if (_worldRenderer?.Transform != null)
+            {
+                _worldRenderer.Transform.Enabled = false;
+                _screenSettingsWindow?.SyncFromTransform();
+            }
             _mediaManager?.CleanSounds();
+            _videoWindow?.ClearFrameTexture();
+            MediaPlayerCore.StreamProxy.Instance.ClearSessions();
+            _cefBrowserHandle?.Dispose();
+            _cefBrowserHandle = null;
             ResetStreamValues(false);
             CurrentTvPlacement = null;
+            _nearbyTvs.Clear();
 
             _deferredTerritoryChangeTime = DateTime.UtcNow.AddSeconds(3);
+        }
+
+        private bool IsWorldScreenAllowedForLocation(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+            if (key.StartsWith("house_")) return true;
+            if (key.StartsWith("island_")) return true;
+            if (key.StartsWith("zone_")) return _config.EnableOutdoorPublicScreens;
+            return false;
+        }
+
+        private void DisableCurrentWorldScreenAndMedia(bool clearPlacement)
+        {
+            _currentResolutionId = Guid.NewGuid();
+            _isResolvingMedia = false;
+
+            if (_worldRenderer?.Transform != null)
+            {
+                _worldRenderer.Transform.Enabled = false;
+                _screenSettingsWindow?.SyncFromTransform();
+            }
+
+            if (clearPlacement)
+            {
+                CurrentTvPlacement = null;
+                _nearbyTvs.Clear();
+            }
+
+            _mediaManager?.CleanSounds();
+            _videoWindow?.ClearFrameTexture();
+            MediaPlayerCore.StreamProxy.Instance.ClearSessions();
+            _cefBrowserHandle?.Dispose();
+            _cefBrowserHandle = null!;
+            _streamURLs = null!;
+            _lastStreamURL = "";
+            _currentMediaOwnerId = "";
+            _currentStreamer = "";
+            _currentMediaTitle = "";
+            _currentMediaDurationMs = null;
+            _isLocalDj = false;
+            _lastStreamObject = null;
+            _streamWasPlaying = false;
+            _lastStreamIsLive = false;
         }
 
         private async Task FetchServerDataForCurrentLocationAsync()
@@ -1745,7 +1800,7 @@ namespace XivMediaPlayer
             else if (isZone)
             {
                 // If outdoor screens are disabled, ensure we don't hold onto a stale TV placement
-                CurrentTvPlacement = null;
+                DisableCurrentWorldScreenAndMedia(clearPlacement: true);
             }
         }
 
@@ -1757,6 +1812,8 @@ namespace XivMediaPlayer
             if (_worldRenderer?.Transform == null) return;
             var key = _lastLocationKey;
             if (string.IsNullOrEmpty(key)) return;
+            if (!IsWorldScreenAllowedForLocation(key)) return;
+
             var transform = _worldRenderer.Transform.Clone();
             transform.Enabled = _worldRenderer.Transform.Enabled;
             _config.ScreenPlacements[key] = transform;
@@ -1787,6 +1844,12 @@ namespace XivMediaPlayer
         {
             var key = GetLocationKey();
             if (string.IsNullOrEmpty(key)) return;
+            if (!IsWorldScreenAllowedForLocation(key))
+            {
+                DisableCurrentWorldScreenAndMedia(clearPlacement: true);
+                return;
+            }
+
             if (_config.ScreenPlacements.TryGetValue(key, out var saved))
             {
                 _worldRenderer.Transform.Position = saved.Position;
@@ -1846,8 +1909,15 @@ namespace XivMediaPlayer
         /// </summary>
         private void RestoreMediaForCurrentLocation()
         {
-            var key = CurrentTvPlacement?.LocationKey ?? GetLocationKey();
+            var currentKey = GetLocationKey();
+            var key = CurrentTvPlacement?.LocationKey ?? currentKey;
             if (string.IsNullOrEmpty(key)) return;
+            if (!IsWorldScreenAllowedForLocation(currentKey ?? key))
+            {
+                _lastLocationKey = currentKey ?? key;
+                DisableCurrentWorldScreenAndMedia(clearPlacement: true);
+                return;
+            }
 
             // Track location for future saving
             _lastLocationKey = key;
@@ -2012,9 +2082,22 @@ namespace XivMediaPlayer
 
         public async Task FetchMediaFromServerAsync()
         {
+            var currentKey = GetLocationKey();
+            if (!string.IsNullOrEmpty(currentKey) && !IsWorldScreenAllowedForLocation(currentKey))
+            {
+                DisableCurrentWorldScreenAndMedia(clearPlacement: true);
+                return;
+            }
+
             var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             _pluginLog.Information($"[Sync] FetchMediaFromServerAsync invoked. Key: {key}");
             if (string.IsNullOrEmpty(key)) return;
+            if (!IsWorldScreenAllowedForLocation(key))
+            {
+                DisableCurrentWorldScreenAndMedia(clearPlacement: true);
+                return;
+            }
+
             bool isHouse = key.StartsWith("house_");
             bool isZone = key.StartsWith("zone_");
             if (!isHouse && !(isZone && _config.EnableOutdoorPublicScreens)) return;
@@ -2416,7 +2499,15 @@ namespace XivMediaPlayer
 
         private unsafe void OnDraw()
         {
-            if (_worldRenderer != null) _worldRenderer.UseDepthOcclusion = _config.DepthOcclusionEnabled;
+            bool shouldRenderWorld =
+                _worldRenderer?.IsActive == true &&
+                _clientState.IsLoggedIn;
+
+            bool shouldUseDepthThisFrame =
+                shouldRenderWorld &&
+                _config.DepthOcclusionEnabled;
+
+            if (_worldRenderer != null) _worldRenderer.UseDepthOcclusion = shouldUseDepthThisFrame;
 
             bool useDifferenceFallback = false;
             if (_config.EnableWanderersCampfireFix && _objectTable != null) {
@@ -2434,8 +2525,10 @@ namespace XivMediaPlayer
                 }
             }
 
-            // Reset per-frame depth capture flag
-            _depthCapture?.BeginFrame();
+            if (shouldUseDepthThisFrame)
+            {
+                _depthCapture?.BeginFrame();
+            }
 
             if (!_dependencyManager.IsReady)
             {
@@ -2469,6 +2562,12 @@ namespace XivMediaPlayer
                 _uiCapture.CaptureFrame();
             }
 
+            if (_worldRenderer?.IsActive == true && !IsWorldScreenAllowedForLocation(GetLocationKey()))
+            {
+                DisableCurrentWorldScreenAndMedia(clearPlacement: true);
+                shouldRenderWorld = false;
+            }
+
             // Decode frames every tick, even if the video window is closed,
             // so the world-space renderer always has fresh textures.
             _videoWindow.UpdateFrame();
@@ -2476,12 +2575,8 @@ namespace XivMediaPlayer
             _windowSystem.Draw();
 
             // World-space video rendering
-            if (_worldRenderer?.IsActive == true && _clientState.IsLoggedIn)
+            if (shouldRenderWorld)
             {
-                // Only read depth to CPU when occlusion is on
-                if (_depthCapture != null)
-                    _depthCapture.ReadDepthEnabled = _worldRenderer.UseDepthOcclusion;
-
                 _videoWindow.GetCurrentVideoTexture(out IntPtr videoSrv, out int videoWidth, out int videoHeight, out int videoTrueWidth, out int videoTrueHeight);
                 if (videoSrv != IntPtr.Zero)
                 {
@@ -2961,7 +3056,7 @@ namespace XivMediaPlayer
                         srvPtr = IntPtr.Zero;
                     }
 
-                    _worldRenderer.EnableGlow = _config.DepthOcclusionEnabled && _config.TvGlowEnabled;
+                    _worldRenderer.EnableGlow = shouldUseDepthThisFrame && _config.TvGlowEnabled;
                     _worldRenderer.EnableUiCulling = _config.EnableUiCulling;
                     
                     // useDifferenceFallback is already calculated above when checking UI occlusion,
@@ -2970,9 +3065,9 @@ namespace XivMediaPlayer
                     
                     var mainViewport = ImGui.GetMainViewport();
                     
-                    _worldRenderer.Render(videoSrv, videoWidth, videoHeight, videoTrueWidth, videoTrueHeight, _depthCapture, 
-                        _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp, 
-                        fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver, useDifferenceFallback: useDifferenceFallback, 
+                    _worldRenderer.Render(videoSrv, videoWidth, videoHeight, videoTrueWidth, videoTrueHeight, shouldUseDepthThisFrame ? _depthCapture : null,
+                        _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp,
+                        fovY, aspectRatio, _uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, srvPtr, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, showScreensaver, useDifferenceFallback: useDifferenceFallback,
                         viewProjMatrix: _prevViewProjMatrix ?? viewProjMatrix, viewportPos: mainViewport.Pos, viewportSize: mainViewport.Size, uiBlendThreshold: _config.UIBlendThreshold);
                         
                     _prevCameraPos = cameraPos;
@@ -3148,12 +3243,7 @@ namespace XivMediaPlayer
             {
                 if (!_config.EnableOutdoorPublicScreens)
                 {
-                    _worldRenderer.Transform.Enabled = false;
-                    _mediaManager?.StopStream();
-                    _lastStreamURL = "";
-                    _currentMediaOwnerId = "";
-                    _isLocalDj = false;
-                    _lastStreamObject = null;
+                    DisableCurrentWorldScreenAndMedia(clearPlacement: true);
                 }
                 else
                 {

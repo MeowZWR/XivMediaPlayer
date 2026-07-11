@@ -135,6 +135,19 @@ namespace XivMediaPlayer.Windows {
       }
     }
 
+    public void ClearFrameTexture() {
+      lock (_textureLock) {
+        _videoTexture?.Dispose();
+        _videoTexture = null!;
+        _localFrameBuffer = Array.Empty<byte>();
+        _lastLoadedFrameCount = 0;
+        _lastLoadedFrame = null!;
+        wasStreaming = false;
+        deadStreamTimer.Stop();
+        deadStreamTimer.Reset();
+      }
+    }
+
     public override void Draw() {
       WindowName = Loc.T("VideoWindow.Title") + "###VideoWindow";
 

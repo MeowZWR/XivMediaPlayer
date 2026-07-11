@@ -363,12 +363,20 @@ namespace MediaPlayerCore
             return $"http://127.0.0.1:{_port}/stream.ts?sid={sid}&target={escapedTarget}";
         }
 
+        public void ClearSessions()
+        {
+            foreach (var session in _sessions.Values)
+            {
+                try { session.Client?.Dispose(); } catch { }
+            }
+            _sessions.Clear();
+        }
+
         public void Dispose()
         {
             _cts?.Cancel();
             try { _listener?.Stop(); _listener?.Close(); } catch { }
-            foreach (var session in _sessions.Values) { try { session.Client?.Dispose(); } catch { } }
-            _sessions.Clear();
+            ClearSessions();
         }
     }
 }

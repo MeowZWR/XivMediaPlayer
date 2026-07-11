@@ -337,31 +337,16 @@ namespace XivMediaPlayer.Compositing {
       float depthBL = ComputeDepth(bl);
       var cornerDepths = new Vector4(depthTL, depthTR, depthBR, depthBL);
 
-      // Sample game depth at corners for debug
-      float gameTL = depthCapture.GetDepthAt((int)sTL.X, (int)sTL.Y);
-      float gameTR = depthCapture.GetDepthAt((int)sTR.X, (int)sTR.Y);
-      float gameBR = depthCapture.GetDepthAt((int)sBR.X, (int)sBR.Y);
-      float gameBL = depthCapture.GetDepthAt((int)sBL.X, (int)sBL.Y);
-      DepthDebugInfo = $"Threshold: TL={depthTL:F6} TR={depthTR:F6} BR={depthBR:F6} BL={depthBL:F6}\n" +
-                        $"GameDepth: TL={gameTL:F6} TR={gameTR:F6} BR={gameBR:F6} BL={gameBL:F6}\n" +
-                        $"Occluded?: TL={gameTL > depthTL} TR={gameTR > depthTR} BR={gameBR > depthBR} BL={gameBL > depthBL}";
-
       // Feed screen quad info to depth capture for preview overlay
       depthCapture.ScreenQuadCorners = (sTL, sTR, sBR, sBL);
       depthCapture.ScreenQuadDepths = cornerDepths;
-
-      // Average depth for glow visibility
-      float centerDepth = (depthTL + depthTR + depthBR + depthBL) * 0.25f;
 
       var drawList = ImGui.GetBackgroundDrawList(ImGui.GetMainViewport());
 
       // Draw glow behind the video
       if (_enableGlow && allCornersInFront) {
-        float visibility = ComputeVisibility(depthCapture, sTL, sTR, sBR, sBL, centerDepth);
-          if (visibility > 0.05f) {
-            RenderGlow(drawList, textureSrv, sTL, sTR, sBR, sBL, visibility);
-          }
-        }
+        RenderGlow(drawList, textureSrv, sTL, sTR, sBR, sBL, 1f);
+      }
 
         // Render standard UI layer (non-occluded TV UI)
         // Ensure DepthTestedRenderer is initialized
@@ -401,7 +386,8 @@ namespace XivMediaPlayer.Compositing {
         var localBR = sBR - viewport.Pos;
         var localBL = sBL - viewport.Pos;
 
-        depthCapture.GetMinMaxDepth(out float minDepth, out float maxDepth);
+        const float minDepth = 0.001f;
+        const float maxDepth = 1.0f;
 
         var transparentUiSrvPtr = SceneColorProbe.GetToneAdjustSourceSrvPtr();
 
