@@ -595,8 +595,71 @@ namespace XivMediaPlayer
                 }
             }
 
-            // Clipboard cookie watcher — check every 5 seconds
-            CheckClipboardForCookies();
+            // Clipboard cookie watcher — check every 5 seconds when enabled
+            if (_config.AutoImportCookiesFromClipboard)
+            {
+                CheckClipboardForCookies();
+            }
+        }
+
+        /// <summary>
+        /// Imports cookies from the clipboard on a background STA thread.
+        /// </summary>
+        public void ImportCookiesFromClipboard(string source = "clipboard")
+        {
+            Thread thread = new Thread(() =>
+            {
+                string clip = "";
+                for (int i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        clip = System.Windows.Forms.Clipboard.GetText();
+                        if (!string.IsNullOrEmpty(clip)) break;
+                    }
+                    catch { }
+
+                    Thread.Sleep(50);
+                }
+
+                string captured = clip;
+                EnqueueFrameworkAction(() => ProcessCookieImport(captured, source));
+            });
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
+
+        private void ProcessCookieImport(string? clipText, string source)
+        {
+            if (string.IsNullOrWhiteSpace(clipText))
+            {
+                _chat.PrintError(Loc.Chat("ClipboardEmpty"));
+                return;
+            }
+
+            var result = _ytDlpManager.TrySaveCookiesFromText(clipText, source);
+            if (result == YtDlpManager.CookieValidationResult.Valid)
+            {
+                _lastCookieHash = clipText.GetHashCode();
+                _pluginLog.Info($"[yt-dlp] Cookies imported from {source}.");
+                _chat.Print(Loc.Chat("CookiesImported"));
+                return;
+            }
+
+            _chat.PrintError(Loc.Chat(GetCookieValidationMessageKey(result)));
+        }
+
+        private static string GetCookieValidationMessageKey(YtDlpManager.CookieValidationResult result)
+        {
+            return result switch
+            {
+                YtDlpManager.CookieValidationResult.LooksLikeUrl => "CookiesInvalidUrl",
+                YtDlpManager.CookieValidationResult.LooksLikeJson => "CookiesInvalidJson",
+                YtDlpManager.CookieValidationResult.NoCookieLines => "CookiesInvalidEmpty",
+                YtDlpManager.CookieValidationResult.NoKnownVideoSite => "CookiesInvalidNoVideoSite",
+                YtDlpManager.CookieValidationResult.InvalidFormat => "CookiesInvalidFormat",
+                _ => "CookiesImportFailed",
+            };
         }
 
         private void CheckClipboardForCookies()
@@ -614,9 +677,9 @@ namespace XivMediaPlayer
 
                 if (YtDlpManager.IsNetscapeCookieFormat(clipText))
                 {
-                    _lastCookieHash = hash;
-                    if (_ytDlpManager.SaveCookiesFromText(clipText))
+                    if (_ytDlpManager.TrySaveCookiesFromText(clipText, "clipboard auto-detect") == YtDlpManager.CookieValidationResult.Valid)
                     {
+                        _lastCookieHash = hash;
                         _pluginLog.Info("[yt-dlp] Auto-detected YouTube cookies from clipboard.");
                     }
                 }
@@ -872,6 +935,10 @@ namespace XivMediaPlayer
 
                 case "help":
                     _chat.Print(Loc.Chat("Help"));
+                    break;
+
+                case "cookies":
+                    ImportCookiesFromClipboard("chat command");
                     break;
 
                 default:

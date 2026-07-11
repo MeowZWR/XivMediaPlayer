@@ -141,10 +141,16 @@ namespace MediaPlayerCore.YtDlp
                         string body = new string(bodyChars, 0, read);
 
                         // Try to parse out the cookies and save them
-                        if (!string.IsNullOrEmpty(body) && body.Contains(".youtube.com"))
+                        if (!string.IsNullOrEmpty(body) && body.Contains(".youtube.com", StringComparison.OrdinalIgnoreCase))
                         {
-                            SaveCookiesFromText(body, "VRCVideoCacher browser extension");
-                            OnStatusUpdate?.Invoke(this, "Successfully processed cookies from extension!");
+                            if (SaveCookiesFromExtension(body))
+                            {
+                                OnStatusUpdate?.Invoke(this, "Successfully processed cookies from VRCVideoCacher browser extension!");
+                            }
+                            else
+                            {
+                                OnError?.Invoke(this, new Exception("Received cookies from VRCVideoCacher extension but failed to save them."));
+                            }
                         }
                     }
 
@@ -600,10 +606,20 @@ namespace MediaPlayerCore.YtDlp
         public bool HasCookiesFile => FindCookiesFile() != null;
 
         /// <summary>
+        /// True when the VRCVideoCacher browser extension listener is running on localhost:9696.
+        /// </summary>
+        public bool IsCookieListenerActive => _isListeningForCookies && _cookieListener != null;
+
+        /// <summary>
         /// Returns the path where cookies.txt will be saved (plugin directory).
         /// </summary>
         public string CookiesSavePath => Path.Combine(
           Path.GetDirectoryName(_ytDlpPath) ?? ".", "cookies.txt");
+
+        private static readonly string[] KnownVideoCookieDomains =
+        {
+            ".youtube.com", "youtube.com", ".google.com", ".bilibili.com", "bilibili.com", ".twitch.tv", "twitch.tv",
+        };
 
         /// <summary>
         /// Checks if text looks like Netscape cookie format (tab-separated, 7 fields per line).
@@ -611,27 +627,119 @@ namespace MediaPlayerCore.YtDlp
         /// </summary>
         public static bool IsNetscapeCookieFormat(string? text)
         {
-            if (string.IsNullOrWhiteSpace(text)) return false;
+            return ValidateCookieText(text, out _) == CookieValidationResult.Valid;
+        }
 
-            var lines = text.Split('\n')
-              .Select(l => l.Trim())
-              .Where(l => !string.IsNullOrEmpty(l) && !l.StartsWith("#"))
+        public enum CookieValidationResult
+        {
+            Valid,
+            Empty,
+            LooksLikeUrl,
+            LooksLikeJson,
+            NoCookieLines,
+            InvalidFormat,
+            NoKnownVideoSite,
+        }
+
+        /// <summary>
+        /// Validates clipboard or pasted text before saving as cookies.txt.
+        /// </summary>
+        public static CookieValidationResult ValidateCookieText(string? text, out int validCookieCount)
+        {
+            validCookieCount = 0;
+            if (string.IsNullOrWhiteSpace(text)) return CookieValidationResult.Empty;
+
+            string trimmed = text.Trim();
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return CookieValidationResult.LooksLikeUrl;
+            }
+
+            if (trimmed.StartsWith("{") || trimmed.StartsWith("[")) return CookieValidationResult.LooksLikeJson;
+
+            var lines = text.Replace("\r\n", "\n").Split('\n');
+            bool hasNetscapeHeader = lines.Any(l =>
+                l.Contains("Netscape HTTP Cookie File", StringComparison.OrdinalIgnoreCase)
+                || l.Contains("HTTP Cookie File", StringComparison.OrdinalIgnoreCase));
+
+            var cookieLines = lines
+              .Select(l => l.TrimEnd('\r'))
+              .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith('#'))
               .ToArray();
 
-            if (lines.Length < 2) return false;
+            if (cookieLines.Length == 0) return CookieValidationResult.NoCookieLines;
 
-            // At least half the non-comment lines should be 7-field tab-separated
-            int validCount = 0;
-            foreach (var line in lines)
+            int knownSiteCount = 0;
+            foreach (var line in cookieLines)
             {
-                var parts = line.Split('\t');
-                if (parts.Length == 7 && (parts[0].Contains('.') || parts[0] == "localhost"))
+                if (!TryParseNetscapeCookieLine(line, out var domain)) continue;
+
+                validCookieCount++;
+                if (KnownVideoCookieDomains.Any(d => domain.Contains(d, StringComparison.OrdinalIgnoreCase)))
                 {
-                    validCount++;
+                    knownSiteCount++;
                 }
             }
 
-            return validCount >= 2 && validCount >= lines.Length / 2;
+            if (validCookieCount == 0) return CookieValidationResult.InvalidFormat;
+
+            // Reject files where most lines fail parsing — likely random clipboard text.
+            if (validCookieCount < Math.Max(1, cookieLines.Length / 2)) return CookieValidationResult.InvalidFormat;
+
+            if (!hasNetscapeHeader && knownSiteCount == 0) return CookieValidationResult.NoKnownVideoSite;
+
+            return CookieValidationResult.Valid;
+        }
+
+        private static bool TryParseNetscapeCookieLine(string line, out string domain)
+        {
+            domain = string.Empty;
+            var parts = line.Split('\t');
+            if (parts.Length != 7) return false;
+
+            domain = parts[0].Trim();
+            string subdomainFlag = parts[1].Trim();
+            string path = parts[2].Trim();
+            string secure = parts[3].Trim();
+            string expiration = parts[4].Trim();
+            string name = parts[5].Trim();
+
+            if (string.IsNullOrEmpty(domain) || string.IsNullOrEmpty(name)) return false;
+            if (!domain.Contains('.') && !domain.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!path.StartsWith('/')) return false;
+            if (subdomainFlag is not ("TRUE" or "FALSE")) return false;
+            if (secure is not ("TRUE" or "FALSE")) return false;
+            if (!long.TryParse(expiration, out _)) return false;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Saves cookies pushed by the VRCVideoCacher browser extension (localhost:9696).
+        /// Uses standard validation first, then a relaxed check for known extension payloads.
+        /// </summary>
+        public bool SaveCookiesFromExtension(string cookieText)
+        {
+            if (string.IsNullOrWhiteSpace(cookieText)) return false;
+
+            var validation = ValidateCookieText(cookieText, out var validCount);
+            if (validation == CookieValidationResult.Valid)
+            {
+                return WriteCookiesFile(cookieText, "VRCVideoCacher browser extension");
+            }
+
+            if (!cookieText.Contains(".youtube.com", StringComparison.OrdinalIgnoreCase)) return false;
+            if (!IsVRCVideoCacherPayload(cookieText)) return false;
+            if (validCount < 1) return false;
+
+            return WriteCookiesFile(cookieText, "VRCVideoCacher browser extension");
+        }
+
+        private static bool IsVRCVideoCacherPayload(string body)
+        {
+            return body.Contains("generated by VRCVideoCacher", StringComparison.OrdinalIgnoreCase)
+                || body.Contains("Netscape HTTP Cookie File", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -639,6 +747,14 @@ namespace MediaPlayerCore.YtDlp
         /// Returns true if saved successfully.
         /// </summary>
         public bool SaveCookiesFromText(string cookieText, string source = "clipboard")
+        {
+            var validation = ValidateCookieText(cookieText, out _);
+            if (validation != CookieValidationResult.Valid) return false;
+
+            return WriteCookiesFile(cookieText, source);
+        }
+
+        private bool WriteCookiesFile(string cookieText, string source)
         {
             try
             {
@@ -651,6 +767,17 @@ namespace MediaPlayerCore.YtDlp
                 OnError?.Invoke(this, new Exception("Failed to save cookies: " + e.Message, e));
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Validates and saves cookie text. Returns validation result when save fails.
+        /// </summary>
+        public CookieValidationResult TrySaveCookiesFromText(string cookieText, string source = "clipboard")
+        {
+            var validation = ValidateCookieText(cookieText, out _);
+            if (validation != CookieValidationResult.Valid) return validation;
+
+            return SaveCookiesFromText(cookieText, source) ? CookieValidationResult.Valid : CookieValidationResult.InvalidFormat;
         }
 
         /// <summary>

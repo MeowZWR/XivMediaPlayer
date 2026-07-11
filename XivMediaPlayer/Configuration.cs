@@ -57,6 +57,9 @@ namespace XivMediaPlayer {
     // yt-dlp settings
     public int PreferredQuality { get; set; } = 720;
 
+    // cookies settings
+    public bool AutoImportCookiesFromClipboard { get; set; } = true;
+
     // World screen compositing settings (legacy single placement)
     public MediaPlayerCore.Compositing.WorldScreenTransform WorldScreen { get; set; } = new MediaPlayerCore.Compositing.WorldScreenTransform();
 

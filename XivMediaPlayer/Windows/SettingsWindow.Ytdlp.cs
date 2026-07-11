@@ -22,30 +22,6 @@ namespace XivMediaPlayer.Windows {
       ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f),
         Loc.T("Settings.YtdlpHint"));
 
-      if (_plugin.YtDlpManager != null && !_plugin.YtDlpManager.HasCookiesFile) {
-        ImGui.Spacing();
-        ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), Loc.T("Settings.NoCookiesWarning"));
-        ImGui.TextWrapped(Loc.T("Settings.NoCookiesBody"));
-        
-        if (ImGui.Button(Loc.T("Settings.ChromeExtension"))) {
-            try {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
-                    FileName = "https://chromewebstore.google.com/detail/vrcvideocacher-cookies-ex/kfgelknbegappcajiflgfbjbdpbpokge",
-                    UseShellExecute = true
-                });
-            } catch { }
-        }
-        ImGui.SameLine();
-        if (ImGui.Button(Loc.T("Settings.FirefoxExtension"))) {
-            try {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
-                    FileName = "https://addons.mozilla.org/en-US/firefox/addon/vrcvideocachercookiesexporter/",
-                    UseShellExecute = true
-                });
-            } catch { }
-        }
-      }
-
       ImGui.Spacing();
       ImGui.Spacing();
     }
