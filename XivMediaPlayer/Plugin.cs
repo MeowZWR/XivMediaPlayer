@@ -1040,6 +1040,12 @@ namespace XivMediaPlayer
 
             url = CleanUrl(url);
 
+            if (!IsValidMediaUrl(url))
+            {
+                if (!isAutoSync) _chat.PrintError(Loc.Chat("InvalidMediaUrl"));
+                return;
+            }
+
             string urlWithoutQuery = url.Split('?')[0];
             _lastStreamIsLive = urlWithoutQuery.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)
                 || (url.Contains("twitch.tv") && !url.Contains("/videos/"))
@@ -1128,6 +1134,12 @@ namespace XivMediaPlayer
             }
 
             url = CleanUrl(url);
+
+            if (!IsValidMediaUrl(url))
+            {
+                if (!isAutoSync) _chat.PrintError(Loc.Chat("InvalidMediaUrl"));
+                return;
+            }
 
             if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable())
             {
@@ -1953,6 +1965,12 @@ namespace XivMediaPlayer
             
             var activeStream = _mediaManager?.ActiveStream;
             string lastUrl = CleanUrl(_lastStreamURL ?? "");
+            if (!string.IsNullOrEmpty(lastUrl) && !IsValidMediaUrl(lastUrl))
+            {
+                if (!isBackgroundSync) _chat.PrintError(Loc.Chat("InvalidMediaUrl"));
+                return;
+            }
+
             string soundPath = activeStream?.SoundPath ?? "";
             // Never let local StreamProxy URLs (e.g. http://127.0.0.1:xxxxx/stream.m3u8?sid=...) leak as fallback
             if (soundPath.Contains("127.0.0.1")) soundPath = "";
@@ -3257,6 +3275,21 @@ namespace XivMediaPlayer
         #endregion
 
         #region Utilities
+
+        private static bool IsValidMediaUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+
+            url = url.Trim();
+            if (url.Contains('\n') || url.Contains('\r')) return false;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host)) return false;
+
+            return uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                || uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                || uri.Scheme.Equals("rtmp", StringComparison.OrdinalIgnoreCase)
+                || uri.Scheme.Equals("rtmps", StringComparison.OrdinalIgnoreCase)
+                || uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase);
+        }
 
         private static string CleanUrl(string url)
         {

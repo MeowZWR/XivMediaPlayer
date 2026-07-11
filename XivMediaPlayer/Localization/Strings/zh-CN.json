@@ -37,6 +37,7 @@
   "Chat.CookiesInvalidEmpty": "剪贴板中没有任何 Cookie 行。",
   "Chat.CookiesInvalidFormat": "剪贴板内容不是有效的 Netscape Cookie 格式（制表符分隔，每行 7 个字段）。",
   "Chat.CookiesInvalidNoVideoSite": "未找到支持的视频站点 Cookie（YouTube、Bilibili、Twitch 等）。",
+  "Chat.InvalidMediaUrl": "无效的媒体 URL。请使用 http、https、rtmp 或 rtsp 链接。",
   "Chat.ScreenHelp": "屏幕命令：\n /media screen place — 在视线位置放置屏幕\n /media screen move <x> <y> <z> — 调整位置\n /media screen rotate <yaw> [pitch] — 设置旋转\n /media screen scale <w> <h> — 设置大小（世界单位）\n /media screen reset — 返回叠加模式\n /media screen save — 保存当前放置",
   "Chat.DmcaCopied": "DMCA 联系信息与 URL 已复制到剪贴板。",
   "Chat.NoActiveUrl": "没有可复制的活动媒体 URL。",

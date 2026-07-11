@@ -47,6 +47,7 @@
   "Chat.CookiesInvalidEmpty": "Clipboard does not contain any cookie lines.",
   "Chat.CookiesInvalidFormat": "Clipboard text is not valid Netscape cookies format (tab-separated, 7 fields per line).",
   "Chat.CookiesInvalidNoVideoSite": "No cookies for supported video sites found (YouTube, Bilibili, Twitch, etc.).",
+  "Chat.InvalidMediaUrl": "Invalid media URL. Use an http, https, rtmp, or rtsp link.",
   "Chat.LoopOn": "Loop: ON",
   "Chat.LoopOff": "Loop: OFF",
   "Chat.ShuffleOn": "Shuffle: ON",
