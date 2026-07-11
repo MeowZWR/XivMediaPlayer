@@ -1,0 +1,105 @@
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Which native dependency zip(s) to publish'
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - cef
+          - libvlc
+
+name: Publish Native Dependencies
+
+env:
+  NATIVE_DEPS_TAG: native-dependencies
+
+jobs:
+  publish:
+    name: Publish Native Dependencies
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read versions from NativeDependencies.props
+        shell: pwsh
+        run: |
+          [xml]$xml = Get-Content -Raw NativeDependencies.props
+          $pg = $xml.Project.PropertyGroup
+          $cef = $pg.CefSharpVersion
+          $vlc = $pg.LibVlcVersion
+          if ([string]::IsNullOrWhiteSpace($cef) -or [string]::IsNullOrWhiteSpace($vlc)) {
+            throw "Failed to read CefSharpVersion / LibVlcVersion from NativeDependencies.props"
+          }
+          "CEF_VERSION=$cef" >> $env:GITHUB_ENV
+          "LIBVLC_VERSION=$vlc" >> $env:GITHUB_ENV
+          Write-Host "CEF_VERSION=$cef"
+          Write-Host "LIBVLC_VERSION=$vlc"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: '10.x.x'
+
+      - name: Download Dalamud
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/stg/latest.zip -OutFile latest.zip
+          Expand-Archive -Force latest.zip "$env:AppData\XIVLauncher\addon\Hooks\dev\"
+
+      - name: Restore and build
+        run: |
+          dotnet restore
+          dotnet build --no-restore -c Release --nologo
+
+      - name: Pack dependency zips
+        shell: bash
+        run: |
+          set -e
+          OUT="XivMediaPlayer/bin/x64/Release"
+          ART="${GITHUB_WORKSPACE}/native-deps-artifacts"
+          mkdir -p "$ART"
+
+          if [ ! -d "$OUT/cef" ] || [ ! -d "$OUT/libvlc" ]; then
+            echo "Expected cef/ and libvlc/ in build output"
+            ls -la "$OUT"
+            exit 1
+          fi
+
+          COMPONENT="${{ inputs.component }}"
+          pushd "$OUT"
+
+          if [ "$COMPONENT" = "both" ] || [ "$COMPONENT" = "cef" ]; then
+            7z a "$ART/cef-${{ env.CEF_VERSION }}.zip" cef
+          fi
+
+          if [ "$COMPONENT" = "both" ] || [ "$COMPONENT" = "libvlc" ]; then
+            7z a "$ART/libvlc-${{ env.LIBVLC_VERSION }}.zip" libvlc
+          fi
+
+          popd
+          ls -la "$ART"
+
+      - name: Ensure release exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if ! gh release view "${{ env.NATIVE_DEPS_TAG }}" >/dev/null 2>&1; then
+            gh release create "${{ env.NATIVE_DEPS_TAG }}" \
+              --prerelease \
+              --title "Native dependencies (CEF / LibVLC)" \
+              --notes "CefSharp and LibVLC native binaries for in-game autodownload. Do not download or install manually — the plugin fetches the matching asset when needed. Versions come from NativeDependencies.props."
+          fi
+
+      - name: Upload assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload "${{ env.NATIVE_DEPS_TAG }}" native-deps-artifacts/*.zip --clobber

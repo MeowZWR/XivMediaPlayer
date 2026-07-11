@@ -48,10 +48,7 @@ jobs:
         run: |
           pushd XivMediaPlayer/bin/x64/Release/
           
-          # Zip the heavy native dependencies into a separate file
-          7z a ../XivMediaPlayer-Dependencies.zip cef libvlc
-          
-          # Remove them from the output directory
+          # Native CEF/LibVLC ships from the fixed native-dependencies release; keep plugin zip small
           rm -rf cef libvlc
           
           # Remove duplicate native CEF binaries from the root directory to save space

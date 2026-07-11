@@ -59,9 +59,9 @@
       <CefDestDir>$(TargetDir)cef\</CefDestDir>
     </PropertyGroup>
     <ItemGroup>
-      <CefNativeFiles Include="$(NugetPackagesDir)\chromiumembeddedframework.runtime.win-x64\148.0.9\runtimes\win-x64\native\*.*" />
-      <CefLocales Include="$(NugetPackagesDir)\chromiumembeddedframework.runtime.win-x64\148.0.9\CEF\win-x64\locales\*.*" />
-      <CefBrowserSub Include="$(NugetPackagesDir)\cefsharp.common.netcore\148.0.90\runtimes\win-x64\native\*.*" />
+      <CefNativeFiles Include="$(NugetPackagesDir)\chromiumembeddedframework.runtime.win-x64\$(ChromiumRuntimeVersion)\runtimes\win-x64\native\*.*" />
+      <CefLocales Include="$(NugetPackagesDir)\chromiumembeddedframework.runtime.win-x64\$(ChromiumRuntimeVersion)\CEF\win-x64\locales\*.*" />
+      <CefBrowserSub Include="$(NugetPackagesDir)\cefsharp.common.netcore\$(CefSharpVersion)\runtimes\win-x64\native\*.*" />
     </ItemGroup>
     
     <Copy SourceFiles="@(CefNativeFiles)" DestinationFolder="$(CefDestDir)" SkipUnchangedFiles="true" />
@@ -77,5 +77,62 @@
 
     <Copy SourceFiles="@(CefDllsToMove)" DestinationFolder="$(CefDestDir)" SkipUnchangedFiles="true" />
     <Delete Files="@(CefDllsToMove)" />
+  </Target>
+
+  <!-- KamiToolKit (Dalamud.NET.Sdk) pulls Dalamud-provided assemblies into output; strip them so the plugin zip stays small. -->
+  <Target Name="RemoveDalamudProvidedAssemblies" AfterTargets="Build">
+    <ItemGroup>
+      <DalamudProvidedAssemblies Include="$(TargetDir)TerraFX.Interop.Windows.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Iced.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)System.Reactive.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Mono.Cecil.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)BCnEncoder.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)BitFaster.Caching.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)CommunityToolkit.HighPerformance.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)SQLite-net.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)SQLitePCLRaw.core.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)SQLitePCLRaw.provider.e_sqlite3.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)SQLitePCLRaw.batteries_v2.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Reloaded.Hooks.Definitions.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Reloaded.Memory.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)goatcorp.Reloaded.Hooks.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)goatcorp.Reloaded.Memory.Buffers.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Serilog.Sinks.Console.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Serilog.Sinks.File.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Serilog.Sinks.Async.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)HexaGen.Runtime.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Dalamud.Common.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)Dalamud.Common.pdb" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)CheapLoc.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)MinSharp.dll" />
+      <DalamudProvidedAssemblies Include="$(TargetDir)KamiToolKit.xml" />
+    </ItemGroup>
+    <Delete Files="@(DalamudProvidedAssemblies)" TreatErrorsAsWarnings="true" />
+    <RemoveDir Directories="$(TargetDir)Assets" Condition="Exists('$(TargetDir)Assets')" />
+  </Target>
+
+  <!-- Emit C# constants from NativeDependencies.props so DependencyManager stays in sync. -->
+  <Target Name="GenerateNativeDependencyVersions"
+          BeforeTargets="BeforeCompile;CoreCompile"
+          DependsOnTargets="PrepareForBuild">
+    <PropertyGroup>
+      <_NativeDepsGenFile>$(IntermediateOutputPath)NativeDependencyVersions.g.cs</_NativeDepsGenFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <_NativeDepsGenLines Include="// &lt;auto-generated /&gt;" />
+      <_NativeDepsGenLines Include="// Generated from NativeDependencies.props — do not edit." />
+      <_NativeDepsGenLines Include="namespace XivMediaPlayer%3B" />
+      <_NativeDepsGenLines Include="internal static class NativeDependencyVersions" />
+      <_NativeDepsGenLines Include="{" />
+      <_NativeDepsGenLines Include="    public const string CefSharpVersion = &quot;$(CefSharpVersion)&quot;%3B" />
+      <_NativeDepsGenLines Include="    public const string ChromiumRuntimeVersion = &quot;$(ChromiumRuntimeVersion)&quot;%3B" />
+      <_NativeDepsGenLines Include="    public const string LibVlcVersion = &quot;$(LibVlcVersion)&quot;%3B" />
+      <_NativeDepsGenLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_NativeDepsGenFile)" Lines="@(_NativeDepsGenLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_NativeDepsGenFile)" />
+      <FileWrites Include="$(_NativeDepsGenFile)" />
+    </ItemGroup>
   </Target>
 </Project>

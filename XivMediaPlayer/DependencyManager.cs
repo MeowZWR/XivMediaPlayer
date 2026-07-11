@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
@@ -10,9 +11,16 @@ namespace XivMediaPlayer
 {
     public class DependencyManager
     {
+        private const string NativeDepsRepo = "MeowZWR/XivMediaPlayer";
+        private const string NativeDepsTag = "native-dependencies";
+        private const string CefVersion = NativeDependencyVersions.CefSharpVersion;
+        private const string LibVlcVersion = NativeDependencyVersions.LibVlcVersion;
+        private const string CefAssetName = "cef-" + CefVersion + ".zip";
+        private const string LibVlcAssetName = "libvlc-" + LibVlcVersion + ".zip";
+        private const string VersionStampFileName = ".version";
+
         private readonly IPluginLog _pluginLog;
-        private readonly string _version;
-        
+
         public bool IsReady { get; private set; }
         public bool IsDownloading { get; private set; }
         public float DownloadProgress { get; private set; }
@@ -24,7 +32,7 @@ namespace XivMediaPlayer
 
         public DependencyManager(string configDir, string pluginDir, string version, IPluginLog pluginLog)
         {
-            _version = version;
+            _ = version; // kept for call-site compatibility; native deps use fixed release assets
             _pluginLog = pluginLog;
             Status = Loc.T("Deps.Initializing");
 
@@ -42,13 +50,27 @@ namespace XivMediaPlayer
             }
         }
 
+        private string CefDir => Path.Combine(DependenciesDir, "cef");
+        private string LibVlcDir => Path.Combine(DependenciesDir, "libvlc");
+        private string CefDllPath => Path.Combine(CefDir, "libcef.dll");
+        private string LibVlcDllPath => Path.Combine(LibVlcDir, "win-x64", "libvlc.dll");
+
+        private bool HasCef => File.Exists(CefDllPath);
+        private bool HasLibVlc => File.Exists(LibVlcDllPath);
+
+        // Missing .version never forces re-download; only an existing mismatched stamp does (future NuGet bumps).
+        private bool NeedsCefDownload => !HasCef || HasMismatchedVersionStamp(CefDir, CefVersion);
+        private bool NeedsLibVlcDownload => !HasLibVlc || HasMismatchedVersionStamp(LibVlcDir, LibVlcVersion);
+
         private void CheckDependencies()
         {
-            string cefPath = Path.Combine(DependenciesDir, "cef", "libcef.dll");
-            string vlcPath = Path.Combine(DependenciesDir, "libvlc", "win-x64", "libvlc.dll");
-            string ffmpegPath = Path.Combine(DependenciesDir, "ffmpeg.exe");
+            // Ready when main DLLs exist. Backfill .version for legacy installs without re-downloading.
+            if (HasCef)
+                EnsureVersionStamp(CefDir, CefVersion);
+            if (HasLibVlc)
+                EnsureVersionStamp(LibVlcDir, LibVlcVersion);
 
-            if (File.Exists(cefPath) && File.Exists(vlcPath))
+            if (HasCef && HasLibVlc && !NeedsCefDownload && !NeedsLibVlcDownload)
             {
                 IsReady = true;
                 Status = Loc.T("Deps.Ready");
@@ -59,11 +81,52 @@ namespace XivMediaPlayer
                 Status = Loc.T("Deps.Missing");
             }
 
+            string ffmpegPath = Path.Combine(DependenciesDir, "ffmpeg.exe");
             if (!File.Exists(ffmpegPath) && !IsDownloading)
             {
                 _pluginLog.Information("ffmpeg.exe not found! Auto-downloading...");
                 _ = Task.Run(async () => await DownloadFFmpegAsync());
             }
+        }
+
+        private static bool HasMismatchedVersionStamp(string componentDir, string expectedVersion)
+        {
+            string stampPath = Path.Combine(componentDir, VersionStampFileName);
+            if (!File.Exists(stampPath))
+                return false;
+
+            try
+            {
+                string actual = File.ReadAllText(stampPath).Trim();
+                return !string.Equals(actual, expectedVersion, StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static void EnsureVersionStamp(string componentDir, string expectedVersion)
+        {
+            string stampPath = Path.Combine(componentDir, VersionStampFileName);
+            if (File.Exists(stampPath))
+                return;
+
+            try
+            {
+                Directory.CreateDirectory(componentDir);
+                File.WriteAllText(stampPath, expectedVersion);
+            }
+            catch
+            {
+                // Non-fatal: stamp is only for future version bumps.
+            }
+        }
+
+        private static void WriteVersionStamp(string componentDir, string version)
+        {
+            Directory.CreateDirectory(componentDir);
+            File.WriteAllText(Path.Combine(componentDir, VersionStampFileName), version);
         }
 
         public async Task DownloadDependenciesAsync()
@@ -78,76 +141,73 @@ namespace XivMediaPlayer
             try
             {
                 Directory.CreateDirectory(DependenciesDir);
-                string zipPath = Path.Combine(DependenciesDir, "Dependencies.zip");
 
-                string cnUrl = $"https://github.com/MeowZWR/XivMediaPlayer/releases/download/{_version}-cn/XivMediaPlayer-Dependencies.zip";
-                _pluginLog.Information($"Downloading dependencies from: https://meowrs.com/{cnUrl}");
-                bool success = await TryDownloadDependencies($"https://meowrs.com/{cnUrl}", zipPath);
-                if (!success)
+                var missing = new List<(string Name, string Asset, string Version, string ExtractHint)>();
+                if (NeedsCefDownload)
+                    missing.Add(("CEF", CefAssetName, CefVersion, "cef"));
+                if (NeedsLibVlcDownload)
+                    missing.Add(("LibVLC", LibVlcAssetName, LibVlcVersion, "libvlc"));
+
+                if (missing.Count == 0)
                 {
-                    _pluginLog.Information($"Downloading dependencies from: {cnUrl}");
-                    success = await TryDownloadDependencies(cnUrl, zipPath);
+                    IsReady = true;
+                    Status = Loc.T("Deps.Installed");
+                    return;
                 }
 
-                // Download URL for the dependencies zip from the GitHub release
-                if (!success)
+                int total = missing.Count;
+                for (int i = 0; i < missing.Count; i++)
                 {
-                    string url = $"https://github.com/Sebane1/XivMediaPlayer/releases/download/{_version}/XivMediaPlayer-Dependencies.zip";
-                    
-                    _pluginLog.Information($"Downloading dependencies from: {url}");
+                    var component = missing[i];
+                    int index = i + 1;
+                    float baseProgress = (float)i / total;
 
-                    success = await TryDownloadDependencies(url, zipPath);
-                }
-                
-                if (!success) {
-                    string fallbackUrl = "https://github.com/Sebane1/XivMediaPlayer/releases/latest/download/XivMediaPlayer-Dependencies.zip";
-                    _pluginLog.Information($"Version {_version} not found. Falling back to latest release: {fallbackUrl}");
-                    success = await TryDownloadDependencies(fallbackUrl, zipPath);
-                }
+                    string githubUrl =
+                        $"https://github.com/{NativeDepsRepo}/releases/download/{NativeDepsTag}/{component.Asset}";
+                    string zipPath = Path.Combine(DependenciesDir, component.Asset);
 
-                if (!success) {
-                    _pluginLog.Information("Direct fallback failed. Attempting to resolve via GitHub API...");
-                    string apiUrl = "https://api.github.com/repos/Sebane1/XivMediaPlayer/releases/latest";
-                    string actualUrl = await ResolveLatestAssetUrl(apiUrl, "XivMediaPlayer-Dependencies.zip");
-                    if (!string.IsNullOrEmpty(actualUrl)) {
-                        _pluginLog.Information($"Resolved latest asset URL: {actualUrl}");
-                        success = await TryDownloadDependencies(actualUrl, zipPath);
+                    Status = Loc.T("Deps.DownloadingComponent", component.Name, index, total);
+                    _pluginLog.Information($"Downloading {component.Name} from: https://meowrs.com/{githubUrl}");
+
+                    bool success = await TryDownloadDependencies(
+                        $"https://meowrs.com/{githubUrl}",
+                        zipPath,
+                        baseProgress,
+                        total,
+                        component.Name,
+                        index);
+
+                    if (!success)
+                    {
+                        _pluginLog.Information($"Downloading {component.Name} from: {githubUrl}");
+                        success = await TryDownloadDependencies(
+                            githubUrl,
+                            zipPath,
+                            baseProgress,
+                            total,
+                            component.Name,
+                            index);
                     }
-                }
 
-                if (!success) {
-                    throw new Exception("Failed to download dependencies. The server returned 404 Not Found for all available URLs. Please try downloading manually from the GitHub releases page.");
-                }
-
-                Status = Loc.T("Deps.Extracting");
-                _pluginLog.Information("Extracting Dependencies.zip...");
-
-                await Task.Run(() =>
-                {
-                    // Clean up old folders if they exist
-                    string cefDir = Path.Combine(DependenciesDir, "cef");
-                    string vlcDir = Path.Combine(DependenciesDir, "libvlc");
-                    
-                    try {
-                        if (Directory.Exists(cefDir)) Directory.Delete(cefDir, true);
-                        if (Directory.Exists(vlcDir)) Directory.Delete(vlcDir, true);
-
-                        ZipFile.ExtractToDirectory(zipPath, DependenciesDir, true);
-                    } catch (Exception e) when (e is UnauthorizedAccessException || e is IOException) {
-                        // DLLs are locked because they are already loaded into the game process memory.
-                        // (Usually happens if the user reloaded the plugin via /xlplugins)
-                        // We can safely silently ignore this because it means the files are already successfully installed!
-                        _pluginLog.Warning("Dependencies are currently locked by the process. Skipping extraction and assuming existing files are valid.");
+                    if (!success)
+                    {
+                        throw new Exception(
+                            $"Failed to download {component.Name} ({component.Asset}). Tried meowrs.com acceleration and direct GitHub.");
                     }
-                });
 
-                _pluginLog.Information("Extraction complete.");
-                
-                // Cleanup zip
-                if (File.Exists(zipPath))
-                {
-                    File.Delete(zipPath);
+                    Status = Loc.T("Deps.ExtractingComponent", component.Name, index, total);
+                    _pluginLog.Information($"Extracting {component.Asset}...");
+
+                    await Task.Run(() => ExtractComponentZip(zipPath, component.ExtractHint, component.Version));
+
+                    if (File.Exists(zipPath))
+                        File.Delete(zipPath);
+
+                    DownloadProgress = (float)index / total;
                 }
+
+                if (NeedsCefDownload || NeedsLibVlcDownload)
+                    throw new Exception("Dependencies extracted but required native libraries are still missing.");
 
                 IsReady = true;
                 Status = Loc.T("Deps.Installed");
@@ -170,52 +230,47 @@ namespace XivMediaPlayer
             }
         }
 
-        private async Task<string> ResolveLatestAssetUrl(string apiUrl, string assetName)
+        private void ExtractComponentZip(string zipPath, string componentFolderName, string version)
         {
+            string componentDir = Path.Combine(DependenciesDir, componentFolderName);
+
             try
             {
-                using (var client = new HttpClient())
-                {
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("XivMediaPlayer-Plugin");
-                    var json = await client.GetStringAsync(apiUrl);
-                    
-                    // Simple string search to avoid adding Newtonsoft.Json dependency if not already present in this file
-                    string searchStr = $"\"name\":\"{assetName}\"";
-                    int nameIdx = json.IndexOf(searchStr);
-                    if (nameIdx > 0)
-                    {
-                        // Look for browser_download_url nearby
-                        int urlIdx = json.IndexOf("\"browser_download_url\":\"", nameIdx);
-                        if (urlIdx > 0)
-                        {
-                            urlIdx += 24; // length of key
-                            int endIdx = json.IndexOf("\"", urlIdx);
-                            if (endIdx > urlIdx)
-                            {
-                                return json.Substring(urlIdx, endIdx - urlIdx);
-                            }
-                        }
-                    }
-                }
+                if (Directory.Exists(componentDir))
+                    Directory.Delete(componentDir, true);
+
+                ZipFile.ExtractToDirectory(zipPath, DependenciesDir, true);
+                WriteVersionStamp(componentDir, version);
             }
-            catch (Exception ex)
+            catch (Exception e) when (e is UnauthorizedAccessException || e is IOException)
             {
-                _pluginLog.Warning(ex, "Failed to resolve latest asset URL from GitHub API.");
+                // DLLs locked after /xlplugins reload — treat as already installed.
+                _pluginLog.Warning(
+                    $"{componentFolderName} files are locked by the process. Skipping extraction and assuming existing files are valid.");
+                if (Directory.Exists(componentDir))
+                    EnsureVersionStamp(componentDir, version);
             }
-            return string.Empty;
         }
 
-        private async Task<bool> TryDownloadDependencies(string url, string zipPath)
+        private async Task<bool> TryDownloadDependencies(
+            string url,
+            string zipPath,
+            float baseProgress,
+            int totalComponents,
+            string componentName,
+            int componentIndex)
         {
             try
             {
                 using (var client = new HttpClient())
                 {
+                    client.Timeout = TimeSpan.FromHours(2);
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("XivMediaPlayer-Plugin");
-                    
+
                     using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
                     {
-                        if (!response.IsSuccessStatusCode) {
+                        if (!response.IsSuccessStatusCode)
+                        {
                             _pluginLog.Warning($"URL returned {(int)response.StatusCode} {response.ReasonPhrase}: {url}");
                             return false;
                         }
@@ -242,14 +297,27 @@ namespace XivMediaPlayer
                                     await fileStream.WriteAsync(buffer, 0, read);
                                     totalRead += read;
 
+                                    float fileProgress = canReportProgress ? (float)totalRead / totalBytes : 0f;
+                                    DownloadProgress = Math.Min(1f, baseProgress + fileProgress / totalComponents);
+
                                     if (canReportProgress)
                                     {
-                                        DownloadProgress = (float)totalRead / totalBytes;
-                                        Status = Loc.T("Deps.DownloadingProgress", totalRead / 1024 / 1024, totalBytes / 1024 / 1024);
+                                        Status = Loc.T(
+                                            "Deps.DownloadingComponentProgress",
+                                            componentName,
+                                            componentIndex,
+                                            totalComponents,
+                                            totalRead / 1024 / 1024,
+                                            totalBytes / 1024 / 1024);
                                     }
                                     else
                                     {
-                                        Status = Loc.T("Deps.DownloadingUnknownSize", totalRead / 1024 / 1024);
+                                        Status = Loc.T(
+                                            "Deps.DownloadingComponentUnknownSize",
+                                            componentName,
+                                            componentIndex,
+                                            totalComponents,
+                                            totalRead / 1024 / 1024);
                                     }
                                 }
                             } while (isMoreToRead);
@@ -257,7 +325,9 @@ namespace XivMediaPlayer
                     }
                 }
                 return true;
-            } catch (HttpRequestException) {
+            }
+            catch (HttpRequestException)
+            {
                 return false;
             }
         }
