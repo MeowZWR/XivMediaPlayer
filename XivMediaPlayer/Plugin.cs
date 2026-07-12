@@ -1098,6 +1098,8 @@ namespace XivMediaPlayer
         private bool _lastStreamIsLive = false;
         private bool _isIntentionallyPaused = false;
         private DateTime _lastUrlLoadTime = DateTime.MinValue;
+        private DateTime _lastPasteUtc = DateTime.MinValue;
+        private const int PasteDebounceMs = 800;
 
         // Playback stall watchdog (P0)
         private ulong _stallWatchLastFrameCount = 0;
@@ -1114,6 +1116,16 @@ namespace XivMediaPlayer
         private DateTime _mediaRecoveryGraceUntil = DateTime.MinValue;
         private int _savedPlaybackTimeMs = -1;
         private const int MediaRecoveryGraceSeconds = 20;
+
+        private bool TryAcceptPasteRequest()
+        {
+            if ((DateTime.UtcNow - _lastPasteUtc).TotalMilliseconds < PasteDebounceMs)
+                return false;
+            if (_isResolvingMedia)
+                return false;
+            _lastPasteUtc = DateTime.UtcNow;
+            return true;
+        }
 
         private bool IsUrlSafeForPublic(string url)
         {
@@ -1785,15 +1797,19 @@ namespace XivMediaPlayer
             }
 
             var vlcState = activeStream.VlcState;
+            // Opening is normal during URL switch; treating it as stall triggers Stop/Dispose
+            // while LibVLC is still starting and can crash natively (libvlc_Quit UAF).
             bool isActivelyStreaming = vlcState == LibVLCSharp.Shared.VLCState.Playing
-                || vlcState == LibVLCSharp.Shared.VLCState.Buffering
-                || vlcState == LibVLCSharp.Shared.VLCState.Opening;
+                || vlcState == LibVLCSharp.Shared.VLCState.Buffering;
 
             if (!isActivelyStreaming || DateTime.UtcNow < _mediaRecoveryGraceUntil)
             {
                 ResetStallWatchTimers();
                 return;
             }
+
+            if ((DateTime.UtcNow - _lastUrlLoadTime).TotalSeconds < 15)
+                return;
 
             var now = DateTime.UtcNow;
             bool frameStalled = false;
@@ -3027,6 +3043,7 @@ namespace XivMediaPlayer
                                     _ = PushMediaToServerAsync(false);
                                     _queueMenuTextureManager?.UpdateQueue(_mediaQueue, _currentMediaTitle ?? "Nothing Playing");
                                 } else if (action == "paste") {
+                                    if (!TryAcceptPasteRequest()) return;
                                     Thread thread = new Thread(() =>
                                     {
                                         string clip = "";
@@ -3149,7 +3166,7 @@ namespace XivMediaPlayer
                                 // Paste (0.85 - 0.89)
                                 else if (uv.X >= 0.85f && uv.X <= 0.89f)
                                 {
-                                    if (_playerObject != null)
+                                    if (_playerObject != null && TryAcceptPasteRequest())
                                     {
                                         PrintVerbose("[Media Player] Reading clipboard...");
                                         Thread thread = new Thread(() =>

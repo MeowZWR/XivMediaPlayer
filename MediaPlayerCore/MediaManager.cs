@@ -21,6 +21,8 @@ namespace MediaPlayerCore {
     private bool notDisposed = true;
     private float _livestreamVolume = 1;
     private float _cameraAndPlayerPositionSlider;
+    // Serialize all LibVLC Play/Stop/Dispose to avoid concurrent Quit/event_detach crashes.
+    private readonly SemaphoreSlim _vlcGate = new SemaphoreSlim(1, 1);
 
     public float LiveStreamVolume { get => _livestreamVolume; set => _livestreamVolume = value; }
     public byte[] LastFrame { get => _lastFrame; set => _lastFrame = value; }
@@ -49,17 +51,21 @@ namespace MediaPlayerCore {
     }
 
     public void PlayStream(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false, string? slaveAudioPath = null) {
-      Task.Run(() => {
+      Task.Run(async () => {
+        await _vlcGate.WaitAsync().ConfigureAwait(false);
         try {
+          if (!notDisposed) return;
           if (!audioOnly) {
               StopFFmpegStream();
           }
           OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
           if (!string.IsNullOrEmpty(audioPath)) {
-            ConfigureStream(playerObject, audioPath, spatialAllowed, startTimeMs, httpHeaders, audioOnly, slaveAudioPath);
+            await ConfigureStreamAsync(playerObject, audioPath, spatialAllowed, startTimeMs, httpHeaders, audioOnly, slaveAudioPath).ConfigureAwait(false);
           }
         } catch (Exception e) {
           OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
+        } finally {
+          try { _vlcGate.Release(); } catch { }
         }
       });
     }
@@ -76,8 +82,10 @@ namespace MediaPlayerCore {
     public bool IsFFmpegPlaying => _ffmpegStream != null && _ffmpegStream.IsPlaying;
 
     public void PlayFFmpegStream(string url, IMediaGameObject characterObject = null, bool spatialAllowed = false) {
-        Task.Run(() => {
+        Task.Run(async () => {
+            await _vlcGate.WaitAsync().ConfigureAwait(false);
             try {
+                if (!notDisposed) return;
                 StopFFmpegStream();
 
                 // Stop all VLC streams synchronously to prevent them from playing concurrently
@@ -86,6 +94,7 @@ namespace MediaPlayerCore {
                     streams = _playbackStreams.Values.ToArray();
                     _playbackStreams.Clear();
                     streams = streams.Concat(_deadStreams).ToArray();
+                    _deadStreams.Clear();
                 }
                 foreach (var stream in streams) {
                     try { stream?.Dispose(); } catch { }
@@ -102,6 +111,8 @@ namespace MediaPlayerCore {
                 _ffmpegStream.Play(url, characterObject, spatialAllowed);
             } catch (Exception e) {
                 OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
+            } finally {
+                try { _vlcGate.Release(); } catch { }
             }
         });
     }
@@ -120,35 +131,31 @@ namespace MediaPlayerCore {
     }
 
     public void ChangeStream(IMediaGameObject playerObject, string audioPath, float width, string? slaveAudioPath = null) {
-      Task.Run(() => {
-        try {
-          OnNewMediaTriggered?.Invoke(this, EventArgs.Empty);
-          if (!string.IsNullOrEmpty(audioPath)) {
-            if (_playbackStreams.ContainsKey(playerObject.Name)) {
-              _playbackStreams[playerObject.Name].ChangeVideoStream(audioPath, width);
-            }
-          }
-        } catch (Exception e) {
-          OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
-        }
-      });
+      bool spatial = ActiveStream?.SpatialAllowed ?? true;
+      PlayStream(playerObject, audioPath, spatial, startTimeMs: 0, httpHeaders: null, audioOnly: false, slaveAudioPath: slaveAudioPath);
     }
 
     public void StopStream() {
-      // Copy references before clearing to avoid collection modification issues
-      MediaObject[] streams;
-      lock (_playbackStreams) {
-          streams = _playbackStreams.Values.ToArray();
-          _playbackStreams.Clear();
-          streams = streams.Concat(_deadStreams).ToArray();
-      }
-      // VLC's Stop() is synchronous and blocks — run on background thread
-      Task.Run(() => {
-        StopFFmpegStream();
-        foreach (var stream in streams) {
-          try {
-            stream?.Dispose();
-          } catch { }
+      Task.Run(async () => {
+        await _vlcGate.WaitAsync().ConfigureAwait(false);
+        try {
+          MediaObject[] streams;
+          lock (_playbackStreams) {
+              streams = _playbackStreams.Values.ToArray();
+              _playbackStreams.Clear();
+              streams = streams.Concat(_deadStreams).ToArray();
+              _deadStreams.Clear();
+          }
+          StopFFmpegStream();
+          foreach (var stream in streams) {
+            try {
+              stream?.Dispose();
+            } catch { }
+          }
+        } catch (Exception e) {
+          OnErrorReceived?.Invoke(this, new MediaError() { Exception = e });
+        } finally {
+          try { _vlcGate.Release(); } catch { }
         }
       });
     }
@@ -169,39 +176,35 @@ namespace MediaPlayerCore {
       return false;
     }
 
-    public void ConfigureStream(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false, string? slaveAudioPath = null) {
-      if (playerObject != null) {
-          MediaObject stream = null;
-          bool isNew = false;
-          
-          lock (_playbackStreams) {
-              // Ensure we only ever have ONE active video stream decoding to the LastFrame buffer.
-              foreach (var kvp in _playbackStreams.ToList()) {
-                  if (kvp.Key != playerObject.Name) {
-                      kvp.Value.Stop();
-                      _playbackStreams.TryRemove(kvp.Key, out _);
-                  }
-              }
+    private async Task ConfigureStreamAsync(IMediaGameObject playerObject, string audioPath, bool spatialAllowed, int startTimeMs, Dictionary<string, string>? httpHeaders = null, bool audioOnly = false, string? slaveAudioPath = null) {
+      if (playerObject == null) return;
 
-              if (!_playbackStreams.TryGetValue(playerObject.Name, out stream)) {
-                  stream = new MediaObject(this, playerObject, _camera, SoundType.Livestream, audioPath, _libVLCPath, spatialAllowed, audioOnly);
-                  _playbackStreams[playerObject.Name] = stream;
-                  isNew = true;
-              }
-          }
-
-          if (isNew) {
-            lock (stream) {
-              stream.OnErrorReceived += MediaManager_OnErrorReceived;
-              stream.PlaybackFinished += (s, e) => {
-                 OnPlaybackFinished?.Invoke(this, e);
-              };
-              stream.Play(audioPath, _livestreamVolume, startTimeMs, httpHeaders, slaveAudioPath);
-            }
-          } else {
-             stream.ChangeVideoStream(audioPath, LastFrameWidth, startTimeMs, httpHeaders, slaveAudioPath);
-          }
+      MediaObject[] toDispose;
+      lock (_playbackStreams) {
+          toDispose = _playbackStreams.Values.ToArray();
+          _playbackStreams.Clear();
+          toDispose = toDispose.Concat(_deadStreams).ToArray();
+          _deadStreams.Clear();
       }
+
+      foreach (var old in toDispose) {
+          try { old?.Dispose(); } catch { }
+      }
+
+      var stream = new MediaObject(this, playerObject, _camera, SoundType.Livestream, audioPath, _libVLCPath, spatialAllowed, audioOnly);
+      lock (_playbackStreams) {
+          if (!notDisposed) {
+              try { stream.Dispose(); } catch { }
+              return;
+          }
+          _playbackStreams[playerObject.Name] = stream;
+      }
+
+      stream.OnErrorReceived += MediaManager_OnErrorReceived;
+      stream.PlaybackFinished += (s, e) => {
+         OnPlaybackFinished?.Invoke(this, e);
+      };
+      await stream.PlayAsync(audioPath, _livestreamVolume, startTimeMs, httpHeaders, slaveAudioPath).ConfigureAwait(false);
     }
 
     private void Update() {
@@ -298,28 +301,33 @@ namespace MediaPlayerCore {
 
     public void CleanSounds() {
       try {
-        lock (_playbackStreams) {
-            var allStreamsToDispose = _playbackStreams.Values.Concat(_deadStreams).ToArray();
-            foreach (var sound in allStreamsToDispose) {
-              if (sound != null) {
-                sound.Invalidated = true;
-                sound.Dispose();
-                sound.OnErrorReceived -= MediaManager_OnErrorReceived;
-              }
+        _vlcGate.Wait();
+        try {
+            lock (_playbackStreams) {
+                var allStreamsToDispose = _playbackStreams.Values.Concat(_deadStreams).ToArray();
+                foreach (var sound in allStreamsToDispose) {
+                  if (sound != null) {
+                    sound.Invalidated = true;
+                    sound.Dispose();
+                    sound.OnErrorReceived -= MediaManager_OnErrorReceived;
+                  }
+                }
+                _playbackStreams?.Clear();
+                _deadStreams.Clear();
             }
-            _playbackStreams?.Clear();
-            _deadStreams.Clear();
+            lock (FrameLock) {
+              _lastFrame = Array.Empty<byte>();
+              LastFrameWidth = 0;
+              LastFrameHeight = 0;
+              LastFrameTrueWidth = 0;
+              LastFrameTrueHeight = 0;
+              LastFrameCount++;
+            }
+            StopFFmpegStream();
+            OnCleanupTime?.Invoke(this, EventArgs.Empty);
+        } finally {
+            try { _vlcGate.Release(); } catch { }
         }
-        lock (FrameLock) {
-          _lastFrame = Array.Empty<byte>();
-          LastFrameWidth = 0;
-          LastFrameHeight = 0;
-          LastFrameTrueWidth = 0;
-          LastFrameTrueHeight = 0;
-          LastFrameCount++;
-        }
-        StopFFmpegStream();
-        OnCleanupTime?.Invoke(this, EventArgs.Empty);
       } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
     }
 
@@ -329,10 +337,7 @@ namespace MediaPlayerCore {
       try {
         _updateLoop?.Wait(TimeSpan.FromSeconds(2));
       } catch { }
+      try { _vlcGate.Dispose(); } catch { }
     }
   }
 }
-
-
-
-
