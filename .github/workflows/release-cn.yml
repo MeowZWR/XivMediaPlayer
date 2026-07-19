@@ -7,19 +7,84 @@ on:
 
 name: CN Release
 
+env:
+  NATIVE_DEPS_TAG: native-dependencies
+
 jobs:
+  detect-native-deps:
+    name: Detect Native Dependency Updates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      component: ${{ steps.check.outputs.component }}
+      cef_version: ${{ steps.check.outputs.cef_version }}
+      libvlc_version: ${{ steps.check.outputs.libvlc_version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Compare props versions to release assets
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CEF=$(sed -n 's/.*<CefSharpVersion>\([^<]*\)<\/CefSharpVersion>.*/\1/p' NativeDependencies.props | head -n1)
+          VLC=$(sed -n 's/.*<LibVlcVersion>\([^<]*\)<\/LibVlcVersion>.*/\1/p' NativeDependencies.props | head -n1)
+          if [ -z "$CEF" ] || [ -z "$VLC" ]; then
+            echo "Failed to read CefSharpVersion / LibVlcVersion from NativeDependencies.props"
+            exit 1
+          fi
+
+          echo "cef_version=$CEF" >> "$GITHUB_OUTPUT"
+          echo "libvlc_version=$VLC" >> "$GITHUB_OUTPUT"
+          echo "Desired: cef-${CEF}.zip libvlc-${VLC}.zip"
+
+          NEED_CEF=1
+          NEED_VLC=1
+
+          if gh release view "${{ env.NATIVE_DEPS_TAG }}" >/dev/null 2>&1; then
+            ASSETS=$(gh release view "${{ env.NATIVE_DEPS_TAG }}" --json assets --jq '.assets[].name')
+            echo "Existing assets under ${{ env.NATIVE_DEPS_TAG }}:"
+            printf '%s\n' "$ASSETS"
+            if printf '%s\n' "$ASSETS" | grep -Fxq "cef-${CEF}.zip"; then
+              NEED_CEF=0
+            fi
+            if printf '%s\n' "$ASSETS" | grep -Fxq "libvlc-${VLC}.zip"; then
+              NEED_VLC=0
+            fi
+          else
+            echo "Release ${{ env.NATIVE_DEPS_TAG }} does not exist yet; will publish both"
+          fi
+
+          if [ "$NEED_CEF" -eq 1 ] && [ "$NEED_VLC" -eq 1 ]; then
+            COMPONENT=both
+          elif [ "$NEED_CEF" -eq 1 ]; then
+            COMPONENT=cef
+          elif [ "$NEED_VLC" -eq 1 ]; then
+            COMPONENT=libvlc
+          else
+            COMPONENT=none
+          fi
+
+          echo "component=$COMPONENT" >> "$GITHUB_OUTPUT"
+          echo "NEED_CEF=$NEED_CEF NEED_VLC=$NEED_VLC -> component=$COMPONENT"
+
   release:
     name: CN Release
+    needs: detect-native-deps
     runs-on: windows-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v1
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.x.x'
 
@@ -44,7 +109,51 @@ jobs:
           $content = $content -replace '0.0.0.0',$ver
           set-content -Path $path -Value $content
 
-      - name: Packing Release
+      - name: Pack updated native dependency zips
+        if: needs.detect-native-deps.outputs.component != 'none'
+        shell: bash
+        env:
+          COMPONENT: ${{ needs.detect-native-deps.outputs.component }}
+          CEF_VERSION: ${{ needs.detect-native-deps.outputs.cef_version }}
+          LIBVLC_VERSION: ${{ needs.detect-native-deps.outputs.libvlc_version }}
+        run: |
+          set -euo pipefail
+          OUT="XivMediaPlayer/bin/x64/Release"
+          ART="${GITHUB_WORKSPACE}/native-deps-artifacts"
+          mkdir -p "$ART"
+
+          if [ ! -d "$OUT/cef" ] || [ ! -d "$OUT/libvlc" ]; then
+            echo "Expected cef/ and libvlc/ in build output"
+            ls -la "$OUT"
+            exit 1
+          fi
+
+          pushd "$OUT"
+          if [ "$COMPONENT" = "both" ] || [ "$COMPONENT" = "cef" ]; then
+            7z a "$ART/cef-${CEF_VERSION}.zip" cef
+          fi
+          if [ "$COMPONENT" = "both" ] || [ "$COMPONENT" = "libvlc" ]; then
+            7z a "$ART/libvlc-${LIBVLC_VERSION}.zip" libvlc
+          fi
+          popd
+          ls -la "$ART"
+
+      - name: Publish native dependencies release
+        if: needs.detect-native-deps.outputs.component != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "${{ env.NATIVE_DEPS_TAG }}" >/dev/null 2>&1; then
+            gh release create "${{ env.NATIVE_DEPS_TAG }}" \
+              --prerelease \
+              --title "Native dependencies (CEF / LibVLC)" \
+              --notes "CefSharp and LibVLC native binaries for in-game autodownload. Do not download or install manually — the plugin fetches the matching asset when needed. Versions come from NativeDependencies.props."
+          fi
+          gh release upload "${{ env.NATIVE_DEPS_TAG }}" native-deps-artifacts/*.zip --clobber
+
+      - name: Packing plugin release
         run: |
           pushd XivMediaPlayer/bin/x64/Release/
           
@@ -63,8 +172,8 @@ jobs:
           popd
         shell: bash
 
-      - name: Create Release
-        uses: ncipollo/release-action@v1.12.0
+      - name: Create plugin release
+        uses: ncipollo/release-action@v1.21.0
         with:
           name: XivMediaPlayer ${{ github.ref_name }}
           artifacts: "./XivMediaPlayer/bin/x64/*.zip"

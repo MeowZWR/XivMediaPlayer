@@ -1,6 +1,7 @@
 <Project>
   <!-- Single source of truth for native CEF / LibVLC versions.
-       Bump these when upgrading NuGet packages, then re-run publish-native-dependencies. -->
+       Bump these when upgrading NuGet packages. Pushing a *-cn tag auto-publishes
+       missing cef-/libvlc- assets via release-cn; or run publish-native-dependencies manually. -->
   <PropertyGroup>
     <CefSharpVersion>148.0.90</CefSharpVersion>
     <ChromiumRuntimeVersion>148.0.9</ChromiumRuntimeVersion>
