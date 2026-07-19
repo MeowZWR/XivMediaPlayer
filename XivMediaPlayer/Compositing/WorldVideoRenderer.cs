@@ -67,6 +67,33 @@ namespace XivMediaPlayer.Compositing {
     }
 
     /// <summary>
+    /// Starts background HLSL compile and finishes D3D resource creation on the draw thread.
+    /// Returns true only when the depth pipeline is ready; callers should fall back to screen-space meanwhile.
+    /// </summary>
+    public bool TryEnsureDepthPipelineReady() {
+      if (_disposed) return false;
+
+      if (_depthRenderer == null)
+        _depthRenderer = new DepthTestedRenderer();
+      if (_vignetteExtractor == null)
+        _vignetteExtractor = new VignetteExtractor();
+
+      // Kick both compiles in parallel; vignette is optional and never blocks the depth path.
+      if (!_vignetteExtractor.IsInitialized)
+        _vignetteExtractor.TryFinishInitialize();
+
+      if (!_depthRenderer.IsInitialized) {
+        if (!_depthRenderer.TryFinishInitialize()) {
+          if (!string.IsNullOrEmpty(_depthRenderer.InitError))
+            DepthRendererError = $"Init failed: {_depthRenderer.InitError}";
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    /// <summary>
     /// Returns initialization error from the depth renderer, if any.
     /// </summary>
     public string? DepthRendererError { get; private set; }
@@ -120,15 +147,19 @@ namespace XivMediaPlayer.Compositing {
       }
 
       if (_useDepthOcclusion && depthCapture != null && cameraPos.HasValue && cameraForward.HasValue && cameraRight.HasValue && cameraUp.HasValue) {
-        var (tl, tr, br, bl) = _transform.Corners;
-        float zTL = cameraPos.HasValue && cameraForward.HasValue ? Vector3.Dot(tl - cameraPos.Value, -cameraForward.Value) : 1f;
-        float zTR = cameraPos.HasValue && cameraForward.HasValue ? Vector3.Dot(tr - cameraPos.Value, -cameraForward.Value) : 1f;
-        float zBR = cameraPos.HasValue && cameraForward.HasValue ? Vector3.Dot(br - cameraPos.Value, -cameraForward.Value) : 1f;
-        float zBL = cameraPos.HasValue && cameraForward.HasValue ? Vector3.Dot(bl - cameraPos.Value, -cameraForward.Value) : 1f;
-        bool allCornersInFront = zTL > 0.1f && zTR > 0.1f && zBR > 0.1f && zBL > 0.1f;
+        if (!TryEnsureDepthPipelineReady()) {
+          RenderScreenSpace(textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
+        } else {
+          var (tl, tr, br, bl) = _transform.Corners;
+          float zTL = Vector3.Dot(tl - cameraPos.Value, -cameraForward.Value);
+          float zTR = Vector3.Dot(tr - cameraPos.Value, -cameraForward.Value);
+          float zBR = Vector3.Dot(br - cameraPos.Value, -cameraForward.Value);
+          float zBL = Vector3.Dot(bl - cameraPos.Value, -cameraForward.Value);
+          bool allCornersInFront = zTL > 0.1f && zTR > 0.1f && zBR > 0.1f && zBL > 0.1f;
 
-        RenderWithOcclusion(textureSrv, depthCapture, cameraPos.Value,
-          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize, uiBlendThreshold, uvBottom, uvRight);
+          RenderWithOcclusion(textureSrv, depthCapture, cameraPos.Value,
+            cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize, uiBlendThreshold, uvBottom, uvRight);
+        }
       } else {
         RenderScreenSpace(textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
       }
@@ -347,22 +378,6 @@ namespace XivMediaPlayer.Compositing {
       if (_enableGlow && allCornersInFront) {
         RenderGlow(drawList, textureSrv, sTL, sTR, sBR, sBL, 1f);
       }
-
-        // Render standard UI layer (non-occluded TV UI)
-        // Ensure DepthTestedRenderer is initialized
-        if (_depthRenderer == null) {
-          _depthRenderer = new DepthTestedRenderer();
-          _depthRenderer.Initialize();
-          _vignetteExtractor = new VignetteExtractor();
-          _vignetteExtractor.Initialize();
-        }
-        if (!_depthRenderer.IsInitialized) {
-          if (!_depthRenderer.Initialize()) {
-            DepthRendererError = $"Init failed: {_depthRenderer.InitError}";
-            RenderScreenSpace(textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom);
-            return;
-          }
-        }
 
       // Get viewport size
       var viewport = ImGui.GetMainViewport();

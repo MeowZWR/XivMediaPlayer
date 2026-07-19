@@ -37,7 +37,49 @@ namespace XivMediaPlayer.Compositing {
         private bool _initialized;
         private bool _disposed;
 
+        private volatile bool _compileStarted;
+        private volatile bool _compileFinished;
+        private volatile bool _compileFailed;
+        private byte[]? _vsBytecode;
+        private byte[]? _psExtractBytecode;
+        private byte[]? _psExtraBytecode;
+
+        public bool IsInitialized => _initialized;
         public ID3D11ShaderResourceView ExtrapolatedVignetteSRV => _extrapSRV;
+
+        private void BeginBackgroundCompile() {
+            if (_initialized || _disposed || _compileStarted) return;
+            _compileStarted = true;
+
+            System.Threading.Tasks.Task.Run(() => {
+                try {
+                    _vsBytecode = Compiler.Compile(ExtractorShaderCode, "VSMain", "", "vs_5_0").ToArray();
+                    _psExtractBytecode = Compiler.Compile(ExtractorShaderCode, "PSExtract", "", "ps_5_0").ToArray();
+                    _psExtraBytecode = Compiler.Compile(ExtractorShaderCode, "PSExtrapolate", "", "ps_5_0").ToArray();
+                    _compileFinished = true;
+                } catch {
+                    _compileFailed = true;
+                    _compileFinished = true;
+                }
+            });
+        }
+
+        public bool TryFinishInitialize() {
+            if (_initialized) return true;
+            if (_disposed) return false;
+            if (!_compileStarted) BeginBackgroundCompile();
+            if (_compileFailed || !_compileFinished
+                || _vsBytecode == null || _psExtractBytecode == null || _psExtraBytecode == null)
+                return false;
+
+            try {
+                return FinishInitializeFromBytecode(_vsBytecode, _psExtractBytecode, _psExtraBytecode);
+            } finally {
+                _vsBytecode = null;
+                _psExtractBytecode = null;
+                _psExtraBytecode = null;
+            }
+        }
 
         private const string ExtractorShaderCode = @"
 Texture2D BackBuffer : register(t0);
@@ -117,9 +159,7 @@ float4 PSExtrapolate(PSInput input) : SV_Target {
 }
 ";
 
-        public bool Initialize() {
-            if (_initialized || _disposed) return _initialized;
-
+        private bool FinishInitializeFromBytecode(byte[] vsBytecode, byte[] psExtractBytecode, byte[] psExtraBytecode) {
             try {
                 var ffxivDevice = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance();
                 if (ffxivDevice == null || ffxivDevice->D3D11DeviceContext == null) return false;
@@ -129,14 +169,9 @@ float4 PSExtrapolate(PSInput input) : SV_Target {
                 _context = new ID3D11DeviceContext(contextPtr);
                 _device = _context.Device;
 
-                var vsBlob = Compiler.Compile(ExtractorShaderCode, "VSMain", "", "vs_5_0");
-                _vertexShader = _device.CreateVertexShader(vsBlob.Span);
-
-                var psExBlob = Compiler.Compile(ExtractorShaderCode, "PSExtract", "", "ps_5_0");
-                _extractShader = _device.CreatePixelShader(psExBlob.Span);
-
-                var psExtraBlob = Compiler.Compile(ExtractorShaderCode, "PSExtrapolate", "", "ps_5_0");
-                _extrapolateShader = _device.CreatePixelShader(psExtraBlob.Span);
+                _vertexShader = _device.CreateVertexShader(vsBytecode);
+                _extractShader = _device.CreatePixelShader(psExtractBytecode);
+                _extrapolateShader = _device.CreatePixelShader(psExtraBytecode);
 
                 _linearSampler = _device.CreateSamplerState(new SamplerDescription {
                     Filter = Filter.MinMagMipLinear,

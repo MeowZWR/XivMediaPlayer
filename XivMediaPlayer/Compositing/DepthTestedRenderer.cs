@@ -36,6 +36,13 @@ namespace XivMediaPlayer.Compositing {
     private bool _disposed;
     private string _initError;
 
+    private volatile bool _compileStarted;
+    private volatile bool _compileFinished;
+    private volatile bool _compileFailed;
+    private byte[]? _vsBytecode;
+    private byte[]? _psBytecode;
+    private string? _compileError;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct PSConstants {
       public Vector2 CornerTL;
@@ -1220,9 +1227,51 @@ float4 PS(VS_OUT input) : SV_TARGET {
     public string InitError => _initError;
     public ID3D11ShaderResourceView OutputSRV => _renderTargetSRV;
 
-    public bool Initialize() {
-      if (_initialized || _disposed) return _initialized;
+    /// <summary>
+    /// Compiles HLSL off the render thread. Call <see cref="TryFinishInitialize"/> later on the draw thread.
+    /// </summary>
+    private void BeginBackgroundCompile() {
+      if (_initialized || _disposed || _compileStarted) return;
+      _compileStarted = true;
 
+      System.Threading.Tasks.Task.Run(() => {
+        try {
+          var vsBlob = Compiler.Compile(ShaderCode, "VS", "", "vs_5_0");
+          var psBlob = Compiler.Compile(ShaderCode, "PS", "", "ps_5_0");
+          _vsBytecode = vsBlob.ToArray();
+          _psBytecode = psBlob.ToArray();
+          _compileFinished = true;
+        } catch (Exception ex) {
+          _compileError = ex.Message;
+          _compileFailed = true;
+          _compileFinished = true;
+        }
+      });
+    }
+
+    /// <summary>
+    /// Creates D3D resources from background-compiled bytecode. Must run on the draw thread.
+    /// Returns true when initialized, false while still compiling or on failure.
+    /// </summary>
+    public bool TryFinishInitialize() {
+      if (_initialized) return true;
+      if (_disposed) return false;
+      if (!_compileStarted) BeginBackgroundCompile();
+      if (_compileFailed) {
+        _initError = $"DepthTestedRenderer compile failed: {_compileError}";
+        return false;
+      }
+      if (!_compileFinished || _vsBytecode == null || _psBytecode == null) return false;
+
+      try {
+        return FinishInitializeFromBytecode(_vsBytecode, _psBytecode);
+      } finally {
+        _vsBytecode = null;
+        _psBytecode = null;
+      }
+    }
+
+    private bool FinishInitializeFromBytecode(byte[] vsBytecode, byte[] psBytecode) {
       try {
         var ffxivDevice = FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance();
         if (ffxivDevice == null || ffxivDevice->D3D11DeviceContext == null) {
@@ -1235,12 +1284,8 @@ float4 PS(VS_OUT input) : SV_TARGET {
         _context = new ID3D11DeviceContext(contextPtr);
         _device = _context.Device;
 
-        // Compile shaders
-        var vsBytecode = Compiler.Compile(ShaderCode, "VS", "", "vs_5_0");
-        _vertexShader = _device.CreateVertexShader(vsBytecode.Span);
-
-        var psBytecode = Compiler.Compile(ShaderCode, "PS", "", "ps_5_0");
-        _pixelShader = _device.CreatePixelShader(psBytecode.Span);
+        _vertexShader = _device.CreateVertexShader(vsBytecode);
+        _pixelShader = _device.CreatePixelShader(psBytecode);
 
         // Constant buffers
         _constantBuffer = _device.CreateBuffer(new BufferDescription {
