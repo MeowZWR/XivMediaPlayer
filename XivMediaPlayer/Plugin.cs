@@ -4913,8 +4913,6 @@ namespace XivMediaPlayer
 
         private unsafe void OnDraw()
         {
-            if (_worldRenderer != null) _worldRenderer.UseDepthOcclusion = _config.DepthOcclusionEnabled;
-
             bool useDifferenceFallback = false;
             if (_config.EnableWanderersCampfireFix && _objectTable != null) {
                 foreach (var obj in _objectTable) {
@@ -4930,9 +4928,6 @@ namespace XivMediaPlayer
                     }
                 }
             }
-
-            // Reset per-frame depth capture flag
-            _depthCapture?.BeginFrame();
 
             if (!_dependencyManager.IsReady)
             {
@@ -4977,14 +4972,21 @@ namespace XivMediaPlayer
             var roomBannersToRender = GetRoomBannersForPrimaryLocation();
             bool shouldRenderWorldVideo = _worldRenderer != null && _clientState.IsLoggedIn
                 && (roomTvsToRender.Count > 0 || roomBannersToRender.Count > 0);
+            bool shouldUseDepthThisFrame = shouldRenderWorldVideo && _config.DepthOcclusionEnabled;
+
+            if (_worldRenderer != null)
+                _worldRenderer.UseDepthOcclusion = shouldUseDepthThisFrame;
+
+            if (_depthCapture != null)
+            {
+                _depthCapture.ReadDepthEnabled = _depthPreviewWindow?.IsOpen == true;
+                if (shouldUseDepthThisFrame || _depthCapture.ReadDepthEnabled)
+                    _depthCapture.BeginFrame();
+            }
 
             // World-space video rendering
             if (shouldRenderWorldVideo)
             {
-                // Only read depth to CPU when occlusion is on
-                if (_depthCapture != null)
-                    _depthCapture.ReadDepthEnabled = _worldRenderer.UseDepthOcclusion;
-
                 _videoWindow.GetCurrentVideoTexture(out IntPtr videoSrv, out int videoWidth, out int videoHeight, out int videoTrueWidth, out int videoTrueHeight);
                 if (videoSrv != IntPtr.Zero || roomBannersToRender.Count > 0)
                 {
@@ -5111,7 +5113,10 @@ namespace XivMediaPlayer
 
                         IntPtr unk68Ptr = SceneColorProbe.GetToneAdjustSourceSrvPtr();
                         
-                        bool isOccluding = _uiCapture.IsPixelOccluding(physX, physY, unk68Ptr, _depthCapture, useDifferenceFallback);
+                        bool isOccluding = _uiCapture.IsPixelOccluding(
+                            physX, physY, unk68Ptr,
+                            _depthCapture?.ReadDepthEnabled == true ? _depthCapture : null,
+                            useDifferenceFallback);
                         if (isOccluding)
                         {
                             uv = new System.Numerics.Vector2(-1, -1);
@@ -5599,7 +5604,7 @@ namespace XivMediaPlayer
                                         ? 1.0f
                                         : showScreensaver;
 
-                                    _worldRenderer.Render(videoSrv, videoWidth, videoHeight, videoTrueWidth, videoTrueHeight, _depthCapture,
+                                    _worldRenderer.Render(videoSrv, videoWidth, videoHeight, videoTrueWidth, videoTrueHeight, shouldUseDepthThisFrame ? _depthCapture : null,
                                         _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp,
                                         fovY, aspectRatio, _uiCapture, nearPlane, farPlane, screenHover, progress, bufferProgress, playbackState, lockState, volume, screenOverlay, _config.LoopEnabled, _config.ShuffleEnabled, timeSeconds, tvShowScreensaver, useDifferenceFallback: useDifferenceFallback,
                                         viewProjMatrix: _prevViewProjMatrix ?? viewProjMatrix, viewportPos: mainViewport.Pos, viewportSize: mainViewport.Size, uiBlendThreshold: _config.UIBlendThreshold,
@@ -5616,7 +5621,7 @@ namespace XivMediaPlayer
 
                                     _worldRenderer.Render(
                                         item.BannerTextureSrv, item.BannerTextureWidth, item.BannerTextureHeight,
-                                        item.BannerTextureWidth, item.BannerTextureHeight, _depthCapture,
+                                        item.BannerTextureWidth, item.BannerTextureHeight, shouldUseDepthThisFrame ? _depthCapture : null,
                                         _prevCameraPos ?? cameraPos, _prevCameraForward ?? cameraForward, _prevCameraRight ?? cameraRight, _prevCameraUp ?? cameraUp,
                                         fovY, aspectRatio, _uiCapture, nearPlane, farPlane,
                                         hoverUV: null, progress: 0f, bufferProgress: 1f, playbackState: 0f, lockState: 0f, volume: 0f,
