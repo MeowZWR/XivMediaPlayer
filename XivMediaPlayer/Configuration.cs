@@ -41,7 +41,7 @@ namespace XivMediaPlayer {
     private bool _spatialAudioEnabled = true;
     private bool _desktopAudioVisualsEnabled = true;
 
-    int IPluginConfiguration.Version { get; set; }
+    public int Version { get; set; }
 
     #region Saved configuration values
 
@@ -169,7 +169,7 @@ namespace XivMediaPlayer {
         EnableSabrProxy = true;
       }
 
-      if (versioned.Version < 3) {
+      if (versioned.Version < 3 && !Enum.IsDefined(typeof(LanguageEnum), UiLanguage)) {
         UiLanguage = (int)LanguageEnum.English;
       }
 
