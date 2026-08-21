@@ -9,6 +9,9 @@ namespace XivMediaPlayer
 {
     public class DependencyManager
     {
+        private const string DependenciesRepo = "MeowZWR/XivMediaPlayer";
+        private const string MeowrsPrefix = "https://meowrs.com/";
+
         private readonly IPluginLog _pluginLog;
         private readonly string _version;
         
@@ -78,26 +81,24 @@ namespace XivMediaPlayer
                 Directory.CreateDirectory(DependenciesDir);
                 string zipPath = Path.Combine(DependenciesDir, "Dependencies.zip");
 
-                // Download URL for the dependencies zip from the GitHub release
-                string url = $"https://github.com/Sebane1/XivMediaPlayer/releases/download/{_version}/XivMediaPlayer-Dependencies.zip";
-                
-                _pluginLog.Information($"Downloading dependencies from: {url}");
+                string releaseTag = $"{_version}-cn";
+                string url = $"https://github.com/{DependenciesRepo}/releases/download/{releaseTag}/XivMediaPlayer-Dependencies.zip";
 
-                bool success = await TryDownloadDependencies(url, zipPath);
+                bool success = await TryDownloadFromGitHub(url, zipPath);
                 
                 if (!success) {
-                    string fallbackUrl = "https://github.com/Sebane1/XivMediaPlayer/releases/latest/download/XivMediaPlayer-Dependencies.zip";
-                    _pluginLog.Information($"Version {_version} not found. Falling back to latest release: {fallbackUrl}");
-                    success = await TryDownloadDependencies(fallbackUrl, zipPath);
+                    string fallbackUrl = $"https://github.com/{DependenciesRepo}/releases/latest/download/XivMediaPlayer-Dependencies.zip";
+                    _pluginLog.Information($"Version {releaseTag} not found. Falling back to latest release: {fallbackUrl}");
+                    success = await TryDownloadFromGitHub(fallbackUrl, zipPath);
                 }
 
                 if (!success) {
                     _pluginLog.Information("Direct fallback failed. Attempting to resolve via GitHub API...");
-                    string apiUrl = "https://api.github.com/repos/Sebane1/XivMediaPlayer/releases/latest";
+                    string apiUrl = $"https://api.github.com/repos/{DependenciesRepo}/releases/latest";
                     string actualUrl = await ResolveLatestAssetUrl(apiUrl, "XivMediaPlayer-Dependencies.zip");
                     if (!string.IsNullOrEmpty(actualUrl)) {
                         _pluginLog.Information($"Resolved latest asset URL: {actualUrl}");
-                        success = await TryDownloadDependencies(actualUrl, zipPath);
+                        success = await TryDownloadFromGitHub(actualUrl, zipPath);
                     }
                 }
 
@@ -191,6 +192,18 @@ namespace XivMediaPlayer
             return string.Empty;
         }
 
+        private static string WithMeowrsProxy(string url) => MeowrsPrefix + url;
+
+        private async Task<bool> TryDownloadFromGitHub(string githubUrl, string zipPath)
+        {
+            _pluginLog.Information($"Downloading dependencies from: {WithMeowrsProxy(githubUrl)}");
+            if (await TryDownloadDependencies(WithMeowrsProxy(githubUrl), zipPath))
+                return true;
+
+            _pluginLog.Information($"Downloading dependencies from: {githubUrl}");
+            return await TryDownloadDependencies(githubUrl, zipPath);
+        }
+
         private async Task<bool> TryDownloadDependencies(string url, string zipPath)
         {
             try
@@ -255,15 +268,10 @@ namespace XivMediaPlayer
                 Status = "Downloading FFmpeg...";
                 _pluginLog.Information("Downloading FFmpeg...");
                 string zipPath = Path.Combine(DependenciesDir, "ffmpeg.zip");
-                string url = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-win-64.zip";
+                string githubUrl = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-win-64.zip";
 
-                using (var client = new HttpClient())
-                using (var response = await client.GetAsync(url))
-                using (var stream = await response.Content.ReadAsStreamAsync())
-                using (var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write))
-                {
-                    await stream.CopyToAsync(fileStream);
-                }
+                if (!await TryDownloadFromGitHub(githubUrl, zipPath))
+                    throw new Exception("Failed to download FFmpeg.");
 
                 Status = "Extracting FFmpeg...";
                 await Task.Run(() =>
