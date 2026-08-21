@@ -1930,7 +1930,8 @@ namespace XivMediaPlayer
                     "youtube.com", "youtu.be",
                     "twitch.tv",
                     "vimeo.com",
-                    "soundcloud.com"
+                    "soundcloud.com",
+                    "bilibili.com", "b23.tv"
                 };
                 
                 foreach (var domain in safeDomains)
