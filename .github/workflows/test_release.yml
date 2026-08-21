@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: recursive
-          token: ${{ secrets.RELEASE }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v1
@@ -32,12 +32,12 @@ jobs:
 
       - name: Build
         run: |
-          $ver = '${{ github.ref }}' -replace 'refs/tags/testing_',''
-          dotnet build --no-restore -c Release --nologo -p:Version=$ver
+          $ver = '${{ github.ref_name }}' -replace '^testing_','' -replace '-cn$',''
+          dotnet build --no-restore -c Release --nologo -p:Version=$ver -p:FileVersion=$ver -p:AssemblyVersion=$ver
 
       - name: Write version into manifest
         run: |
-          $ver = '${{ github.ref }}' -replace 'refs/tags/testing_',''
+          $ver = '${{ github.ref_name }}' -replace '^testing_','' -replace '-cn$',''
           $path = './XivMediaPlayer/bin/x64/Release/XivMediaPlayer.json'
           $content = get-content -path $path
           $content = $content -replace '0.0.0.0',$ver
@@ -76,26 +76,31 @@ jobs:
           omitBodyDuringUpdate: true
           allowUpdates: true
           replacesArtifacts: true
-          token: ${{ secrets.RELEASE }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Write out repo.json
         run: |
-          $ver = '${{ github.ref_name }}' -replace 'testing_',''
           $tag = '${{ github.ref_name }}'
+          $ver = $tag -replace '^testing_','' -replace '-cn$',''
+          $repo = '${{ github.repository }}'
+          $downloadUrl = "https://meowrs.com/https://github.com/$repo/releases/download/$tag/XivMediaPlayer.zip"
           $path = './repo.json'
           $json = Get-Content -Raw $path | ConvertFrom-Json
           $json[0].TestingAssemblyVersion = $ver
-          $json[0].DownloadLinkTesting = "https://github.com/Sebane1/XivMediaPlayer/releases/download/$tag/XivMediaPlayer.zip"
+          $json[0].DownloadLinkTesting = $downloadUrl
           $content = ConvertTo-Json @($json) -Depth 10
           set-content -Path $path -Value $content
 
       - name: Commit repo.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
           git config --global user.name "Actions User"
           git config --global user.email "actions@github.com"
-          git fetch origin main
-          git branch -f main ${{ github.sha }}
-          git checkout main
+          git fetch origin cn
+          git branch -f cn ${{ github.sha }}
+          git checkout cn
           git add repo.json
           git commit -m "[CI] Updating repo.json for testing build ${{ github.ref_name }}" || true
-          git push origin main
+          git push origin cn
