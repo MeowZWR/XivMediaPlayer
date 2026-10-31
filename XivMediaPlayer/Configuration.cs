@@ -110,6 +110,7 @@ namespace XivMediaPlayer {
     public Dictionary<string, RoomMediaState> RoomMediaStates { get; set; } = new Dictionary<string, RoomMediaState>();
     public Dictionary<string, MediaHistoryEntry> WatchHistory { get; set; } = new Dictionary<string, MediaHistoryEntry>();
     public List<string> LocalPlaylist { get; set; } = new List<string>();
+    public bool LocalPlaybackMode { get; set; }
 
     public string ServerUrl
     {

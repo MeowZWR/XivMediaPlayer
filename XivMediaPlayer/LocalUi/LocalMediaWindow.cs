@@ -86,7 +86,7 @@ namespace XivMediaPlayer.LocalUi
         private void DrawTitleRow()
         {
             float menuW = CompactButtonWidth();
-            float syncW = SyncMarkWidth();
+            float syncW = ModeSwitchWidth();
             float spacing = ImGui.GetStyle().ItemSpacing.X;
             float textWidth = ImGui.GetContentRegionAvail().X - menuW - syncW - spacing * 2f;
             string title = string.IsNullOrEmpty(_plugin.CurrentMediaTitle) ? "未在播放" : _plugin.CurrentMediaTitle;
@@ -100,7 +100,7 @@ namespace XivMediaPlayer.LocalUi
             }
 
             ImGui.SameLine();
-            DrawSyncMark();
+            DrawModeSwitch();
 
             float menuX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - menuW;
             if (menuX > ImGui.GetCursorPosX())
@@ -110,25 +110,22 @@ namespace XivMediaPlayer.LocalUi
             DrawMenu();
         }
 
-        private void DrawSyncMark()
+        private void DrawModeSwitch()
         {
-            bool local = _plugin.IsRoomSyncPaused;
-            var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
-            if (handle.Available)
-            {
-                using (handle.Push())
-                    ImGui.TextColored(local ? SyncOff : SyncOn, (local ? FontAwesomeIcon.Unlink : FontAwesomeIcon.Link).ToIconString());
-            }
-            else
-            {
-                ImGui.TextColored(local ? SyncOff : SyncOn, local ? "本地" : "同步");
-            }
-
+            bool local = _plugin.IsLocalPlaybackMode;
+            string label = local ? "本地" : "同步";
+            Vector4 color = local ? SyncOff : SyncOn;
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(color.X, color.Y, color.Z, 0.35f));
+            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(color.X, color.Y, color.Z, 0.55f));
+            ImGui.PushStyleColor(ImGuiCol.Text, color);
+            if (ImGui.SmallButton(label + "##playback-mode"))
+                _plugin.SetLocalPlaybackMode(!local);
+            ImGui.PopStyleColor(3);
             if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip(local
-                    ? "本地文件在本机播放。停止本地播放或改播网络链接后，才会恢复房间同步。"
-                    : "房间同步已开启。");
+                    ? "本地模式。播放不参与房间同步，播完不会从列表移除。点击切换到同步模式。"
+                    : "同步模式。播放列表与房间一起出队，不能添加本地视频。点击切换到本地模式。");
             }
         }
 
@@ -365,11 +362,14 @@ namespace XivMediaPlayer.LocalUi
             if (CompactIconButton(FontAwesomeIcon.FolderOpen, "browse", "浏览本地文件"))
                 OpenLocalFileDialog();
             ImGui.SameLine(0, CompactGap);
-            if (CompactIconButton(FontAwesomeIcon.Play, "file-play", "播放本地文件"))
+            bool localMode = _plugin.IsLocalPlaybackMode;
+            if (!localMode) ImGui.BeginDisabled();
+            if (CompactIconButton(FontAwesomeIcon.Play, "file-play", localMode ? "播放本地文件" : "同步模式不能播放本地视频"))
                 _plugin.PlayLocalFile(_filePath);
             ImGui.SameLine(0, CompactGap);
-            if (CompactIconButton(FontAwesomeIcon.Plus, "file-queue", "加入列表"))
+            if (CompactIconButton(FontAwesomeIcon.Plus, "file-queue", localMode ? "加入列表" : "同步模式不能添加本地视频"))
                 _plugin.EnqueueMedia(_filePath);
+            if (!localMode) ImGui.EndDisabled();
         }
 
         private void DrawQueue(string[] queue)
@@ -419,8 +419,11 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.SameLine(0, CompactGap);
                 if (!QueueContains(queue, entry.Url))
                 {
-                    if (CompactIconButton(FontAwesomeIcon.Plus, "add", "加入列表"))
+                    bool blockLocalAdd = !_plugin.IsLocalPlaybackMode && LocalMediaPaths.IsLocalFile(entry.Url);
+                    if (blockLocalAdd) ImGui.BeginDisabled();
+                    if (CompactIconButton(FontAwesomeIcon.Plus, "add", blockLocalAdd ? "同步模式不能添加本地视频" : "加入列表"))
                         _plugin.EnqueueMedia(entry.Url);
+                    if (blockLocalAdd) ImGui.EndDisabled();
                     ImGui.SameLine(0, CompactGap);
                 }
                 string label = string.IsNullOrEmpty(entry.Title) ? entry.Url : entry.Title;
@@ -528,13 +531,10 @@ namespace XivMediaPlayer.LocalUi
                 return ImGui.CalcTextSize(FontAwesomeIcon.Play.ToIconString()).X;
         }
 
-        private float SyncMarkWidth()
+        private float ModeSwitchWidth()
         {
-            var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
-            if (!handle.Available)
-                return ImGui.CalcTextSize("同步").X;
-            using (handle.Push())
-                return ImGui.CalcTextSize(FontAwesomeIcon.Link.ToIconString()).X;
+            float text = Math.Max(ImGui.CalcTextSize("本地").X, ImGui.CalcTextSize("同步").X);
+            return text + ImGui.GetStyle().FramePadding.X * 2f;
         }
 
         private bool CanControl() => _plugin.IsRoomSyncPaused || _plugin.CanControlCurrentTvPlayback();
@@ -575,9 +575,7 @@ namespace XivMediaPlayer.LocalUi
                 (ok, paths) =>
                 {
                     if (!ok || paths == null || paths.Count == 0) return;
-                    string path = paths[0];
-                    _filePath = path;
-                    _plugin.PlayLocalFile(path);
+                    _filePath = paths[0];
                 },
                 1,
                 startPath,

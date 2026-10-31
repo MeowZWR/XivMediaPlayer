@@ -13,32 +13,50 @@ namespace XivMediaPlayer
         private LocalMediaWindow? _localMediaWindow;
         private string _resumeAfterStopUrl = "";
         private string _resumeAfterStopTitle = "";
-        private string? _persistedPlaylistKey;
+        private int _localPlaylistIndex = -1;
 
-        private void RestoreLocalPlaylist()
+        private void ApplySavedPlaybackMode()
         {
-            _mediaQueue.Clear();
-            if (_config.LocalPlaylist != null)
-            {
-                foreach (string url in _config.LocalPlaylist)
-                {
-                    if (!string.IsNullOrWhiteSpace(url))
-                        _mediaQueue.Enqueue(url.Trim());
-                }
-            }
-            _persistedPlaylistKey = string.Join("\n", _mediaQueue);
+            _config.LocalPlaylist ??= new List<string>();
+            if (_config.LocalPlaybackMode)
+                _suppressServerSync = true;
         }
 
-        private void PersistLocalPlaylistIfChanged()
+        public bool IsLocalPlaybackMode => _config.LocalPlaybackMode;
+        public bool IsRoomSyncPaused => IsLocalPlaybackMode;
+
+        public void SetLocalPlaybackMode(bool enabled)
         {
-            string key = string.Join("\n", _mediaQueue);
-            if (key == _persistedPlaylistKey) return;
-            _persistedPlaylistKey = key;
-            _config.LocalPlaylist = _mediaQueue.ToList();
+            if (_config.LocalPlaybackMode == enabled) return;
+            _config.LocalPlaybackMode = enabled;
             _config.Save();
+            if (enabled)
+            {
+                _suppressServerSync = true;
+                PrintPlain("已切换到本地模式。播放不会同步到房间，播完也不会从列表移除。");
+                return;
+            }
+
+            _suppressServerSync = false;
+            _isLocalDj = false;
+            if (!string.IsNullOrEmpty(_lastStreamURL))
+            {
+                _mediaManager?.StopStream();
+                ResetStreamValues(false);
+            }
+            _ = FetchMediaFromServerAsync();
+            PrintPlain("已切换到同步模式。本地视频不能加入播放列表。");
         }
 
-        public bool IsRoomSyncPaused => _suppressServerSync;
+        internal void EnterSyncModeForScreenPaste(string url)
+        {
+            if (LocalMediaPaths.IsLocalFile(url)) return;
+            if (!_config.LocalPlaybackMode && !_suppressServerSync) return;
+            _config.LocalPlaybackMode = false;
+            _suppressServerSync = false;
+            _config.Save();
+            PrintPlain("已切换到同步模式。");
+        }
         public string CurrentMediaTitle =>
             !string.IsNullOrEmpty(_currentMediaTitle) ? _currentMediaTitle : _resumeAfterStopTitle;
 
@@ -57,7 +75,10 @@ namespace XivMediaPlayer
             _localMediaWindow.IsOpen = !_localMediaWindow.IsOpen;
         }
 
-        public string[] CopyMediaQueue() => _mediaQueue.ToArray();
+        public string[] CopyMediaQueue() =>
+            IsLocalPlaybackMode
+                ? (_config.LocalPlaylist ?? new List<string>()).ToArray()
+                : _mediaQueue.ToArray();
 
         internal void PrintPlain(string text) => _chat.Print(text);
 
@@ -98,22 +119,22 @@ namespace XivMediaPlayer
 
         private bool AllowPlaybackDuringLocalSession(string url, bool isAutoSync)
         {
-            if (LocalMediaPaths.IsLocalFile(url) || !_suppressServerSync) return true;
-            if (isAutoSync) return false;
-            if (!CanControlCurrentTvPlayback()) return true;
-            _suppressServerSync = false;
-            return true;
-        }
+            if (!IsLocalPlaybackMode && LocalMediaPaths.IsLocalFile(url))
+            {
+                if (!isAutoSync)
+                    PrintPlainError("同步模式不能播放本地视频。请切换到本地模式。");
+                return false;
+            }
 
-        private void ArmLocalFileSyncBlock(string url)
-        {
-            if (LocalMediaPaths.IsLocalFile(url))
-                _suppressServerSync = true;
+            if (IsLocalPlaybackMode)
+                return !isAutoSync;
+
+            return true;
         }
 
         private void ApplyLocalFileLabels(string url)
         {
-            if (!_suppressServerSync) return;
+            if (!LocalMediaPaths.IsLocalFile(url)) return;
             _currentMediaTitle = Path.GetFileName(LocalMediaPaths.Normalize(url));
             _currentStreamer = "Local File";
         }
@@ -128,6 +149,8 @@ namespace XivMediaPlayer
                 return;
             }
 
+            NoteLocalPlaylistIndex(url);
+
             if (_playerObject == null)
             {
                 PrintPlainError("播放器还没准备好。请先进入游戏。");
@@ -141,14 +164,23 @@ namespace XivMediaPlayer
         public void PlayLocalFile(string path)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
+            if (!IsLocalPlaybackMode)
+            {
+                PrintPlainError("同步模式不能播放本地视频。请切换到本地模式。");
+                return;
+            }
+
             path = LocalMediaPaths.Normalize(path);
             if (!File.Exists(path))
             {
-                bool removed = CanControlCurrentTvPlayback() && RemoveQueuedPath(path);
-                if (removed && _mediaQueue.Count > 0 && _playerObject != null)
+                bool removed = RemoveQueuedPath(path);
+                int remaining = _config.LocalPlaylist?.Count ?? 0;
+                if (removed && remaining > 0 && _playerObject != null)
                 {
                     PrintPlainError("这个本地文件已经不存在，改为播放下一项。");
-                    PlayNext();
+                    if (_localPlaylistIndex < 0 || _localPlaylistIndex >= remaining)
+                        _localPlaylistIndex = 0;
+                    PlayMediaUrl(_config.LocalPlaylist![_localPlaylistIndex]);
                     return;
                 }
 
@@ -158,30 +190,22 @@ namespace XivMediaPlayer
                 return;
             }
 
+            NoteLocalPlaylistIndex(path);
+
             if (_playerObject == null)
             {
                 PrintPlainError("播放器还没准备好。请先进入游戏。");
                 return;
             }
 
-            if (!CanControlCurrentTvPlayback())
-            {
-                PrintPlainError("这台电视已被房主锁定，无法播放。");
-                return;
-            }
-
             _lastStreamObject = CurrentAudioSource;
             PlayRouted(path, CurrentAudioSource);
-            if (_suppressServerSync)
-            {
-                PrintPlain("正在播放本地文件。房间同步已暂停，停止播放或改播网络链接后会恢复。");
-            }
         }
 
         public void EnqueueMedia(string url)
         {
             if (string.IsNullOrWhiteSpace(url)) return;
-            if (!CanControlCurrentTvPlayback())
+            if (!IsLocalPlaybackMode && !CanControlCurrentTvPlayback())
             {
                 PrintPlainError("这台电视已被房主锁定，无法播放。");
                 return;
@@ -190,6 +214,12 @@ namespace XivMediaPlayer
             url = url.Trim().Trim('"');
             if (LocalMediaPaths.IsLocalFile(url))
             {
+                if (!IsLocalPlaybackMode)
+                {
+                    PrintPlainError("同步模式不能添加本地视频。请切换到本地模式。");
+                    return;
+                }
+
                 url = LocalMediaPaths.Normalize(url);
                 if (!File.Exists(url))
                 {
@@ -198,11 +228,17 @@ namespace XivMediaPlayer
                 }
             }
 
+            if (IsLocalPlaybackMode)
+            {
+                _config.LocalPlaylist ??= new List<string>();
+                _config.LocalPlaylist.Add(url);
+                _config.Save();
+                return;
+            }
+
             _mediaQueue.Enqueue(url);
             PrintVerboseFormat("[Media Player] Queued ({0}): {1}", _mediaQueue.Count, url);
-
-            if (!_suppressServerSync && !LocalMediaPaths.IsLocalFile(url))
-                _ = PushMediaToServerAsync(isBackgroundSync: false);
+            _ = PushMediaToServerAsync(isBackgroundSync: false);
         }
 
         internal void RememberStoppedMedia()
@@ -223,7 +259,7 @@ namespace XivMediaPlayer
                 _resumeAfterStopUrl = "";
                 _resumeAfterStopTitle = "";
                 PrintPlainError("上次播放的本地文件已经不存在。");
-                if (_mediaQueue.Count > 0)
+                if (!IsLocalPlaybackMode && _mediaQueue.Count > 0)
                     PlayNext();
                 return true;
             }
@@ -292,38 +328,127 @@ namespace XivMediaPlayer
             PrintPlainError($"有 {skipped} 个本地文件已不存在，已跳过。");
         }
 
+        private void NoteLocalPlaylistIndex(string url)
+        {
+            if (!IsLocalPlaybackMode) return;
+            _localPlaylistIndex = FindLocalPlaylistIndex(url);
+        }
+
+        private int FindLocalPlaylistIndex(string url)
+        {
+            var list = _config.LocalPlaylist;
+            if (list == null || string.IsNullOrEmpty(url)) return -1;
+            string key = PlaylistKey(url);
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (string.Equals(PlaylistKey(list[i]), key, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static string PlaylistKey(string value)
+        {
+            value = value.Trim().Trim('"');
+            if (!LocalMediaPaths.IsLocalFile(value)) return value;
+            return LocalMediaPaths.Normalize(value).Replace('/', '\\');
+        }
+
+        private void PlayAdjacentLocalItem(int delta)
+        {
+            var list = _config.LocalPlaylist;
+            if (list == null || list.Count == 0 || _playerObject == null) return;
+
+            if (delta > 0 && _config.ShuffleEnabled && list.Count > 1)
+            {
+                for (int attempt = 0; attempt < list.Count; attempt++)
+                {
+                    int index = _shuffleRandom.Next(list.Count);
+                    if (index == _localPlaylistIndex || LocalMediaPaths.IsMissing(list[index])) continue;
+                    _localPlaylistIndex = index;
+                    PlayMediaUrl(list[index]);
+                    return;
+                }
+            }
+
+            int start = _localPlaylistIndex;
+            if (start < 0)
+                start = delta >= 0 ? -1 : list.Count;
+            int next = start + delta;
+            int guard = list.Count;
+            while (guard-- > 0)
+            {
+                if (next < 0 || next >= list.Count) return;
+                if (!LocalMediaPaths.IsMissing(list[next]))
+                {
+                    _localPlaylistIndex = next;
+                    PlayMediaUrl(list[next]);
+                    return;
+                }
+
+                next += delta == 0 ? 1 : delta;
+            }
+        }
+
         private bool RemoveQueuedPath(string path)
         {
             string key = LocalMediaPaths.Normalize(path).Replace('/', '\\');
+            if (IsLocalPlaybackMode)
+            {
+                var local = _config.LocalPlaylist;
+                if (local == null) return false;
+                int removed = local.RemoveAll(item =>
+                    LocalMediaPaths.IsLocalFile(item)
+                    && string.Equals(PlaylistKey(item), key, StringComparison.OrdinalIgnoreCase));
+                if (removed == 0) return false;
+                _config.Save();
+                return true;
+            }
+
             var list = _mediaQueue.ToList();
-            int removed = list.RemoveAll(item =>
+            int removedSync = list.RemoveAll(item =>
                 LocalMediaPaths.IsLocalFile(item)
-                && string.Equals(
-                    LocalMediaPaths.Normalize(item).Replace('/', '\\'),
-                    key,
-                    StringComparison.OrdinalIgnoreCase));
-            if (removed == 0) return false;
+                && string.Equals(PlaylistKey(item), key, StringComparison.OrdinalIgnoreCase));
+            if (removedSync == 0) return false;
             _mediaQueue = new Queue<string>(list);
             return true;
         }
 
         public void RemoveQueuedMedia(int index)
         {
+            if (IsLocalPlaybackMode)
+            {
+                var local = _config.LocalPlaylist;
+                if (local == null || index < 0 || index >= local.Count) return;
+                local.RemoveAt(index);
+                if (_localPlaylistIndex == index) _localPlaylistIndex = -1;
+                else if (_localPlaylistIndex > index) _localPlaylistIndex--;
+                _config.Save();
+                return;
+            }
+
             if (!CanControlCurrentTvPlayback()) return;
             var list = _mediaQueue.ToList();
             if (index < 0 || index >= list.Count) return;
             list.RemoveAt(index);
             _mediaQueue = new Queue<string>(list);
-            if (!_suppressServerSync)
-                _ = PushMediaToServerAsync(isBackgroundSync: false);
+            _ = PushMediaToServerAsync(isBackgroundSync: false);
         }
 
         public void ClearMediaQueue()
         {
+            if (IsLocalPlaybackMode)
+            {
+                _config.LocalPlaylist = new List<string>();
+                _localPlaylistIndex = -1;
+                _config.Save();
+                return;
+            }
+
             if (!CanControlCurrentTvPlayback()) return;
             _mediaQueue.Clear();
-            if (!_suppressServerSync)
-                _ = PushMediaToServerAsync(isBackgroundSync: false);
+            _ = PushMediaToServerAsync(isBackgroundSync: false);
         }
 
         public void ToggleCurrentTvLock()

@@ -676,7 +676,7 @@ namespace XivMediaPlayer
             }
             InitializeLocalization();
             RefreshDiagnosticReportEligibility();
-            RestoreLocalPlaylist();
+            ApplySavedPlaybackMode();
 
             // Initialize yt-dlp manager
             _ytDlpManager = new YtDlpManager(pluginDir, _config.PreferredQuality) { EnableSabrProxy = _config.EnableSabrProxy };
@@ -805,8 +805,6 @@ namespace XivMediaPlayer
         private unsafe void OnFrameworkUpdate(IFramework framework)
         {
             if (_disposed) return;
-
-            PersistLocalPlaylistIfChanged();
 
             while (_frameworkActions.TryDequeue(out var action))
             {
@@ -1442,13 +1440,11 @@ namespace XivMediaPlayer
 
             url = CleanUrl(url);
 
-            if (!isAutoSync && !CanControlCurrentTvPlayback())
+            if (!isAutoSync && !IsLocalPlaybackMode && !CanControlCurrentTvPlayback())
             {
                 PrintErrorChat("[Media Player] Cannot play stream: The TV in this room is locked by its owner.");
                 return;
             }
-
-            ArmLocalFileSyncBlock(url);
 
             _streamURLs = new string[] { url };
             _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
@@ -2030,7 +2026,7 @@ namespace XivMediaPlayer
             // But if it's a manual play, we ALLOW it to interrupt the current resolution!
             if (isAutoSync && _isResolvingMedia) return;
 
-            if (!isAutoSync && !CanControlCurrentTvPlayback())
+            if (!isAutoSync && !IsLocalPlaybackMode && !CanControlCurrentTvPlayback())
             {
                 PrintErrorChat("[Media Player] Cannot play: The TV in this room is locked by its owner.");
                 return;
@@ -2494,6 +2490,12 @@ namespace XivMediaPlayer
                 _config.Save();
             }
 
+            if (IsLocalPlaybackMode)
+            {
+                ResetStreamValues();
+                return;
+            }
+
             if (_mediaQueue.Count == 0 || e == "Emulation")
             {
                 bool rejoinAfterLocalFile = _suppressServerSync;
@@ -2545,7 +2547,11 @@ namespace XivMediaPlayer
                 _deferredBgmRestoreTime = DateTime.UtcNow.AddSeconds(1);
             }
 
-            if (_suppressServerSync)
+            if (IsLocalPlaybackMode)
+            {
+                pushToServer = false;
+            }
+            else if (_suppressServerSync)
             {
                 _suppressServerSync = false;
                 pushToServer = false;
@@ -5298,6 +5304,7 @@ namespace XivMediaPlayer
                                         {
                                             EnqueueFrameworkAction(() =>
                                             {
+                                                EnterSyncModeForScreenPaste(clip);
                                                 _mediaQueue.Enqueue(clip);
                                                 PrintVerboseFormat("[Media Player] Queued ({0}): {1}", _mediaQueue.Count, clip);
                                                 if (_mediaManager?.ActiveStream == null || _mediaManager.ActiveStream.PlaybackState == NAudio.Wave.PlaybackState.Stopped)
@@ -5434,6 +5441,7 @@ namespace XivMediaPlayer
                                             {
                                                 EnqueueFrameworkAction(() =>
                                                 {
+                                                    EnterSyncModeForScreenPaste(clip);
                                                     PrintVerbose("[Media Player] Loading URL from clipboard...");
                                                     PlayRouted(clip, CurrentAudioSource);
                                                 });
@@ -6268,7 +6276,7 @@ namespace XivMediaPlayer
         {
             var activeStream = _mediaManager?.ActiveStream;
             if (activeStream == null) return;
-            if (!CanControlCurrentTvPlayback()) return;
+            if (!IsLocalPlaybackMode && !CanControlCurrentTvPlayback()) return;
             if (BlocksYouTubeUserSeek()) return;
 
             SeekToMs(activeStream.Time + (seconds * 1000L));
@@ -6348,7 +6356,7 @@ namespace XivMediaPlayer
                 return;
             }
 
-            if (userInitiated && !CanControlCurrentTvPlayback())
+            if (userInitiated && !IsLocalPlaybackMode && !CanControlCurrentTvPlayback())
             {
                 return;
             }
@@ -6489,6 +6497,13 @@ namespace XivMediaPlayer
         {
             RememberStoppedMedia();
 
+            if (IsLocalPlaybackMode)
+            {
+                _mediaManager?.StopStream();
+                ResetStreamValues(false);
+                return;
+            }
+
             if (_suppressServerSync)
             {
                 PrintVerbose("[Media Player] Stopping local file. Room sync will resume.");
@@ -6529,7 +6544,7 @@ namespace XivMediaPlayer
                 return;
             }
 
-            if (!CanControlCurrentTvPlayback())
+            if (!IsLocalPlaybackMode && !CanControlCurrentTvPlayback())
             {
                 return;
             }
@@ -6578,6 +6593,12 @@ namespace XivMediaPlayer
         /// </summary>
         public void PlayNext()
         {
+            if (IsLocalPlaybackMode)
+            {
+                PlayAdjacentLocalItem(1);
+                return;
+            }
+
             if (!CanControlCurrentTvPlayback())
             {
                 return;
@@ -6605,6 +6626,12 @@ namespace XivMediaPlayer
         /// </summary>
         public void PlayPrevious()
         {
+            if (IsLocalPlaybackMode)
+            {
+                PlayAdjacentLocalItem(-1);
+                return;
+            }
+
             if (!CanControlCurrentTvPlayback())
             {
                 return;
