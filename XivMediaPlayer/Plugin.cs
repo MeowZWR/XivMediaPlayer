@@ -57,6 +57,9 @@ namespace XivMediaPlayer
         private readonly SettingsWindow _settingsWindow;
         private readonly ScreenSettingsWindow _screenSettingsWindow;
         internal ScreenSettingsWindow ScreenSettingsWindow => _screenSettingsWindow;
+        private readonly WatchPartyWindow _watchPartyWindow;
+        internal WatchPartyWindow WatchPartyWindow => _watchPartyWindow;
+        public ITextureProvider TextureProvider => _textureProvider;
         private WorldVideoRenderer _worldRenderer;
         internal WorldVideoRenderer WorldRenderer => _worldRenderer;
         internal string CurrentStreamer => _currentStreamer;
@@ -177,6 +180,7 @@ namespace XivMediaPlayer
         private bool _refreshQueued;
 
         public Networking.ServerClient ServerClient { get; private set; }
+        public Networking.DiscordAuthClient DiscordAuthClient { get; private set; }
         public Configuration Config => _config;
         public YtDlpManager YtDlpManager => _ytDlpManager;
         internal int TranslationRevision => _translationRevision;
@@ -497,6 +501,13 @@ namespace XivMediaPlayer
                 HelpMessage = GetMediaCommandHelpText(),
                 ShowInHelp = true,
             });
+
+            _commandManager.RemoveHandler("/watchparty");
+            _commandManager.AddHandler("/watchparty", new Dalamud.Game.Command.CommandInfo((cmd, args) => ToggleWatchPartyWindow())
+            {
+                HelpMessage = "Open the Watch Party community directory",
+                ShowInHelp = true,
+            });
         }
 
         private void InitializeLocalization()
@@ -706,6 +717,11 @@ namespace XivMediaPlayer
             _worldRenderer = new WorldVideoRenderer(_config.WorldScreen, _gameGui);
 
             ServerClient = new Networking.ServerClient(_config.ServerUrl, _pluginLog);
+            if (!string.IsNullOrEmpty(_config.DiscordSessionToken))
+            {
+                ServerClient.SetDiscordSessionToken(_config.DiscordSessionToken);
+            }
+            DiscordAuthClient = new Networking.DiscordAuthClient(ServerClient, _config, _pluginLog);
             _config.OnConfigurationChanged += (s, e) =>
             {
                 // Only recreate ServerClient if the ServerUrl actually changed!
@@ -714,6 +730,10 @@ namespace XivMediaPlayer
                 {
                     ServerClient?.Dispose();
                     ServerClient = new Networking.ServerClient(_config.ServerUrl, _pluginLog);
+                    if (!string.IsNullOrEmpty(_config.DiscordSessionToken))
+                    {
+                        ServerClient.SetDiscordSessionToken(_config.DiscordSessionToken);
+                    }
                 }
             };
 
@@ -760,11 +780,14 @@ namespace XivMediaPlayer
             _depthPreviewWindow.UICapture = _uiCapture;
             _depthPreviewWindow.Config = _config;
 
+            _watchPartyWindow = new WatchPartyWindow(this);
+
             _windowSystem.AddWindow(_videoWindow);
             _windowSystem.AddWindow(_settingsWindow);
             _windowSystem.AddWindow(_screenSettingsWindow);
             _windowSystem.AddWindow(_depthPreviewWindow);
             RegisterLocalMediaWindow();
+            _windowSystem.AddWindow(_watchPartyWindow);
 
             // Register draw + config UI
             _pluginInterface.UiBuilder.Draw += OnDraw;
@@ -798,6 +821,7 @@ namespace XivMediaPlayer
             // Start proxy server for stream routing
             MediaPlayerCore.StreamProxy.Instance.Start();
             _pluginLog.Information($"[Media Proxy] Transport: {MediaPlayerCore.StreamProxy.TransportName}");
+            ApplyUiLanguageFromConfig();
         }
 
         #region Framework / Initialization
@@ -1143,6 +1167,57 @@ namespace XivMediaPlayer
             }
         }
 
+        public unsafe (string DataCenter, string World, string HousingZone, int Ward, int Plot, int Room, string LocationKey) GetDetailedLocationInfo()
+        {
+            string locKey = GetLocationKey() ?? string.Empty;
+            string dataCenter = string.Empty;
+            string worldName = string.Empty;
+            string housingZone = "Unknown Zone";
+            int ward = 0;
+            int plot = 0;
+            int room = 0;
+
+            try
+            {
+                var player = GetLocalPlayer();
+                if (player is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter pc && pc.CurrentWorld.IsValid)
+                {
+                    worldName = pc.CurrentWorld.Value.Name.ExtractText();
+                    var dc = pc.CurrentWorld.Value.DataCenter;
+                    if (dc.IsValid)
+                    {
+                        dataCenter = dc.Value.Name.ExtractText();
+                    }
+                }
+
+                var territoryId = _clientState.TerritoryType;
+                // Mist: Outdoor 339, Subdivision 344, Indoor Cottages/Houses/Mansions 282, 283, 284, Apartments 608, FC Chambers 384
+                if (territoryId == 339 || territoryId == 344 || territoryId == 282 || territoryId == 283 || territoryId == 284 || territoryId == 608 || territoryId == 384) housingZone = "Mist";
+                // The Lavender Beds: Outdoor 340, Subdivision 345, Indoor Cottages/Houses/Mansions 285, 286, 287, Apartments 609, FC Chambers 385
+                else if (territoryId == 340 || territoryId == 345 || territoryId == 285 || territoryId == 286 || territoryId == 287 || territoryId == 609 || territoryId == 385) housingZone = "The Lavender Beds";
+                // The Goblet: Outdoor 341, Subdivision 346, Indoor Cottages/Houses/Mansions 288, 289, 290, Apartments 610, FC Chambers 386
+                else if (territoryId == 341 || territoryId == 346 || territoryId == 288 || territoryId == 289 || territoryId == 290 || territoryId == 610 || territoryId == 386) housingZone = "The Goblet";
+                // Shirogane: Outdoor 641, Subdivision 650, Indoor Cottages/Houses/Mansions 649, 651, 652, Apartments 717, FC Chambers 653
+                else if (territoryId == 641 || territoryId == 650 || territoryId == 649 || territoryId == 651 || territoryId == 652 || territoryId == 717 || territoryId == 653) housingZone = "Shirogane";
+                // Empyreum: Outdoor 979, Subdivision 980, Indoor Cottages/Houses/Mansions 981, 982, 983, Apartments 984, FC Chambers 985
+                else if (territoryId == 979 || territoryId == 980 || territoryId == 981 || territoryId == 982 || territoryId == 983 || territoryId == 984 || territoryId == 985) housingZone = "Empyreum";
+
+                var housingMgr = FFXIVClientStructs.FFXIV.Client.Game.HousingManager.Instance();
+                if (housingMgr != null)
+                {
+                    short w = housingMgr->GetCurrentWard();
+                    short p = housingMgr->GetCurrentPlot();
+                    short r = housingMgr->GetCurrentRoom();
+                    if (w >= 0) ward = w + 1; // 1-indexed for display
+                    if (p >= 0) plot = p + 1; // 1-indexed for display
+                    if (r >= 0) room = r;
+                }
+            }
+            catch { }
+
+            return (dataCenter, worldName, housingZone, ward, plot, room, locKey);
+        }
+
         private bool _localPlayerNullLogged;
 
         private unsafe void InitializeMediaManager()
@@ -1196,6 +1271,55 @@ namespace XivMediaPlayer
                 _pluginLog.Warning(e, "[Media Player] Failed to get LocalPlayer from ObjectTable");
             }
             return null;
+        }
+
+        public static string ComputePlayerIdHash(string characterName, uint worldId)
+        {
+            if (string.IsNullOrWhiteSpace(characterName)) return string.Empty;
+            string raw = $"{characterName.Trim().ToLowerInvariant()}@{worldId}";
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw));
+            return Convert.ToHexString(bytes).ToLowerInvariant();
+        }
+
+        public List<(string DisplayName, string PlayerHash)> GetNearbyPlayersWithHashes()
+        {
+            var list = new List<(string DisplayName, string PlayerHash)>();
+            foreach (var obj in _objectTable)
+            {
+                if (obj is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter pc && obj.Address != _objectTable[0]?.Address)
+                {
+                    string name = pc.Name.TextValue;
+                    uint worldId = pc.CurrentWorld.RowId;
+                    string worldName = pc.CurrentWorld.Value.Name.ExtractText();
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        string hash = ComputePlayerIdHash(name, worldId);
+                        if (!list.Any(x => x.PlayerHash == hash))
+                        {
+                            list.Add(($"{name} ({worldName})", hash));
+                        }
+                    }
+                }
+            }
+            return list;
+        }
+
+        public List<string> GetNearbyPlayerNames()
+        {
+            var list = new List<string>();
+            foreach (var obj in _objectTable)
+            {
+                if (obj is Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter pc && obj.Address != _objectTable[0]?.Address)
+                {
+                    string name = pc.Name.TextValue;
+                    if (!string.IsNullOrWhiteSpace(name) && !list.Contains(name))
+                    {
+                        list.Add(name);
+                    }
+                }
+            }
+            return list;
         }
 
         #endregion
@@ -1941,11 +2065,13 @@ namespace XivMediaPlayer
                 var host = uri.Host.ToLowerInvariant();
                 
                 string[] safeDomains = {
-                    "youtube.com", "youtu.be",
+                    "youtube.com", 
+                    "youtu.be",
                     "twitch.tv",
                     "vimeo.com",
                     "soundcloud.com",
-                    "bilibili.com", "b23.tv"
+                    "bilibili.com",
+                    "b23.tv"
                 };
                 
                 foreach (var domain in safeDomains)
@@ -4803,6 +4929,10 @@ namespace XivMediaPlayer
         private void OnMediaError(object? sender, MediaError e)
         {
             string errorMsg = e.Exception?.Message ?? string.Empty;
+            if (errorMsg.Contains('\n') || errorMsg.Contains('\r'))
+            {
+                errorMsg = errorMsg.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+            }
 
             // Harmless on live/HLS demuxers. Querying playback time is unsupported.
             if (errorMsg.Contains("DEMUX_GET_TIME", StringComparison.OrdinalIgnoreCase)
@@ -5849,6 +5979,11 @@ namespace XivMediaPlayer
         private void OnOpenConfig()
         {
             _settingsWindow.Toggle();
+        }
+
+        public void ToggleWatchPartyWindow()
+        {
+            _watchPartyWindow.Toggle();
         }
 
         public void ToggleConfigUi()

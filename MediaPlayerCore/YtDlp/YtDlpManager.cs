@@ -1888,7 +1888,7 @@ namespace MediaPlayerCore.YtDlp
         private string BgutilServerDir => Path.Combine(PluginDir, "bgutil-pot-provider");
         private string BgutilServerWorkDir => Path.Combine(BgutilServerDir, "server");
         private string BgutilNodeModulesDir => Path.Combine(BgutilServerWorkDir, "node_modules");
-        private string BgutilReadyMarker => Path.Combine(BgutilServerWorkDir, ".xivmp-deno-ready-v2");
+        private string BgutilReadyMarker => Path.Combine(BgutilServerWorkDir, ".xivmp-deno-ready-v3");
 
         private bool HasYouTubeAuth => HasCookies || !string.IsNullOrEmpty(CookieBrowser);
 
@@ -2959,39 +2959,85 @@ namespace MediaPlayerCore.YtDlp
             }
         }
 
+        private const string MeowrsPrefix = "https://meowrs.com/";
+
+        private static string WithMeowrsProxy(string url) => MeowrsPrefix + url;
+
+        private async Task DownloadGithubFile(string githubUrl, string targetPath, string displayName)
+        {
+            await DownloadFile(WithMeowrsProxy(githubUrl), targetPath, displayName);
+            if (!File.Exists(targetPath))
+                await DownloadFile(githubUrl, targetPath, displayName);
+        }
+
+        private async Task<string> GetLatestBgutilReleaseVersionAsync()
+        {
+            string apiUrl = "https://api.github.com/repos/Brainicism/bgutil-ytdlp-pot-provider/releases/latest";
+            string? version = await TryReadBgutilReleaseVersionAsync(WithMeowrsProxy(apiUrl));
+            if (string.IsNullOrEmpty(version))
+                version = await TryReadBgutilReleaseVersionAsync(apiUrl);
+            return string.IsNullOrEmpty(version) ? "1.3.2" : version;
+        }
+
+        private async Task<string?> TryReadBgutilReleaseVersionAsync(string apiUrl)
+        {
+            try
+            {
+                using var client = new HttpClient();
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("XivMediaPlayer");
+                client.Timeout = TimeSpan.FromSeconds(5);
+                var response = await client.GetAsync(apiUrl);
+                if (!response.IsSuccessStatusCode)
+                    return null;
+
+                string content = await response.Content.ReadAsStringAsync();
+                var match = System.Text.RegularExpressions.Regex.Match(content, @"""tag_name""\s*:\s*""v?([^""]+)""");
+                return match.Success ? match.Groups[1].Value : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private async Task EnsurePotProvider()
         {
             Directory.CreateDirectory(PluginsDir);
-            string marker = Path.Combine(PluginsDir, ".bgutil-plugin-installed");
+            string bgutilVersion = await GetLatestBgutilReleaseVersionAsync();
+            string marker = Path.Combine(PluginsDir, $".bgutil-plugin-installed-v{bgutilVersion}");
             if (File.Exists(marker) && IsPotProviderPluginInstalled())
             {
                 return;
             }
 
-            if (File.Exists(marker))
+            string legacyMarker = Path.Combine(PluginsDir, ".bgutil-plugin-installed");
+            if (File.Exists(legacyMarker))
             {
-                try { File.Delete(marker); } catch { }
+                try { File.Delete(legacyMarker); } catch { }
             }
 
             string potProviderZipPath = Path.Combine(PluginsDir, "bgutil-ytdlp-pot-provider.zip");
-            if (!File.Exists(potProviderZipPath))
+            if (File.Exists(potProviderZipPath))
             {
-                await DownloadFile(PotProviderZipUrl, potProviderZipPath, "PO Token provider plugin");
+                try { File.Delete(potProviderZipPath); } catch { }
             }
+
+            string downloadUrl = $"https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/{bgutilVersion}/bgutil-ytdlp-pot-provider.zip";
+            await DownloadGithubFile(downloadUrl, potProviderZipPath, "PO Token provider plugin");
+            if (!File.Exists(potProviderZipPath))
+                await DownloadGithubFile(PotProviderZipUrl, potProviderZipPath, "PO Token provider plugin");
 
             try
             {
                 ZipFile.ExtractToDirectory(potProviderZipPath, PluginsDir, overwriteFiles: true);
                 File.WriteAllText(marker, DateTime.UtcNow.ToString("O"));
-                OnStatusUpdate?.Invoke(this, "PO Token provider plugin installed.");
+                OnStatusUpdate?.Invoke(this, $"PO Token provider plugin (v{bgutilVersion}) installed.");
             }
             catch (Exception ex)
             {
                 OnError?.Invoke(this, new Exception("Failed to extract PO Token provider plugin.", ex));
             }
         }
-
-        private const string BgutilReleaseZipUrl = "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/1.3.1.zip";
 
         private static bool IsPoTokenProviderFailure(string? text)
         {
@@ -3073,11 +3119,20 @@ namespace MediaPlayerCore.YtDlp
 
         private async Task DownloadBgutilServerIfNeededAsync()
         {
-            if (Directory.Exists(Path.Combine(BgutilServerWorkDir, "src"))) return;
+            string bgutilVersion = await GetLatestBgutilReleaseVersionAsync();
+            string versionMarker = Path.Combine(BgutilServerDir, $".version-{bgutilVersion}");
+            if (Directory.Exists(Path.Combine(BgutilServerWorkDir, "src")) && File.Exists(versionMarker)) return;
 
-            OnStatusUpdate?.Invoke(this, "Downloading PO Token provider server...");
+            OnStatusUpdate?.Invoke(this, $"Downloading PO Token provider server (v{bgutilVersion})...");
+
+            if (Directory.Exists(BgutilServerDir))
+            {
+                try { Directory.Delete(BgutilServerDir, true); } catch { }
+            }
+
             string zipPath = Path.Combine(PluginDir, "bgutil-pot-server.zip");
-            await DownloadFile(BgutilReleaseZipUrl, zipPath, "PO Token provider server");
+            string releaseZipUrl = $"https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/tags/{bgutilVersion}.zip";
+            await DownloadGithubFile(releaseZipUrl, zipPath, "PO Token provider server");
 
             string extractDir = Path.Combine(PluginDir, "bgutil-pot-server-extract");
             if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
@@ -3093,6 +3148,8 @@ namespace MediaPlayerCore.YtDlp
             Directory.Move(sourceDir, BgutilServerDir);
             Directory.Delete(extractDir, true);
             if (File.Exists(zipPath)) File.Delete(zipPath);
+
+            try { File.WriteAllText(versionMarker, DateTime.UtcNow.ToString("O")); } catch { }
 
             EnsureBgutilServerBindPatch();
         }
@@ -3220,7 +3277,13 @@ namespace MediaPlayerCore.YtDlp
                 if (string.IsNullOrEmpty(e.Data)) return;
                 AppendBgutilServerLog(e.Data);
                 if (e.Data.Contains("EADDRINUSE", StringComparison.OrdinalIgnoreCase)
-                    || e.Data.Contains("falling back", StringComparison.OrdinalIgnoreCase))
+                    || e.Data.Contains("falling back", StringComparison.OrdinalIgnoreCase)
+                    || e.Data.Contains("Fossilize", StringComparison.OrdinalIgnoreCase)
+                    || e.Data.Contains("Vulkan", StringComparison.OrdinalIgnoreCase)
+                    || e.Data.Contains("Shader", StringComparison.OrdinalIgnoreCase)
+                    || e.Data.Contains("letting recording go through", StringComparison.OrdinalIgnoreCase)
+                    || e.Data.StartsWith("WARN", StringComparison.OrdinalIgnoreCase)
+                    || e.Data.StartsWith("INFO", StringComparison.OrdinalIgnoreCase))
                 {
                     return;
                 }

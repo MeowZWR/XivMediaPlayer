@@ -51,6 +51,9 @@ namespace XivMediaPlayer {
     public bool EnableOutdoorPublicScreens { get => _enableOutdoorPublicScreens; set => _enableOutdoorPublicScreens = value; }
     public bool OnlySafeDomainsPublicScreens { get => _onlySafeDomainsPublicScreens; set => _onlySafeDomainsPublicScreens = value; }
     public bool SpatialAudioEnabled { get => _spatialAudioEnabled; set => _spatialAudioEnabled = value; }
+    public string DiscordSessionToken { get; set; } = string.Empty;
+    public string DiscordUsername { get; set; } = string.Empty;
+    public string DiscordUserId { get; set; } = string.Empty;
     public bool DesktopAudioVisualsEnabled { get => _desktopAudioVisualsEnabled; set => _desktopAudioVisualsEnabled = value; }
     public bool ShowOutdoorGridDebug { get; set; } = false;
     public bool HasAutoDetectedAMD_v2 { get; set; } = false;

@@ -23,6 +23,18 @@ namespace XivMediaPlayer.Networking
             _httpClient = new HttpClient();
         }
 
+        public void SetDiscordSessionToken(string? token)
+        {
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            }
+            else
+            {
+                _httpClient.DefaultRequestHeaders.Authorization = null;
+            }
+        }
+
         public async Task<long> GetServerTimeAsync()
         {
             try
@@ -380,6 +392,171 @@ namespace XivMediaPlayer.Networking
                 Success = false,
                 ErrorMessage = "Could not send error report. Check your internet connection and try again.",
             };
+        }
+
+        public async Task<List<WatchPartyEvent>> GetEventsAsync(string? datacenter = null, string? world = null)
+        {
+            try
+            {
+                string cleanBase = _baseUrl.TrimEnd('/');
+                string url = $"{cleanBase}/api/events";
+                var queryParams = new List<string>();
+                if (!string.IsNullOrWhiteSpace(datacenter)) queryParams.Add($"datacenter={Uri.EscapeDataString(datacenter)}");
+                if (!string.IsNullOrWhiteSpace(world)) queryParams.Add($"world={Uri.EscapeDataString(world)}");
+
+                if (queryParams.Count > 0) url += "?" + string.Join("&", queryParams);
+
+                var response = await _httpClient.GetAsync(url);
+                if (response.IsSuccessStatusCode)
+                {
+                    var events = await response.Content.ReadFromJsonAsync<List<WatchPartyEvent>>();
+                    return events ?? new List<WatchPartyEvent>();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to fetch watch party events");
+            }
+            return new List<WatchPartyEvent>();
+        }
+
+        public async Task<WatchPartyEvent?> CreateEventAsync(WatchPartyEvent watchEvent)
+        {
+            try
+            {
+                string cleanBase = _baseUrl.TrimEnd('/');
+                var response = await _httpClient.PostAsJsonAsync($"{cleanBase}/api/events", watchEvent);
+                if (response.IsSuccessStatusCode)
+                {
+                    return await response.Content.ReadFromJsonAsync<WatchPartyEvent>();
+                }
+                string err = await response.Content.ReadAsStringAsync();
+                _log.Warning($"Create event failed: {response.StatusCode} - {err}");
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to create watch party event");
+            }
+            return null;
+        }
+
+        public async Task<bool> DeleteEventAsync(string eventId)
+        {
+            try
+            {
+                string cleanBase = _baseUrl.TrimEnd('/');
+                var response = await _httpClient.DeleteAsync($"{cleanBase}/api/events/{Uri.EscapeDataString(eventId)}");
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, $"Failed to delete watch party event {eventId}");
+            }
+            return false;
+        }
+
+        public class BotApiKeyDto
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("keyHashPrefix")]
+            public string KeyHashPrefix { get; set; } = string.Empty;
+
+            [System.Text.Json.Serialization.JsonPropertyName("label")]
+            public string Label { get; set; } = string.Empty;
+
+            [System.Text.Json.Serialization.JsonPropertyName("createdAtUtc")]
+            public DateTime CreatedAtUtc { get; set; }
+
+            [System.Text.Json.Serialization.JsonPropertyName("lastUsedUtc")]
+            public DateTime? LastUsedUtc { get; set; }
+        }
+
+        public class GenerateBotKeyResult
+        {
+            [System.Text.Json.Serialization.JsonPropertyName("apiKey")]
+            public string ApiKey { get; set; } = string.Empty;
+
+            [System.Text.Json.Serialization.JsonPropertyName("label")]
+            public string Label { get; set; } = string.Empty;
+
+            [System.Text.Json.Serialization.JsonPropertyName("discordId")]
+            public string DiscordId { get; set; } = string.Empty;
+
+            [System.Text.Json.Serialization.JsonPropertyName("message")]
+            public string Message { get; set; } = string.Empty;
+        }
+
+        public async Task<(GenerateBotKeyResult? result, string? error)> GenerateBotApiKeyAsync(string label, string? sessionToken = null)
+        {
+            try
+            {
+                string cleanBase = _baseUrl.TrimEnd('/');
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{cleanBase}/api/auth/bot-key/generate");
+                req.Content = JsonContent.Create(new { label });
+                if (!string.IsNullOrEmpty(sessionToken))
+                {
+                    req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", sessionToken);
+                }
+
+                var response = await _httpClient.SendAsync(req);
+                if (response.IsSuccessStatusCode)
+                {
+                    var res = await response.Content.ReadFromJsonAsync<GenerateBotKeyResult>();
+                    return (res, null);
+                }
+                string errStr = await response.Content.ReadAsStringAsync();
+                _log.Warning($"Generate Bot Key failed: {response.StatusCode} - {errStr}");
+                return (null, $"{response.StatusCode}: {errStr}");
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to generate Bot API Key");
+                return (null, ex.Message);
+            }
+        }
+
+        public async Task<List<BotApiKeyDto>> ListBotApiKeysAsync(string? sessionToken = null)
+        {
+            try
+            {
+                string cleanBase = _baseUrl.TrimEnd('/');
+                using var req = new HttpRequestMessage(HttpMethod.Get, $"{cleanBase}/api/auth/bot-key/list");
+                if (!string.IsNullOrEmpty(sessionToken))
+                {
+                    req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", sessionToken);
+                }
+
+                var response = await _httpClient.SendAsync(req);
+                if (response.IsSuccessStatusCode)
+                {
+                    return await response.Content.ReadFromJsonAsync<List<BotApiKeyDto>>() ?? new List<BotApiKeyDto>();
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to list Bot API Keys");
+            }
+            return new List<BotApiKeyDto>();
+        }
+
+        public async Task<bool> RevokeBotApiKeyAsync(string keyHashPrefix, string? sessionToken = null)
+        {
+            try
+            {
+                string cleanBase = _baseUrl.TrimEnd('/');
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{cleanBase}/api/auth/bot-key/revoke?keyHashPrefix={Uri.EscapeDataString(keyHashPrefix)}");
+                if (!string.IsNullOrEmpty(sessionToken))
+                {
+                    req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", sessionToken);
+                }
+
+                var response = await _httpClient.SendAsync(req);
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                _log.Error(ex, "Failed to revoke Bot API Key");
+            }
+            return false;
         }
 
         public void Dispose()
