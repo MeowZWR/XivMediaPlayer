@@ -264,12 +264,10 @@ namespace MediaPlayerCore {
               }
           }
 
-          if (streamsToDispose.Count > 0) {
-              Task.Run(() => {
-                  foreach (var oldStream in streamsToDispose) {
-                      try { oldStream.Dispose(); } catch { }
-                  }
-              });
+          // Stop the old LibVLC completely before creating another one.
+          // Overlapping Stop() with a new player deadlocks the game render thread.
+          foreach (var oldStream in streamsToDispose) {
+              try { oldStream.Dispose(); } catch { }
           }
 
           if (isNew) {
@@ -301,7 +299,20 @@ namespace MediaPlayerCore {
         return true;
       }
 
+      // Switching local files through ChangeVideoStream can also stall the game.
+      if (IsLocalFilesystemPath(currentPath) || IsLocalFilesystemPath(newAudioPath)) {
+        return true;
+      }
+
       return false;
+    }
+
+    private static bool IsLocalFilesystemPath(string path) {
+      if (string.IsNullOrEmpty(path)) return false;
+      if (path.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return false;
+      if (path.StartsWith("rtmp", StringComparison.OrdinalIgnoreCase)) return false;
+      if (path.StartsWith("rtsp", StringComparison.OrdinalIgnoreCase)) return false;
+      return true;
     }
 
     private void Update() {

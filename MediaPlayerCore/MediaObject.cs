@@ -74,8 +74,11 @@ namespace MediaPlayerCore {
     private float _baseVolume = 1;
     private bool _vlcWasAbleToStart;
     private bool _disposed;
-    private bool _isDisposing;
+    private volatile bool _isDisposing;
     private readonly object _disposeLock = new object();
+    private readonly object _lifecycleLock = new object();
+    private readonly List<(MemoryMappedFile File, MemoryMappedViewAccessor View)> _retiredVideoBuffers = new();
+    private int _videoUseCount;
 
     private bool _audioOnly;
     private long _pendingResumeSeekMs;
@@ -603,7 +606,7 @@ namespace MediaPlayerCore {
                 };
                 if (NeedsVideoCallbacks(mediaPath, _audioOnly)) {
                     _vlcPlayer.SetVideoFormatCallbacks(VideoFormatSetup, null);
-                    _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
+                    _vlcPlayer.SetVideoCallbacks(Lock, Unlock, Display);
                 }
               }
 
@@ -714,69 +717,62 @@ namespace MediaPlayerCore {
                 ? MediaParseOptions.ParseNetwork : MediaParseOptions.ParseLocal);
             }
             
-            MediaPlayer playerToStop = null;
-            lock (_disposeLock) {
-                if (_disposed) {
-                    media.Dispose();
-                    return;
-                }
-                playerToStop = _vlcPlayer;
-            }
+            lock (_lifecycleLock) {
+              if (_isDisposing || _disposed) {
+                media.Dispose();
+                return;
+              }
 
-            // Explicitly stop the previous media before assigning the new one to prevent VLC from deadlocking
-            // Do NOT hold _disposeLock while stopping!
-            if (playerToStop != null) {
-                try { playerToStop.Stop(); } catch { }
+              if (_vlcPlayer != null) {
+                try { _vlcPlayer.Stop(); } catch { }
+                WaitForVideoIdle();
                 _bufferedWaveProvider?.ClearBuffer();
-                await Task.Delay(250); // Allow LibVLC background thread to complete teardown
-            }
+              }
 
-            lock (_disposeLock) {
-                if (_disposed) {
-                    media.Dispose();
-                    return;
+              lock (_disposeLock) {
+                if (_disposed || _isDisposing || _vlcPlayer == null) {
+                  media.Dispose();
+                  return;
                 }
-                if (_vlcPlayer != null) {
-                    _vlcPlayer.Media = media;
-                    if (NeedsVideoCallbacks(soundPath, _audioOnly)) {
-                        _vlcPlayer.SetVideoFormatCallbacks(VideoFormatSetup, null);
-                        _vlcPlayer.SetVideoCallbacks(Lock, null, Display);
-                    }
+                _vlcPlayer.Media = media;
+                if (NeedsVideoCallbacks(soundPath, _audioOnly)) {
+                  _vlcPlayer.SetVideoFormatCallbacks(VideoFormatSetup, null);
+                  _vlcPlayer.SetVideoCallbacks(Lock, Unlock, Display);
                 }
-            }
+              }
 
-            long exactSeekMs = _isLiveStream ? 0 : startTimeMs;
-            EventHandler<EventArgs> playingHandler = null;
-            if (!_isLiveStream) {
-              playingHandler = (s, e) => {
+              long exactSeekMs = _isLiveStream ? 0 : startTimeMs;
+              EventHandler<EventArgs> playingHandler = null;
+              if (!_isLiveStream && _vlcPlayer != null) {
+                playingHandler = (s, e) => {
                   if (exactSeekMs > 0) {
-                      Task.Run(async () => {
-                          await Task.Delay(2000); // Bypass plugin load lag spike
-                            if (_vlcPlayer != null && !_disposed) {
-                                _vlcPlayer.Time = exactSeekMs;
-                                _bufferedWaveProvider?.ClearBuffer();
-                            }
-                          exactSeekMs = 0;
-                      });
+                    Task.Run(async () => {
+                      await Task.Delay(2000);
+                      if (_vlcPlayer != null && !_disposed && !_isDisposing) {
+                        _vlcPlayer.Time = exactSeekMs;
+                        _bufferedWaveProvider?.ClearBuffer();
+                      }
+                      exactSeekMs = 0;
+                    });
                   }
                   if (_vlcPlayer != null) {
-                      _vlcPlayer.Playing -= playingHandler;
+                    _vlcPlayer.Playing -= playingHandler;
                   }
-              };
-              _vlcPlayer.Playing += playingHandler;
-            }
-
-            bool playResult = _vlcPlayer.Play();
-            if (!playResult) {
-              await Task.Delay(750);
-              if (!_disposed && _vlcPlayer != null) {
-                playResult = _vlcPlayer.Play();
+                };
+                _vlcPlayer.Playing += playingHandler;
               }
-            }
-            if (!playResult) {
-              OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC Play() returned false after stream change.") });
-            } else if (_pendingResumeSeekMs > 0) {
-              try { _vlcPlayer.SetPause(true); } catch { }
+
+              bool playResult = false;
+              if (_vlcPlayer != null && !_isDisposing) {
+                playResult = _vlcPlayer.Play();
+                if (!playResult && !_isDisposing && !_disposed)
+                  playResult = _vlcPlayer.Play();
+              }
+              if (!playResult) {
+                OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception("VLC Play() returned false after stream change.") });
+              } else if (_pendingResumeSeekMs > 0 && _vlcPlayer != null) {
+                try { _vlcPlayer.SetPause(true); } catch { }
+              }
             }
           }
         } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
@@ -790,13 +786,25 @@ namespace MediaPlayerCore {
     }
 
     private IntPtr Lock(IntPtr opaque, IntPtr planes) {
+      Interlocked.Increment(ref _videoUseCount);
       try {
-        if (_vlcBuffer != IntPtr.Zero) {
-            Marshal.WriteIntPtr(planes, _vlcBuffer);
+        IntPtr buffer = Volatile.Read(ref _vlcBuffer);
+        if (buffer != IntPtr.Zero) {
+          Marshal.WriteIntPtr(planes, buffer);
         }
-        return IntPtr.Zero;
       } catch {
-        return IntPtr.Zero;
+      }
+      return IntPtr.Zero;
+    }
+
+    private void Unlock(IntPtr opaque, IntPtr picture, IntPtr planes) {
+      Interlocked.Decrement(ref _videoUseCount);
+    }
+
+    private void WaitForVideoIdle() {
+      long deadline = Environment.TickCount64 + 2000;
+      while (Volatile.Read(ref _videoUseCount) > 0 && Environment.TickCount64 < deadline) {
+        Thread.Sleep(1);
       }
     }
 
@@ -813,14 +821,17 @@ namespace MediaPlayerCore {
       }
 
       private void ResumeAudio(IntPtr data, long pts) {
+          if (_isDisposing || _disposed) return;
           _waveOut?.Play();
       }
 
       private void PauseAudio(IntPtr data, long pts) {
+          if (_isDisposing || _disposed) return;
           _waveOut?.Pause();
       }
 
         private void PlayAudio(IntPtr data, IntPtr samples, uint count, long pts) {
+            if (_isDisposing || _disposed) return;
             if (_bufferedWaveProvider != null && _waveFormat != null) {
                 int bytes = (int)count * _waveFormat.BlockAlign;
                 if (_audioCopyBuffer.Length < bytes) {
@@ -848,8 +859,9 @@ namespace MediaPlayerCore {
         }
 
       private void Display(IntPtr opaque, IntPtr picture) {
+        if (_isDisposing || _disposed) return;
         lock (_disposeLock) {
-            if (_disposed) return;
+            if (_isDisposing || _disposed) return;
             try {
               lock (_parent.FrameLock) {
                 int totalBytes = (int)(_pitch * _lines);
@@ -875,7 +887,9 @@ namespace MediaPlayerCore {
                 _parent.LastFrameCount++;
               }
 
-              TryApplyPendingSabrResumeSeek();
+              if (!_isDisposing && !_disposed) {
+                TryApplyPendingSabrResumeSeek();
+              }
             } catch (Exception ex) {
                 Debug.WriteLine($"[MediaObject] Display error: {ex}");
             }
@@ -883,6 +897,7 @@ namespace MediaPlayerCore {
       }
 
       private uint VideoFormatSetup(ref IntPtr opaque, IntPtr chroma, ref uint width, ref uint height, ref uint pitches, ref uint lines) {
+        if (_isDisposing || _disposed) return 0;
         byte[] rv32 = System.Text.Encoding.ASCII.GetBytes("RV32");
         Marshal.Copy(rv32, 0, chroma, 4);
         
@@ -902,17 +917,18 @@ namespace MediaPlayerCore {
         }
         
         lock (_disposeLock) {
-          if (!_disposed) {
-            if (_vlcMappedViewAccessor != null) {
-              _vlcMappedViewAccessor.Dispose();
-            }
-            if (_vlcMappedFile != null) {
-              _vlcMappedFile.Dispose();
-            }
-            _vlcMappedFile = MemoryMappedFile.CreateNew(null, _pitch * _lines);
-            _vlcMappedViewAccessor = _vlcMappedFile.CreateViewAccessor();
-            _vlcBuffer = _vlcMappedViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle();
+          if (_disposed || _isDisposing) return 0;
+          long bytes = (long)_pitch * _lines;
+          if (_vlcMappedViewAccessor != null && _vlcMappedViewAccessor.Capacity >= bytes && _vlcBuffer != IntPtr.Zero) {
+            return 1;
           }
+
+          if (_vlcMappedFile != null && _vlcMappedViewAccessor != null) {
+            _retiredVideoBuffers.Add((_vlcMappedFile, _vlcMappedViewAccessor));
+          }
+          _vlcMappedFile = MemoryMappedFile.CreateNew(null, bytes);
+          _vlcMappedViewAccessor = _vlcMappedFile.CreateViewAccessor();
+          Volatile.Write(ref _vlcBuffer, _vlcMappedViewAccessor.SafeMemoryMappedViewHandle.DangerousGetHandle());
         }
         
         return 1;
@@ -921,50 +937,82 @@ namespace MediaPlayerCore {
     public void Dispose() {
       MediaPlayer playerToStop = null;
       LibVLC libVlcToDispose = null;
+      List<(MemoryMappedFile File, MemoryMappedViewAccessor View)> retired = null;
+      MemoryMappedFile currentFile = null;
+      MemoryMappedViewAccessor currentView = null;
 
-      lock (_disposeLock) {
+      lock (_lifecycleLock) {
+        lock (_disposeLock) {
           if (_disposed || _isDisposing) {
             return;
           }
           _isDisposing = true;
-          
           playerToStop = _vlcPlayer;
           libVlcToDispose = libVLC;
-      }
+        }
 
-      if (playerToStop != null) {
+        if (playerToStop != null) {
           PlaybackStopped?.Invoke(this, "OK");
           try { playerToStop.Stop(); } catch { }
+          WaitForVideoIdle();
+          try { playerToStop.SetVideoCallbacks(null, null, null); } catch { }
+          try { playerToStop.SetVideoFormatCallbacks(null, null); } catch { }
+          WaitForVideoIdle();
           try { playerToStop.Dispose(); } catch { }
-      }
-      if (libVlcToDispose != null) {
+        }
+        if (libVlcToDispose != null) {
           try { libVlcToDispose.Dispose(); } catch { }
-      }
+        }
 
-      lock (_disposeLock) {
+        lock (_disposeLock) {
           if (_disposed) return;
           _disposed = true;
           _pendingResumeSeekMs = 0;
           _parent.OnCleanupTime -= _parent_OnCleanupTime;
-          
           _vlcPlayer = null;
           libVLC = null;
-
-          if (_vlcMappedViewAccessor != null) {
-              _vlcMappedViewAccessor.Dispose();
-              _vlcMappedViewAccessor = null;
+          Volatile.Write(ref _vlcBuffer, IntPtr.Zero);
+          currentFile = _vlcMappedFile;
+          currentView = _vlcMappedViewAccessor;
+          _vlcMappedFile = null;
+          _vlcMappedViewAccessor = null;
+          if (_retiredVideoBuffers.Count > 0) {
+            retired = new List<(MemoryMappedFile File, MemoryMappedViewAccessor View)>(_retiredVideoBuffers);
+            _retiredVideoBuffers.Clear();
           }
-          if (_vlcMappedFile != null) {
-              _vlcMappedFile.Dispose();
-              _vlcMappedFile = null;
-          }
-          _vlcBuffer = IntPtr.Zero;
-
           if (_waveOut != null) {
-              _waveOut.Stop();
-              _waveOut.Dispose();
-              _waveOut = null;
+            try { _waveOut.Stop(); } catch { }
+            try { _waveOut.Dispose(); } catch { }
+            _waveOut = null;
           }
+        }
+      }
+
+      ReleaseVideoMaps(currentView, currentFile, retired);
+    }
+
+    private void ReleaseVideoMaps(MemoryMappedViewAccessor currentView, MemoryMappedFile currentFile, List<(MemoryMappedFile File, MemoryMappedViewAccessor View)>? retired) {
+      if (Volatile.Read(ref _videoUseCount) > 0) {
+        Task.Run(() => {
+          long deadline = Environment.TickCount64 + 30000;
+          while (Volatile.Read(ref _videoUseCount) > 0 && Environment.TickCount64 < deadline)
+            Thread.Sleep(5);
+          if (Volatile.Read(ref _videoUseCount) > 0)
+            return;
+          DisposeVideoMaps(currentView, currentFile, retired);
+        });
+        return;
+      }
+      DisposeVideoMaps(currentView, currentFile, retired);
+    }
+
+    private static void DisposeVideoMaps(MemoryMappedViewAccessor currentView, MemoryMappedFile currentFile, List<(MemoryMappedFile File, MemoryMappedViewAccessor View)>? retired) {
+      try { currentView?.Dispose(); } catch { }
+      try { currentFile?.Dispose(); } catch { }
+      if (retired == null) return;
+      foreach (var item in retired) {
+        try { item.View?.Dispose(); } catch { }
+        try { item.File?.Dispose(); } catch { }
       }
     }
 

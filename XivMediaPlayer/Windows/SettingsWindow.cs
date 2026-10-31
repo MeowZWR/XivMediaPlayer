@@ -138,6 +138,13 @@ namespace XivMediaPlayer.Windows {
         _onVolumeFix.Invoke();
       }
 
+      if (ImGui.Button("播放控制")) {
+        _plugin.ToggleLocalMediaWindow();
+      }
+      if (ImGui.IsItemHovered()) {
+        ImGui.SetTooltip("打开播放、播放列表、锁定和本地文件控制。");
+      }
+
       bool spatialAudio = _plugin.Config.SpatialAudioEnabled;
       if (ImGui.Checkbox(Localize("Enable 3D Spatial Audio"), ref spatialAudio)) {
         _plugin.Config.SpatialAudioEnabled = spatialAudio;

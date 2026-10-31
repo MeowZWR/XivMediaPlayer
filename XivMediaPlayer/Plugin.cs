@@ -29,7 +29,7 @@ using System.Collections.Concurrent;
 
 namespace XivMediaPlayer
 {
-    public sealed class Plugin : IDalamudPlugin
+    public sealed partial class Plugin : IDalamudPlugin
     {
         public string Name => Translate("XIV Media Player");
 
@@ -459,6 +459,7 @@ namespace XivMediaPlayer
                 Translate(" /media play <url> — Play a media URL\n") +
                 Translate(" /media stop — Stop current stream\n") +
                 Translate(" /media video — Toggle video window\n") +
+                Translate(" /media controls — Open playback controls\n") +
                 Translate(" /media emulate <ip> <session> — Connect to emulation server");
         }
 
@@ -470,6 +471,7 @@ namespace XivMediaPlayer
                 Translate(" /media play <url> — Play a media URL\n") +
                 Translate(" /media stop — Stop current stream\n") +
                 Translate(" /media video — Toggle video window\n") +
+                Translate(" /media controls — Open playback controls\n") +
                 Translate(" /media emulate <ip> <session> — Connect to emulation server\n") +
                 Translate(" /media screen [place|move|rotate|scale|reset|save] — 3D screen\n") +
                 Translate(" /media ytdlp-update — Update yt-dlp\n") +
@@ -761,6 +763,7 @@ namespace XivMediaPlayer
             _windowSystem.AddWindow(_settingsWindow);
             _windowSystem.AddWindow(_screenSettingsWindow);
             _windowSystem.AddWindow(_depthPreviewWindow);
+            RegisterLocalMediaWindow();
 
             // Register draw + config UI
             _pluginInterface.UiBuilder.Draw += OnDraw;
@@ -1041,7 +1044,11 @@ namespace XivMediaPlayer
 
                 // Only push if actively playing or loading.
                 // Paused media should continue pushing so clients don't think the DJ crashed.
-                if (isMediaOwner && ((_mediaManager?.ActiveStream != null) || !string.IsNullOrEmpty(_lastStreamURL)))
+                if (_suppressServerSync)
+                {
+                    _lastServerSyncPush = DateTime.UtcNow;
+                }
+                else if (isMediaOwner && ((_mediaManager?.ActiveStream != null) || !string.IsNullOrEmpty(_lastStreamURL)))
                 {
                     if ((DateTime.UtcNow - _lastServerSyncPush).TotalSeconds >= 5)
                     {
@@ -1299,6 +1306,10 @@ namespace XivMediaPlayer
                     _videoWindow.IsOpen = !_videoWindow.IsOpen;
                     break;
 
+                case "controls":
+                    ToggleLocalMediaWindow();
+                    break;
+
                 case "emulate":
                     if (splitArgs.Length >= 3)
                     {
@@ -1385,6 +1396,7 @@ namespace XivMediaPlayer
         private void TuneIntoStream(string url, MediaPlayerCore.IMediaGameObject audioGameObject, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null, bool isAutoSync = false)
         {
             if (_disposed) return;
+            if (!AllowPlaybackDuringLocalSession(url, isAutoSync)) return;
 
             // Auto-detect Emulation Server URLs (e.g. rtsp://10.0.0.30:8554/live/screen_43815929)
             // Replace any backslashes with forward slashes (FFXIV chat/clipboard can mangle them)
@@ -1433,6 +1445,8 @@ namespace XivMediaPlayer
                 return;
             }
 
+            ArmLocalFileSyncBlock(url);
+
             _streamURLs = new string[] { url };
             _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
             if (_streamURLs.Length > 0)
@@ -1447,6 +1461,7 @@ namespace XivMediaPlayer
                 _mediaManager.PlayStream(audioGameObject, playUrl, _config.SpatialAudioEnabled, startTimeMs, httpHeaders);
                 _lastStreamURL = url;
                 _currentStreamer = "Stream";
+                ApplyLocalFileLabels(url);
                 PrintVerbose(@"[Media Player] Playing stream!" +
                   "\r\nUse \"/media video\" to toggle the video feed." +
                   "\r\nUse \"/media stop\" to stop the stream.");
@@ -1977,6 +1992,7 @@ namespace XivMediaPlayer
             }
 
             url = CleanUrl(url);
+            if (!AllowPlaybackDuringLocalSession(url, isAutoSync)) return;
 
             if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable())
             {
@@ -2466,6 +2482,9 @@ namespace XivMediaPlayer
                 return;
             }
 
+            if (TryRestartForLoop(e))
+                return;
+
             if (!string.IsNullOrEmpty(_lastStreamURL))
             {
                 _config.WatchHistory.Remove(_lastStreamURL);
@@ -2474,7 +2493,10 @@ namespace XivMediaPlayer
 
             if (_mediaQueue.Count == 0 || e == "Emulation")
             {
+                bool rejoinAfterLocalFile = _suppressServerSync;
                 ResetStreamValues();
+                if (rejoinAfterLocalFile)
+                    _ = FetchMediaFromServerAsync();
             }
             else
             {
@@ -2518,6 +2540,12 @@ namespace XivMediaPlayer
             if (wasPlaying)
             {
                 _deferredBgmRestoreTime = DateTime.UtcNow.AddSeconds(1);
+            }
+
+            if (_suppressServerSync)
+            {
+                _suppressServerSync = false;
+                pushToServer = false;
             }
 
             if (pushToServer) {
@@ -4154,7 +4182,7 @@ namespace XivMediaPlayer
         {
             key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             state = new RoomMediaState();
-            if (string.IsNullOrEmpty(key)) return false;
+            if (string.IsNullOrEmpty(key) || _suppressServerSync) return false;
 
             var activeStream = _mediaManager?.ActiveStream;
             if (activeStream != null && !string.IsNullOrEmpty(activeStream.SoundPath))
@@ -4228,6 +4256,8 @@ namespace XivMediaPlayer
         /// </summary>
         private void BeginInitialMediaRestore()
         {
+            if (_suppressServerSync) return;
+
             string key = CurrentTvPlacement?.LocationKey ?? GetLocationKey();
             if (string.IsNullOrEmpty(key))
             {
@@ -4308,6 +4338,8 @@ namespace XivMediaPlayer
 
         public async Task PushMediaToServerAsync(bool isBackgroundSync, long? overrideTimeMs = null)
         {
+            if (_suppressServerSync) return;
+
             var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             
             var activeStream = _mediaManager?.ActiveStream;
@@ -4444,6 +4476,8 @@ namespace XivMediaPlayer
 
         public async Task FetchMediaFromServerAsync(string? locationKey = null)
         {
+            if (_suppressServerSync) return;
+
             var key = locationKey ?? CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             _pluginLog.Information($"[Sync] FetchMediaFromServerAsync invoked. Key: {key}");
             if (string.IsNullOrEmpty(key)) return;
@@ -6450,6 +6484,15 @@ namespace XivMediaPlayer
         /// </summary>
         public void Stop()
         {
+            if (_suppressServerSync)
+            {
+                PrintVerbose("[Media Player] Stopping local file. Room sync will resume.");
+                _mediaManager?.StopStream();
+                ResetStreamValues(true);
+                _ = FetchMediaFromServerAsync();
+                return;
+            }
+
             if (!CanControlCurrentTvPlayback())
             {
                 return;
