@@ -1,3 +1,4 @@
+using LibVLCSharp.Shared;
 using MediaPlayerCore.Compositing;
 using MediaPlayerCore.YtDlp;
 using NAudio.Wave;
@@ -19,6 +20,8 @@ namespace MediaPlayerCore {
     private IMediaGameObject _mainPlayer = null;
     private IMediaGameObject _camera;
     private string _libVLCPath;
+    private LibVLC _sharedLibVlc;
+    private readonly object _libVlcGate = new object();
     private Task _updateLoop;
     private bool notDisposed = true;
     private float _livestreamVolume = 1;
@@ -446,14 +449,52 @@ namespace MediaPlayerCore {
       } catch (Exception e) { OnErrorReceived?.Invoke(this, new MediaError() { Exception = e }); }
     }
 
+    internal LibVLC GetSharedLibVLC() {
+      lock (_libVlcGate) {
+        if (_sharedLibVlc != null) return _sharedLibVlc;
+        string location = Path.Combine(_libVLCPath, "libvlc", "win-x64");
+        Core.Initialize(location);
+        _sharedLibVlc = new LibVLC("--vout=none", "--http-reconnect");
+        _sharedLibVlc.Log += SharedLibVlcLog;
+        return _sharedLibVlc;
+      }
+    }
+
+    private void SharedLibVlcLog(object sender, LogEventArgs e) {
+      if (MediaObject.IsBenignVlcLogMessage(e.Message)) return;
+      if (e.Level >= LogLevel.Error) {
+        Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
+        OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception($"VLC [{e.Level}] {e.Module}: {e.Message}") });
+      } else if (e.Level >= LogLevel.Warning) {
+        Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
+      }
+    }
+
     public void Dispose() {
       notDisposed = false;
       _desktopAudioListener?.Dispose();
       _desktopAudioListener = null;
-      CleanSounds();
+      DisposePlaybackStreams();
       try {
         _updateLoop?.Wait(TimeSpan.FromSeconds(2));
       } catch { }
+      lock (_libVlcGate) {
+        try { _sharedLibVlc?.Dispose(); } catch { }
+        _sharedLibVlc = null;
+      }
+    }
+
+    private void DisposePlaybackStreams() {
+      MediaObject[] streams;
+      lock (_playbackStreams) {
+        streams = _playbackStreams.Values.Concat(_deadStreams).ToArray();
+        _playbackStreams.Clear();
+        _deadStreams.Clear();
+      }
+      StopFFmpegStream();
+      foreach (var stream in streams) {
+        try { stream?.Dispose(); } catch { }
+      }
     }
   }
 }

@@ -241,7 +241,7 @@ namespace MediaPlayerCore {
       }
     }
 
-    private static bool IsBenignVlcLogMessage(string message)
+    internal static bool IsBenignVlcLogMessage(string message)
       => message.Contains("DEMUX_GET_TIME", StringComparison.OrdinalIgnoreCase)
         || message.Contains("DEMUX_GET_LENGTH", StringComparison.OrdinalIgnoreCase)
         || message.Contains("DEMUX_GET_PTS", StringComparison.OrdinalIgnoreCase)
@@ -487,33 +487,9 @@ namespace MediaPlayerCore {
                 _parent.LastFrameTrueHeight = 0;
                 _parent.LastFrameCount++;
               }
-              string location = _libVLCPath + @"\libvlc\win-x64";
-              Debug.WriteLine($"[MediaObject] Initializing VLC from: {location}");
               Debug.WriteLine($"[MediaObject] Media path: {mediaPath.Substring(0, Math.Min(100, mediaPath.Length))}...");
-
-              Core.Initialize(location);
+              libVLC = _parent.GetSharedLibVLC();
               string userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-              var vlcArgs = new List<string> {
-                "--vout=none", 
-                "--http-reconnect"
-              };
-
-              libVLC = new LibVLC(vlcArgs.ToArray());
-
-              // Hook VLC's internal log to catch errors
-              libVLC.Log += (s, e) => {
-                if (IsBenignVlcLogMessage(e.Message)) {
-                  return;
-                }
-
-                if (e.Level >= LogLevel.Error) {
-                  Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
-                  OnErrorReceived?.Invoke(this, new MediaError() { Exception = new Exception($"VLC [{e.Level}] {e.Module}: {e.Message}") });
-                } else if (e.Level >= LogLevel.Warning) {
-                  Debug.WriteLine($"[VLC-{e.Level}] {e.Module}: {e.Message}");
-                }
-              };
 
               var media = new Media(libVLC, mediaPath, IsNetworkMediaPath(mediaPath)
                 ? FromType.FromLocation : FromType.FromPath);
@@ -562,7 +538,7 @@ namespace MediaPlayerCore {
               }
               
               lock (_disposeLock) {
-                if (_disposed) {
+                if (_disposed || _isDisposing) {
                    media.Dispose();
                    return;
                 }
@@ -936,7 +912,6 @@ namespace MediaPlayerCore {
 
     public void Dispose() {
       MediaPlayer playerToStop = null;
-      LibVLC libVlcToDispose = null;
       List<(MemoryMappedFile File, MemoryMappedViewAccessor View)> retired = null;
       MemoryMappedFile currentFile = null;
       MemoryMappedViewAccessor currentView = null;
@@ -948,20 +923,11 @@ namespace MediaPlayerCore {
           }
           _isDisposing = true;
           playerToStop = _vlcPlayer;
-          libVlcToDispose = libVLC;
         }
 
         if (playerToStop != null) {
           PlaybackStopped?.Invoke(this, "OK");
-          try { playerToStop.Stop(); } catch { }
-          WaitForVideoIdle();
-          try { playerToStop.SetVideoCallbacks(null, null, null); } catch { }
-          try { playerToStop.SetVideoFormatCallbacks(null, null); } catch { }
-          WaitForVideoIdle();
-          try { playerToStop.Dispose(); } catch { }
-        }
-        if (libVlcToDispose != null) {
-          try { libVlcToDispose.Dispose(); } catch { }
+          ReleasePlayer(playerToStop);
         }
 
         lock (_disposeLock) {
@@ -989,6 +955,34 @@ namespace MediaPlayerCore {
       }
 
       ReleaseVideoMaps(currentView, currentFile, retired);
+    }
+
+    private void ReleasePlayer(MediaPlayer player) {
+      using var stopped = new ManualResetEventSlim(false);
+      EventHandler<EventArgs> onStopped = (_, _) => {
+        try { stopped.Set(); } catch (ObjectDisposedException) { }
+      };
+      try { player.Stopped += onStopped; } catch { }
+
+      try {
+        var state = player.State;
+        if (state == VLCState.Stopped || state == VLCState.Ended || state == VLCState.Error || state == VLCState.NothingSpecial)
+          stopped.Set();
+        else
+          player.Stop();
+      } catch {
+        stopped.Set();
+      }
+
+      try { stopped.Wait(TimeSpan.FromSeconds(3)); } catch { }
+      WaitForVideoIdle();
+      try { player.SetVideoCallbacks(null, null, null); } catch { }
+      try { player.SetVideoFormatCallbacks(null, null); } catch { }
+      WaitForVideoIdle();
+      try { player.Stopped -= onStopped; } catch { }
+      // The thread that raised Stopped has to leave the event lock before the player is released.
+      Thread.Sleep(30);
+      try { player.Dispose(); } catch { }
     }
 
     private void ReleaseVideoMaps(MemoryMappedViewAccessor currentView, MemoryMappedFile currentFile, List<(MemoryMappedFile File, MemoryMappedViewAccessor View)>? retired) {
