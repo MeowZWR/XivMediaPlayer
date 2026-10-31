@@ -25,6 +25,19 @@ namespace XivMediaPlayer.LocalUi
             return File.Exists(url);
         }
 
+        public static bool IsMissing(string? url)
+        {
+            if (!IsLocalFile(url)) return false;
+            try
+            {
+                return !File.Exists(Normalize(url!));
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
         public static string Normalize(string path)
         {
             path = path.Trim().Trim('"');

@@ -676,6 +676,7 @@ namespace XivMediaPlayer
             }
             InitializeLocalization();
             RefreshDiagnosticReportEligibility();
+            RestoreLocalPlaylist();
 
             // Initialize yt-dlp manager
             _ytDlpManager = new YtDlpManager(pluginDir, _config.PreferredQuality) { EnableSabrProxy = _config.EnableSabrProxy };
@@ -804,6 +805,8 @@ namespace XivMediaPlayer
         private unsafe void OnFrameworkUpdate(IFramework framework)
         {
             if (_disposed) return;
+
+            PersistLocalPlaylistIfChanged();
 
             while (_frameworkActions.TryDequeue(out var action))
             {
@@ -6484,6 +6487,8 @@ namespace XivMediaPlayer
         /// </summary>
         public void Stop()
         {
+            RememberStoppedMedia();
+
             if (_suppressServerSync)
             {
                 PrintVerbose("[Media Player] Stopping local file. Room sync will resume.");
@@ -6520,6 +6525,7 @@ namespace XivMediaPlayer
             var activeStream = _mediaManager?.ActiveStream;
             if (activeStream == null)
             {
+                TryReplayStoppedMedia();
                 return;
             }
 
@@ -6579,27 +6585,16 @@ namespace XivMediaPlayer
 
             if (_mediaQueue.Count == 0 || _playerObject == null) return;
 
-            // Record history
+            if (!TryDequeuePlayable(out string nextUrl, out int skipped))
+            {
+                ReportSkippedMissingFiles(skipped);
+                return;
+            }
+
             if (!string.IsNullOrEmpty(_lastStreamURL))
-            {
                 _mediaHistory.Push(_lastStreamURL);
-            }
 
-            string nextUrl;
-            if (_config.ShuffleEnabled && _mediaQueue.Count > 1)
-            {
-                // Shuffle queue logic
-                var list = _mediaQueue.ToList();
-                int idx = _shuffleRandom.Next(list.Count);
-                nextUrl = list[idx];
-                list.RemoveAt(idx);
-                _mediaQueue = new Queue<string>(list);
-            }
-            else
-            {
-                nextUrl = _mediaQueue.Dequeue();
-            }
-
+            ReportSkippedMissingFiles(skipped);
             PrintVerboseFormat("[Media Player] Playing next: {0}", nextUrl);
             PlayRouted(nextUrl, CurrentAudioSource);
         }
@@ -6617,7 +6612,12 @@ namespace XivMediaPlayer
 
             if (_mediaHistory.Count == 0 || _playerObject == null) return;
 
-            // Requeue current media
+            if (!TryPopPlayableHistory(out string prevUrl, out int skipped))
+            {
+                ReportSkippedMissingFiles(skipped);
+                return;
+            }
+
             if (!string.IsNullOrEmpty(_lastStreamURL))
             {
                 var list = _mediaQueue.ToList();
@@ -6625,7 +6625,7 @@ namespace XivMediaPlayer
                 _mediaQueue = new Queue<string>(list);
             }
 
-            string prevUrl = _mediaHistory.Pop();
+            ReportSkippedMissingFiles(skipped);
             PrintVerboseFormat("[Media Player] Playing previous: {0}", prevUrl);
             PlayRouted(prevUrl, CurrentAudioSource);
         }

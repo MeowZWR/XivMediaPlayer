@@ -11,9 +11,39 @@ namespace XivMediaPlayer
     {
         private bool _suppressServerSync;
         private LocalMediaWindow? _localMediaWindow;
+        private string _resumeAfterStopUrl = "";
+        private string _resumeAfterStopTitle = "";
+        private string? _persistedPlaylistKey;
+
+        private void RestoreLocalPlaylist()
+        {
+            _mediaQueue.Clear();
+            if (_config.LocalPlaylist != null)
+            {
+                foreach (string url in _config.LocalPlaylist)
+                {
+                    if (!string.IsNullOrWhiteSpace(url))
+                        _mediaQueue.Enqueue(url.Trim());
+                }
+            }
+            _persistedPlaylistKey = string.Join("\n", _mediaQueue);
+        }
+
+        private void PersistLocalPlaylistIfChanged()
+        {
+            string key = string.Join("\n", _mediaQueue);
+            if (key == _persistedPlaylistKey) return;
+            _persistedPlaylistKey = key;
+            _config.LocalPlaylist = _mediaQueue.ToList();
+            _config.Save();
+        }
 
         public bool IsRoomSyncPaused => _suppressServerSync;
-        public string CurrentMediaTitle => _currentMediaTitle;
+        public string CurrentMediaTitle =>
+            !string.IsNullOrEmpty(_currentMediaTitle) ? _currentMediaTitle : _resumeAfterStopTitle;
+
+        public string RememberedMediaUrl =>
+            !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : _resumeAfterStopUrl;
 
         private void RegisterLocalMediaWindow()
         {
@@ -38,6 +68,8 @@ namespace XivMediaPlayer
         private bool TryRestartForLoop(string reason)
         {
             if (!_config.LoopEnabled || reason == "Emulation" || _lastStreamIsLive)
+                return false;
+            if (LocalMediaPaths.IsMissing(_lastStreamURL))
                 return false;
 
             long now = Environment.TickCount64;
@@ -112,7 +144,17 @@ namespace XivMediaPlayer
             path = LocalMediaPaths.Normalize(path);
             if (!File.Exists(path))
             {
-                PrintPlainError("找不到这个本地视频文件。");
+                bool removed = CanControlCurrentTvPlayback() && RemoveQueuedPath(path);
+                if (removed && _mediaQueue.Count > 0 && _playerObject != null)
+                {
+                    PrintPlainError("这个本地文件已经不存在，改为播放下一项。");
+                    PlayNext();
+                    return;
+                }
+
+                PrintPlainError(removed
+                    ? "这个本地文件已经不存在，已从播放列表移除。"
+                    : "找不到这个本地视频文件。");
                 return;
             }
 
@@ -146,19 +188,123 @@ namespace XivMediaPlayer
             }
 
             url = url.Trim().Trim('"');
+            if (LocalMediaPaths.IsLocalFile(url))
+            {
+                url = LocalMediaPaths.Normalize(url);
+                if (!File.Exists(url))
+                {
+                    PrintPlainError("找不到这个本地视频文件。");
+                    return;
+                }
+            }
+
             _mediaQueue.Enqueue(url);
             PrintVerboseFormat("[Media Player] Queued ({0}): {1}", _mediaQueue.Count, url);
 
-            var active = _mediaManager?.ActiveStream;
-            bool idle = active == null || active.PlaybackState == NAudio.Wave.PlaybackState.Stopped;
-            if (idle && _playerObject != null)
-            {
-                PlayMediaUrl(_mediaQueue.Dequeue());
-                return;
-            }
-
             if (!_suppressServerSync && !LocalMediaPaths.IsLocalFile(url))
                 _ = PushMediaToServerAsync(isBackgroundSync: false);
+        }
+
+        internal void RememberStoppedMedia()
+        {
+            if (string.IsNullOrEmpty(_lastStreamURL)) return;
+            _resumeAfterStopUrl = _lastStreamURL;
+            _resumeAfterStopTitle = string.IsNullOrEmpty(_currentMediaTitle)
+                ? _lastStreamURL
+                : _currentMediaTitle;
+        }
+
+        internal bool TryReplayStoppedMedia()
+        {
+            string url = !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : _resumeAfterStopUrl;
+            if (string.IsNullOrEmpty(url)) return false;
+            if (LocalMediaPaths.IsMissing(url))
+            {
+                _resumeAfterStopUrl = "";
+                _resumeAfterStopTitle = "";
+                PrintPlainError("上次播放的本地文件已经不存在。");
+                if (_mediaQueue.Count > 0)
+                    PlayNext();
+                return true;
+            }
+            if (!CanControlCurrentTvPlayback()) return false;
+            _isIntentionallyPaused = false;
+            PlayMediaUrl(url);
+            return true;
+        }
+
+        private bool TryDequeuePlayable(out string url, out int skipped)
+        {
+            url = "";
+            skipped = 0;
+            while (_mediaQueue.Count > 0)
+            {
+                string candidate;
+                if (_config.ShuffleEnabled && _mediaQueue.Count > 1)
+                {
+                    var list = _mediaQueue.ToList();
+                    int idx = _shuffleRandom.Next(list.Count);
+                    candidate = list[idx];
+                    list.RemoveAt(idx);
+                    _mediaQueue = new Queue<string>(list);
+                }
+                else
+                {
+                    candidate = _mediaQueue.Dequeue();
+                }
+
+                if (LocalMediaPaths.IsMissing(candidate))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                url = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryPopPlayableHistory(out string url, out int skipped)
+        {
+            url = "";
+            skipped = 0;
+            while (_mediaHistory.Count > 0)
+            {
+                string candidate = _mediaHistory.Pop();
+                if (LocalMediaPaths.IsMissing(candidate))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                url = candidate;
+                return true;
+            }
+
+            return false;
+        }
+
+        private void ReportSkippedMissingFiles(int skipped)
+        {
+            if (skipped <= 0) return;
+            PrintPlainError($"有 {skipped} 个本地文件已不存在，已跳过。");
+        }
+
+        private bool RemoveQueuedPath(string path)
+        {
+            string key = LocalMediaPaths.Normalize(path).Replace('/', '\\');
+            var list = _mediaQueue.ToList();
+            int removed = list.RemoveAll(item =>
+                LocalMediaPaths.IsLocalFile(item)
+                && string.Equals(
+                    LocalMediaPaths.Normalize(item).Replace('/', '\\'),
+                    key,
+                    StringComparison.OrdinalIgnoreCase));
+            if (removed == 0) return false;
+            _mediaQueue = new Queue<string>(list);
+            return true;
         }
 
         public void RemoveQueuedMedia(int index)
