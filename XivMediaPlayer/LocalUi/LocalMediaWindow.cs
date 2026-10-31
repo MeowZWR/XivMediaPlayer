@@ -25,10 +25,14 @@ namespace XivMediaPlayer.LocalUi
 
         private readonly Plugin _plugin;
         private readonly FileDialogManager _fileDialogs = new();
+        private static readonly string[] ScopeLabels = { "庭院和室内", "仅室外", "仅室内" };
+        private static readonly string[] ArrivalLabels = { "只显示边缘图标", "进入时打开面板" };
+
         private string _urlInput = string.Empty;
         private string _filePath = string.Empty;
         private bool _seekDrag;
         private float _seekValue;
+        private bool _plotRegistryOpen;
 
         public LocalMediaWindow(Plugin plugin)
             : base("播放控制###xmp-local", ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoScrollbar, false)
@@ -61,6 +65,8 @@ namespace XivMediaPlayer.LocalUi
             ImGui.Spacing();
             ImGui.Separator();
             DrawLibrary();
+            if (_plotRegistryOpen)
+                DrawPlotRegistry();
             _fileDialogs.Draw();
             ApplyWidthLimit();
         }
@@ -85,10 +91,10 @@ namespace XivMediaPlayer.LocalUi
 
         private void DrawTitleRow()
         {
-            float menuW = CompactButtonWidth();
+            float iconW = CompactButtonWidth();
             float syncW = ModeSwitchWidth();
             float spacing = ImGui.GetStyle().ItemSpacing.X;
-            float textWidth = ImGui.GetContentRegionAvail().X - menuW - syncW - spacing * 2f;
+            float textWidth = ImGui.GetContentRegionAvail().X - iconW * 2f - syncW - spacing * 3f;
             string title = string.IsNullOrEmpty(_plugin.CurrentMediaTitle) ? "未在播放" : _plugin.CurrentMediaTitle;
 
             ImGui.AlignTextToFramePadding();
@@ -102,11 +108,14 @@ namespace XivMediaPlayer.LocalUi
             ImGui.SameLine();
             DrawModeSwitch();
 
-            float menuX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - menuW;
-            if (menuX > ImGui.GetCursorPosX())
-                ImGui.SameLine(menuX);
+            float buttonsW = iconW * 2f + spacing;
+            float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - buttonsW;
+            if (buttonsX > ImGui.GetCursorPosX())
+                ImGui.SameLine(buttonsX);
             else
                 ImGui.SameLine();
+            DrawPlotGear();
+            ImGui.SameLine(0, spacing);
             DrawMenu();
         }
 
@@ -127,6 +136,122 @@ namespace XivMediaPlayer.LocalUi
                     ? "本地模式。播放不参与房间同步，播完不会从列表移除。点击切换到同步模式。"
                     : "同步模式。播放列表与房间一起出队，不能添加本地视频。点击切换到本地模式。");
             }
+        }
+
+        public override void OnClose()
+        {
+            _plugin.OnPlaybackPanelClosed();
+        }
+
+        private void DrawPlotGear()
+        {
+            if (CompactIconButton(FontAwesomeIcon.Cog, "plots", "地块登记", _plotRegistryOpen, new Vector4(0.35f, 0.55f, 0.75f, 1f)))
+                _plotRegistryOpen = !_plotRegistryOpen;
+        }
+
+        private void DrawPlotRegistry()
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.TextUnformatted("地块登记");
+
+            HousePlotRead read = _plugin.ReadHousePlot();
+            if (read.Kind == HousePlotReadKind.Unknown)
+            {
+                ImGui.TextDisabled("正在读取所在地块…");
+            }
+            else if (read.Kind != HousePlotReadKind.OnPlot)
+            {
+                ImGui.TextWrapped("当前不在地块上。走到庭院范围内，或进入房屋后再登记。");
+            }
+            else
+            {
+                ImGui.TextWrapped("当前：" + Plugin.FormatHousePlot(read.WorldName, read.District, read.Subdivision, read.Ward, read.Plot, read.Indoor));
+                if (_plugin.IsPlotRegistered(read))
+                    ImGui.TextDisabled("这块地已经登记。");
+                else if (ImGui.Button("登记这块地"))
+                    _plugin.RegisterCurrentPlot();
+            }
+
+            ImGui.Spacing();
+            var plots = _plugin.RegisteredPlots;
+            if (plots.Count == 0)
+            {
+                ImGui.TextDisabled("还没有登记的地块。");
+                return;
+            }
+
+            float row = ImGui.GetFrameHeightWithSpacing() * 3f + ImGui.GetStyle().ItemSpacing.Y;
+            float height = Math.Min(280f, row * plots.Count);
+            ImGui.BeginChild("##registered-plots", new Vector2(0, height), true);
+            int removeIndex = -1;
+            for (int i = 0; i < plots.Count; i++)
+            {
+                RegisteredPlot plot = plots[i];
+                if (plot == null) continue;
+                ImGui.PushID(i);
+                if (i > 0)
+                    ImGui.Separator();
+
+                float deleteW = CompactButtonWidth();
+                float textWidth = ImGui.GetContentRegionAvail().X - deleteW - ImGui.GetStyle().ItemSpacing.X;
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted(Ellipsize(
+                    Plugin.FormatHousePlot(plot.WorldName, plot.District, plot.Subdivision, plot.Ward, plot.Plot, null),
+                    Math.Max(48f, textWidth)));
+                float deleteX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - deleteW;
+                if (deleteX > ImGui.GetCursorPosX())
+                    ImGui.SameLine(deleteX);
+                else
+                    ImGui.SameLine();
+                if (CompactIconButton(FontAwesomeIcon.Trash, "delete", "删除"))
+                    removeIndex = i;
+
+                float labelColumn = Math.Max(ImGui.CalcTextSize("触发").X, ImGui.CalcTextSize("动作").X);
+                int scope = (int)plot.Scope;
+                if (scope < 0 || scope >= ScopeLabels.Length) scope = 0;
+                if (DrawAlignedCombo("触发", "##scope", labelColumn, ref scope, ScopeLabels))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    plot.Scope = (PlotTriggerScope)scope;
+                    _plugin.Config.Save();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip(
+                        "庭院和室内：走到庭院里，或进入房屋时，都会执行下面的动作。\n仅室外：只在庭院里触发。\n仅室内：只在房屋里触发。");
+                }
+
+                int arrival = (int)plot.Arrival;
+                if (arrival < 0 || arrival >= ArrivalLabels.Length) arrival = 0;
+                if (DrawAlignedCombo("动作", "##arrival", labelColumn, ref arrival, ArrivalLabels))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    plot.Arrival = (PlotArrivalAction)arrival;
+                    _plugin.Config.Save();
+                }
+
+                ImGui.PopID();
+            }
+            ImGui.EndChild();
+
+            if (removeIndex >= 0)
+                _plugin.RemoveRegisteredPlotAt(removeIndex);
+        }
+
+        private static bool DrawAlignedCombo(string label, string id, float labelColumn, ref int value, string[] items)
+        {
+            float spacing = ImGui.GetStyle().ItemSpacing.X;
+            float rowX = ImGui.GetCursorPosX();
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted(label);
+            float comboX = rowX + labelColumn + spacing;
+            if (comboX > ImGui.GetCursorPosX())
+                ImGui.SameLine(comboX);
+            else
+                ImGui.SameLine();
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+            return ImGui.Combo(id, ref value, items, items.Length);
         }
 
         private void DrawMenu()

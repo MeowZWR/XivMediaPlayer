@@ -1062,6 +1062,8 @@ namespace XivMediaPlayer
                 }
             }
 
+            UpdatePlotPlaybackDock();
+
             // Sync Polling Loop
             if (IsMediaSyncLocation(LocationKey))
             {
@@ -4919,6 +4921,7 @@ namespace XivMediaPlayer
             if (_videoWindow != null) _videoWindow.IsOpen = false;
             if (_screenSettingsWindow != null) _screenSettingsWindow.IsOpen = false;
             if (_settingsWindow != null) _settingsWindow.IsOpen = false;
+            DismissPlotPlaybackDock();
             _mediaManager?.CleanSounds();
             ResetStreamValues();
         }

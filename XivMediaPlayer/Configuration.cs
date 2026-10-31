@@ -114,6 +114,9 @@ namespace XivMediaPlayer {
     public Dictionary<string, MediaHistoryEntry> WatchHistory { get; set; } = new Dictionary<string, MediaHistoryEntry>();
     public List<string> LocalPlaylist { get; set; } = new List<string>();
     public bool LocalPlaybackMode { get; set; }
+    public List<RegisteredPlot> RegisteredPlots { get; set; } = new List<RegisteredPlot>();
+    public PlaybackScreenEdge PlaybackEdgeSide { get; set; } = PlaybackScreenEdge.Right;
+    public float PlaybackEdgeAnchor { get; set; } = 0.42f;
 
     public string ServerUrl
     {

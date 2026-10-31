@@ -18,6 +18,7 @@ namespace XivMediaPlayer
         private void ApplySavedPlaybackMode()
         {
             _config.LocalPlaylist ??= new List<string>();
+            _config.RegisteredPlots ??= new List<RegisteredPlot>();
             if (_config.LocalPlaybackMode)
                 _suppressServerSync = true;
         }
@@ -67,12 +68,22 @@ namespace XivMediaPlayer
         {
             _localMediaWindow = new LocalMediaWindow(this);
             _windowSystem.AddWindow(_localMediaWindow);
+            _playbackEdgeWindow = new PlaybackEdgeTabWindow(this);
+            _windowSystem.AddWindow(_playbackEdgeWindow);
         }
 
         public void ToggleLocalMediaWindow()
         {
             if (_localMediaWindow == null) return;
-            _localMediaWindow.IsOpen = !_localMediaWindow.IsOpen;
+            if (_localMediaWindow.IsOpen)
+            {
+                _localMediaWindow.IsOpen = false;
+                OnPlaybackPanelClosed();
+            }
+            else
+            {
+                OpenPlaybackPanel();
+            }
         }
 
         public string[] CopyMediaQueue() =>
