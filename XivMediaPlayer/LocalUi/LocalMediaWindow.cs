@@ -33,11 +33,17 @@ namespace XivMediaPlayer.LocalUi
         private bool _seekDrag;
         private float _seekValue;
         private bool _plotRegistryOpen;
+        private bool _chromePushed;
+        private bool _pushedAlpha;
 
         public LocalMediaWindow(Plugin plugin)
-            : base("播放控制###xmp-local", ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoScrollbar, false)
+            : base(
+                "播放控制###xmp-local",
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoFocusOnAppearing,
+                false)
         {
             _plugin = plugin;
+            DisableFadeInFadeOut = true;
             SizeConstraints = new WindowSizeConstraints
             {
                 MinimumSize = new Vector2(460, 96),
@@ -45,22 +51,58 @@ namespace XivMediaPlayer.LocalUi
             };
         }
 
+        public override bool DrawConditions()
+            => !_plugin.GameUiHidden;
+
         public override void PreDraw()
         {
+            _chromePushed = _plugin.Config.PlaybackLightlessStyle;
+            AllowBackgroundBlur = !_chromePushed;
+            if (_chromePushed)
+                PlaybackPanelChrome.Push();
+            _pushedAlpha = _plugin.PlaybackDockMoving;
+            if (_pushedAlpha)
+            {
+                ImGui.SetNextWindowPos(_plugin.PlaybackPanelMotionPos, ImGuiCond.Always);
+                ImGui.PushStyleVar(ImGuiStyleVar.Alpha, _plugin.PlaybackPanelReveal);
+            }
             ApplyWidthLimit();
             base.PreDraw();
+        }
+
+        public override void PostDraw()
+        {
+            base.PostDraw();
+            if (_pushedAlpha)
+                ImGui.PopStyleVar();
+            if (_chromePushed)
+                PlaybackPanelChrome.Pop();
+            if (!IsOpen)
+                _plugin.OnPlaybackPanelClosed();
         }
 
         public override void Draw()
         {
             WindowName = "播放控制###xmp-local";
+            if (!_plugin.PlaybackDockMoving)
+                _plugin.NotePlaybackPanelBounds(ImGui.GetWindowPos(), ImGui.GetWindowSize());
+            if (_chromePushed)
+            {
+                PlaybackPanelChrome.DrawBackdrop();
+                PlaybackPanelChrome.DrawAtmosphere();
+            }
 
+            float surfaceTop = ImGui.GetCursorScreenPos().Y;
             DrawTitleRow();
+            if (_chromePushed)
+                PlaybackPanelChrome.DrawHairline();
             if (_plugin.IsMediaLoading && !string.IsNullOrEmpty(_plugin.MediaLoadingMessage))
                 ImGui.TextDisabled(_plugin.MediaLoadingMessage);
 
             DrawSeek();
             DrawControls();
+            if (_chromePushed)
+                PlaybackPanelChrome.DrawRail(surfaceTop, ImGui.GetCursorScreenPos().Y - ImGui.GetStyle().ItemSpacing.Y);
 
             ImGui.Spacing();
             ImGui.Separator();
@@ -91,10 +133,11 @@ namespace XivMediaPlayer.LocalUi
 
         private void DrawTitleRow()
         {
+            const int titleButtons = 2;
             float iconW = CompactButtonWidth();
             float syncW = ModeSwitchWidth();
             float spacing = ImGui.GetStyle().ItemSpacing.X;
-            float textWidth = ImGui.GetContentRegionAvail().X - iconW * 2f - syncW - spacing * 3f;
+            float textWidth = ImGui.GetContentRegionAvail().X - iconW * titleButtons - syncW - spacing * (titleButtons + 1);
             string title = string.IsNullOrEmpty(_plugin.CurrentMediaTitle) ? "未在播放" : _plugin.CurrentMediaTitle;
 
             ImGui.AlignTextToFramePadding();
@@ -108,7 +151,7 @@ namespace XivMediaPlayer.LocalUi
             ImGui.SameLine();
             DrawModeSwitch();
 
-            float buttonsW = iconW * 2f + spacing;
+            float buttonsW = iconW * titleButtons + spacing * (titleButtons - 1);
             float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - buttonsW;
             if (buttonsX > ImGui.GetCursorPosX())
                 ImGui.SameLine(buttonsX);
@@ -123,6 +166,16 @@ namespace XivMediaPlayer.LocalUi
         {
             bool local = _plugin.IsLocalPlaybackMode;
             string label = local ? "本地" : "同步";
+            string tooltip = local
+                ? "本地模式。播放不参与房间同步，播完不会从列表移除。点击切换到同步模式。"
+                : "同步模式。播放列表与房间一起出队，不能添加本地视频。点击切换到本地模式。";
+            if (_chromePushed)
+            {
+                if (PlaybackPanelChrome.DrawPill("##playback-mode", label, local ? SyncOff : SyncOn, tooltip))
+                    _plugin.SetLocalPlaybackMode(!local);
+                return;
+            }
+
             Vector4 color = local ? SyncOff : SyncOn;
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(color.X, color.Y, color.Z, 0.35f));
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(color.X, color.Y, color.Z, 0.55f));
@@ -131,21 +184,34 @@ namespace XivMediaPlayer.LocalUi
                 _plugin.SetLocalPlaybackMode(!local);
             ImGui.PopStyleColor(3);
             if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip(local
-                    ? "本地模式。播放不参与房间同步，播完不会从列表移除。点击切换到同步模式。"
-                    : "同步模式。播放列表与房间一起出队，不能添加本地视频。点击切换到本地模式。");
-            }
+                ImGui.SetTooltip(tooltip);
         }
 
         public override void OnClose()
         {
-            _plugin.OnPlaybackPanelClosed();
+            _plugin.OnPlaybackPanelClosed(hostNotify: true);
         }
 
         private void DrawPlotGear()
         {
-            if (CompactIconButton(FontAwesomeIcon.Cog, "plots", "地块登记", _plotRegistryOpen, new Vector4(0.35f, 0.55f, 0.75f, 1f)))
+            Vector4? openFace = null;
+            Vector4? openHover = null;
+            if (_plotRegistryOpen)
+            {
+                if (_chromePushed)
+                {
+                    openFace = PlaybackPanelChrome.Accent;
+                    openHover = Lighten(openFace.Value);
+                }
+                else
+                {
+                    var colors = ImGui.GetStyle().Colors;
+                    openFace = colors[(int)ImGuiCol.ButtonActive];
+                    openHover = colors[(int)ImGuiCol.ButtonHovered];
+                }
+            }
+
+            if (CompactIconButton(FontAwesomeIcon.Home, "plots", "地块登记", _plotRegistryOpen, openFace, openHover))
                 _plotRegistryOpen = !_plotRegistryOpen;
         }
 
@@ -260,10 +326,14 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.OpenPopup("xmp-local-more");
 
             if (!ImGui.BeginPopup("xmp-local-more")) return;
+            bool lightless = _plugin.Config.PlaybackLightlessStyle;
+            if (ImGui.MenuItem("Lightless 风格", string.Empty, lightless))
+            {
+                _plugin.Config.PlaybackLightlessStyle = !lightless;
+                _plugin.Config.Save();
+            }
             if (ImGui.MenuItem("刷新"))
                 _plugin.RefreshCurrentMedia();
-            if (ImGui.MenuItem("举报"))
-                CopyDmca();
             if (ImGui.MenuItem("重启播放器"))
                 _plugin.RequestKillAndRestart();
             ImGui.EndPopup();
@@ -618,21 +688,23 @@ namespace XivMediaPlayer.LocalUi
             return LocalMediaPaths.Normalize(value).Replace('/', '\\');
         }
 
-        private bool IconButton(FontAwesomeIcon icon, string id, string tooltip, bool highlight = false, Vector4? color = null)
+        private bool IconButton(FontAwesomeIcon icon, string id, string tooltip, bool highlight = false, Vector4? color = null, Vector4? hoveredColor = null)
         {
             Vector4? face = highlight ? color : null;
-            Vector4? hovered = highlight && color.HasValue ? Lighten(color.Value) : null;
+            Vector4? hovered = null;
+            if (highlight)
+                hovered = hoveredColor ?? (color.HasValue ? Lighten(color.Value) : null);
             bool pressed = ImGuiComponents.IconButton(id, icon, face, face, hovered);
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 ImGui.SetTooltip(tooltip);
             return pressed;
         }
 
-        private bool CompactIconButton(FontAwesomeIcon icon, string id, string tooltip, bool highlight = false, Vector4? color = null)
+        private bool CompactIconButton(FontAwesomeIcon icon, string id, string tooltip, bool highlight = false, Vector4? color = null, Vector4? hoveredColor = null)
         {
             var padding = ImGui.GetStyle().FramePadding;
             ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(CompactPadX, padding.Y));
-            bool pressed = IconButton(icon, id, tooltip, highlight, color);
+            bool pressed = IconButton(icon, id, tooltip, highlight, color, hoveredColor);
             ImGui.PopStyleVar();
             return pressed;
         }
@@ -658,31 +730,14 @@ namespace XivMediaPlayer.LocalUi
 
         private float ModeSwitchWidth()
         {
+            if (_chromePushed)
+                return Math.Max(PlaybackPanelChrome.PillWidth("本地"), PlaybackPanelChrome.PillWidth("同步"));
+
             float text = Math.Max(ImGui.CalcTextSize("本地").X, ImGui.CalcTextSize("同步").X);
             return text + ImGui.GetStyle().FramePadding.X * 2f;
         }
 
         private bool CanControl() => _plugin.IsRoomSyncPaused || _plugin.CanControlCurrentTvPlayback();
-
-        private void CopyDmca()
-        {
-            string url = _plugin.LastStreamURL;
-            if (string.IsNullOrEmpty(url))
-            {
-                _plugin.PrintPlainError("没有正在播放的链接可以复制。");
-                return;
-            }
-
-            string domain = "网站管理员";
-            try
-            {
-                domain = new Uri(url).Host;
-            }
-            catch { }
-
-            ImGui.SetClipboardText($"内容链接：{url}\n\n请联系 {domain} 举报此内容。");
-            _plugin.PrintPlain("已把举报信息和链接复制到剪贴板。");
-        }
 
         private void OpenLocalFileDialog()
         {

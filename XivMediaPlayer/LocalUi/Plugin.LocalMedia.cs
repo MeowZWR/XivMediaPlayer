@@ -23,6 +23,8 @@ namespace XivMediaPlayer
                 _suppressServerSync = true;
         }
 
+        internal bool GameUiHidden => _gameGui.GameUiHidden;
+
         public bool IsLocalPlaybackMode => _config.LocalPlaybackMode;
         public bool IsRoomSyncPaused => IsLocalPlaybackMode;
 

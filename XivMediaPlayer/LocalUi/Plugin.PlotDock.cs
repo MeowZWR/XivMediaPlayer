@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Numerics;
+using Dalamud.Bindings.ImGui;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using XivMediaPlayer.LocalUi;
 
@@ -7,7 +9,12 @@ namespace XivMediaPlayer
     public sealed partial class Plugin
     {
         private PlaybackEdgeTabWindow? _playbackEdgeWindow;
+        private readonly PlaybackDockMotion _dockMotion = new();
+        private Vector2 _playbackPanelRest;
+        private Vector2 _playbackPanelSize = new(480f, 180f);
+        private bool _playbackPanelPlaced;
         private bool _plotDockActive;
+        private bool _ignoreNextPanelClose;
         private bool _plotPlaceTracked;
         private int _keepPlaybackPanelTicks;
         private uint _plotDockWorldId;
@@ -127,18 +134,56 @@ namespace XivMediaPlayer
                 _keepPlaybackPanelTicks = 8;
         }
 
-        internal void OpenPlaybackPanel()
+        internal bool PlaybackDockMoving => _dockMotion.Active;
+        internal float PlaybackPanelReveal => _dockMotion.Active ? _dockMotion.PanelAlpha : 1f;
+        internal float PlaybackEdgeReveal => _dockMotion.Active ? 1f - _dockMotion.PanelAlpha : 1f;
+        internal Vector2 PlaybackPanelMotionPos => _dockMotion.PanelPos;
+
+        internal void NotePlaybackPanelBounds(Vector2 pos, Vector2 size)
         {
-            if (_playbackEdgeWindow != null)
-                _playbackEdgeWindow.IsOpen = false;
-            if (_localMediaWindow != null)
-                _localMediaWindow.IsOpen = true;
+            if (size.X < 8f || size.Y < 8f)
+                return;
+            _playbackPanelRest = pos;
+            _playbackPanelSize = size;
+            _playbackPanelPlaced = true;
         }
 
-        internal void OnPlaybackPanelClosed()
+        internal void OpenPlaybackPanel()
         {
-            if (_plotDockActive && _playbackEdgeWindow != null)
-                _playbackEdgeWindow.IsOpen = true;
+            if (_localMediaWindow == null)
+                return;
+
+            bool fromEdge = _playbackEdgeWindow?.IsOpen == true || _dockMotion.Active;
+            _localMediaWindow.IsOpen = true;
+            if (!fromEdge || _playbackEdgeWindow == null)
+            {
+                _dockMotion.Stop();
+                if (_playbackEdgeWindow != null)
+                    _playbackEdgeWindow.IsOpen = false;
+                return;
+            }
+
+            _dockMotion.Begin(true, CollapsedPanelPos(), PanelRestPos());
+            _playbackEdgeWindow.IsOpen = true;
+        }
+
+        internal void OnPlaybackPanelClosed(bool hostNotify = false)
+        {
+            if (hostNotify && _ignoreNextPanelClose)
+            {
+                _ignoreNextPanelClose = false;
+                return;
+            }
+
+            if (!_plotDockActive || _playbackEdgeWindow == null || _localMediaWindow == null)
+                return;
+
+            _localMediaWindow.IsOpen = true;
+            _playbackEdgeWindow.IsOpen = true;
+            if (_dockMotion.Active && !_dockMotion.Opening)
+                return;
+
+            _dockMotion.Begin(false, CollapsedPanelPos(), PanelRestPos());
         }
 
         private void UpdatePlotPlaybackDock()
@@ -146,9 +191,15 @@ namespace XivMediaPlayer
             if (_keepPlaybackPanelTicks > 0)
                 _keepPlaybackPanelTicks--;
 
+            bool motionDone = _dockMotion.Advance();
+
             HousePlotRead read = ReadHousePlot();
             if (read.Kind == HousePlotReadKind.Unknown)
+            {
+                if (motionDone && _dockMotion.Active)
+                    FinishDockMotion();
                 return;
+            }
 
             bool placeChanged = read.Kind != HousePlotReadKind.OnPlot || !_plotPlaceTracked || !SameTrackedPlace(read);
             if (read.Kind == HousePlotReadKind.OnPlot)
@@ -173,7 +224,45 @@ namespace XivMediaPlayer
             if (placeChanged)
                 ApplyPlotArrival(match);
             EnsurePlotDockVisible();
+            if (motionDone && _dockMotion.Active)
+                FinishDockMotion();
         }
+
+        private void FinishDockMotion()
+        {
+            bool opening = _dockMotion.Opening;
+            _dockMotion.Stop();
+            if (opening)
+            {
+                if (_playbackEdgeWindow != null)
+                    _playbackEdgeWindow.IsOpen = false;
+                return;
+            }
+
+            if (_localMediaWindow != null)
+            {
+                _ignoreNextPanelClose = true;
+                _localMediaWindow.IsOpen = false;
+            }
+        }
+
+        private Vector2 PanelRestPos()
+        {
+            if (_playbackPanelPlaced)
+                return _playbackPanelRest;
+
+            Vector2 collapsed = CollapsedPanelPos();
+            var viewport = ImGui.GetMainViewport();
+            Vector2 center = viewport.Pos + viewport.Size * 0.5f;
+            Vector2 dir = center - collapsed;
+            float len = dir.Length();
+            if (len < 1f)
+                return collapsed + new Vector2(-120f, 40f);
+            return collapsed + dir / len * 160f;
+        }
+
+        private Vector2 CollapsedPanelPos()
+            => PlaybackEdgeTabWindow.CollapsedWindowPos(_playbackPanelSize, _config.PlaybackEdgeSide, _config.PlaybackEdgeAnchor);
 
         private bool SameTrackedPlace(HousePlotRead read)
             => _plotDockWorldId == read.WorldId
@@ -194,6 +283,7 @@ namespace XivMediaPlayer
         private void DismissPlotPlaybackDock(bool closePanel = true)
         {
             _plotDockActive = false;
+            _dockMotion.Stop();
             if (_playbackEdgeWindow != null)
                 _playbackEdgeWindow.IsOpen = false;
             if (closePanel && _localMediaWindow != null)
@@ -210,6 +300,15 @@ namespace XivMediaPlayer
 
         private void EnsurePlotDockVisible()
         {
+            if (_dockMotion.Active)
+            {
+                if (_localMediaWindow != null)
+                    _localMediaWindow.IsOpen = true;
+                if (_playbackEdgeWindow != null)
+                    _playbackEdgeWindow.IsOpen = true;
+                return;
+            }
+
             if (_localMediaWindow?.IsOpen == true)
             {
                 if (_playbackEdgeWindow != null)

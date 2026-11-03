@@ -10,8 +10,11 @@ namespace XivMediaPlayer.LocalUi
     internal sealed class PlaybackEdgeTabWindow : Window
     {
         private readonly Plugin _plugin;
+        private readonly ImGuiWindowFlags _baseFlags;
         private bool _dragging;
         private bool _suppressClick;
+        private bool _chromePushed;
+        private bool _pushedAlpha;
         private Vector2 _pressPos;
 
         public PlaybackEdgeTabWindow(Plugin plugin)
@@ -25,20 +28,64 @@ namespace XivMediaPlayer.LocalUi
                 false)
         {
             _plugin = plugin;
+            _baseFlags = Flags;
             RespectCloseHotkey = false;
         }
+
+        public static Vector2 CollapsedWindowPos(Vector2 windowSize, PlaybackScreenEdge edge, float anchor)
+        {
+            var viewport = ImGui.GetMainViewport();
+            EdgePlacement(viewport.Pos, viewport.Size, edge, anchor, out Vector2 pos, out Vector2 pivot);
+            return pos - pivot * windowSize;
+        }
+
+        public override bool DrawConditions()
+            => !_plugin.GameUiHidden;
 
         public override void PreDraw()
         {
             if (_dragging && ImGui.IsMouseDown(ImGuiMouseButton.Left))
                 FollowPointer();
+            _chromePushed = _plugin.Config.PlaybackLightlessStyle;
+            AllowBackgroundBlur = !_chromePushed;
+            Flags = _baseFlags;
+            if (_plugin.PlaybackDockMoving && _plugin.PlaybackEdgeReveal < 0.99f)
+                Flags |= ImGuiWindowFlags.NoInputs;
+            if (_chromePushed)
+                PlaybackPanelChrome.Push();
+            _pushedAlpha = _plugin.PlaybackDockMoving;
+            if (_pushedAlpha)
+                ImGui.PushStyleVar(ImGuiStyleVar.Alpha, _plugin.PlaybackEdgeReveal);
             PlaceOnEdge();
             base.PreDraw();
         }
 
+        public override void PostDraw()
+        {
+            base.PostDraw();
+            if (_pushedAlpha)
+                ImGui.PopStyleVar();
+            if (_chromePushed)
+                PlaybackPanelChrome.Pop();
+        }
+
         public override void Draw()
         {
+            if (_chromePushed)
+            {
+                PlaybackPanelChrome.DrawBackdrop();
+                ImGui.PushStyleColor(ImGuiCol.Button, Vector4.Zero);
+            }
+
             bool clicked = ImGuiComponents.IconButton("open-playback", FontAwesomeIcon.Play);
+            if (_chromePushed)
+            {
+                ImGui.PopStyleColor();
+                const float frameInset = 5f;
+                var frameMin = ImGui.GetWindowPos() + new Vector2(frameInset, frameInset);
+                var frameMax = ImGui.GetWindowPos() + ImGui.GetWindowSize() - new Vector2(frameInset, frameInset);
+                PlaybackPanelChrome.DrawEdgeAtmosphere(frameMin, frameMax);
+            }
             if (ImGui.IsItemActivated())
                 _pressPos = ImGui.GetMousePos();
             if (ImGui.IsItemActive() && Vector2.Distance(ImGui.GetMousePos(), _pressPos) >= 4f)
@@ -99,40 +146,42 @@ namespace XivMediaPlayer.LocalUi
         private void PlaceOnEdge()
         {
             var viewport = ImGui.GetMainViewport();
-            PlaybackScreenEdge edge = _plugin.Config.PlaybackEdgeSide;
+            EdgePlacement(viewport.Pos, viewport.Size, _plugin.Config.PlaybackEdgeSide, _plugin.Config.PlaybackEdgeAnchor, out Vector2 pos, out Vector2 pivot);
+            ImGui.SetNextWindowPos(pos, ImGuiCond.Always, pivot);
+            if (!_chromePushed)
+                ImGui.SetNextWindowBgAlpha(0.92f);
+        }
+
+        private static void EdgePlacement(Vector2 viewportPos, Vector2 viewportSize, PlaybackScreenEdge edge, float anchor, out Vector2 pos, out Vector2 pivot)
+        {
             if (edge is not (PlaybackScreenEdge.Left or PlaybackScreenEdge.Right or PlaybackScreenEdge.Top or PlaybackScreenEdge.Bottom))
                 edge = PlaybackScreenEdge.Right;
 
             bool vertical = edge is PlaybackScreenEdge.Left or PlaybackScreenEdge.Right;
-            float length = vertical ? viewport.Size.Y : viewport.Size.X;
+            float length = vertical ? viewportSize.Y : viewportSize.X;
             GetEdgeRange(length, out float start, out float end);
-            float along = start + (end - start) * Math.Clamp(_plugin.Config.PlaybackEdgeAnchor, 0f, 1f);
+            float along = start + (end - start) * Math.Clamp(anchor, 0f, 1f);
             const float inset = 6f;
 
-            Vector2 pos;
-            Vector2 pivot;
             switch (edge)
             {
                 case PlaybackScreenEdge.Right:
-                    pos = new Vector2(viewport.Pos.X + viewport.Size.X - inset, viewport.Pos.Y + along);
+                    pos = new Vector2(viewportPos.X + viewportSize.X - inset, viewportPos.Y + along);
                     pivot = new Vector2(1f, 0.5f);
                     break;
                 case PlaybackScreenEdge.Top:
-                    pos = new Vector2(viewport.Pos.X + along, viewport.Pos.Y + inset);
+                    pos = new Vector2(viewportPos.X + along, viewportPos.Y + inset);
                     pivot = new Vector2(0.5f, 0f);
                     break;
                 case PlaybackScreenEdge.Bottom:
-                    pos = new Vector2(viewport.Pos.X + along, viewport.Pos.Y + viewport.Size.Y - inset);
+                    pos = new Vector2(viewportPos.X + along, viewportPos.Y + viewportSize.Y - inset);
                     pivot = new Vector2(0.5f, 1f);
                     break;
                 default:
-                    pos = new Vector2(viewport.Pos.X + inset, viewport.Pos.Y + along);
+                    pos = new Vector2(viewportPos.X + inset, viewportPos.Y + along);
                     pivot = new Vector2(0f, 0.5f);
                     break;
             }
-
-            ImGui.SetNextWindowPos(pos, ImGuiCond.Always, pivot);
-            ImGui.SetNextWindowBgAlpha(0.92f);
         }
 
         private static void GetEdgeRange(float length, out float start, out float end)
