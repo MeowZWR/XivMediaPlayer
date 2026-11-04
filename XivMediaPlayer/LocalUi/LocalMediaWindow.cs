@@ -232,12 +232,18 @@ namespace XivMediaPlayer.LocalUi
             }
             else
             {
-                ImGui.TextWrapped("当前：" + Plugin.FormatHousePlot(read.WorldName, read.District, read.Subdivision, read.Ward, read.Plot, read.Indoor));
-                if (_plugin.IsPlotRegistered(read))
-                    ImGui.TextDisabled("这块地已经登记。");
-                else if (ImGui.Button("登记这块地"))
-                    _plugin.RegisterCurrentPlot();
+                DrawCurrentPlotLine(read);
             }
+
+            bool showEdge = _plugin.Config.ShowEdgeIconWhenScreenDetected;
+            if (ImGui.Checkbox("检测到屏幕时显示边缘图标", ref showEdge))
+            {
+                _plugin.KeepPlaybackPanelOpen();
+                _plugin.Config.ShowEdgeIconWhenScreenDetected = showEdge;
+                _plugin.Config.SaveLocal();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("只在住宅区生效。当前地点已经有屏幕，且没有被登记地块的动作接管时，显示边缘图标。");
 
             ImGui.Spacing();
             var plots = _plugin.RegisteredPlots;
@@ -303,6 +309,36 @@ namespace XivMediaPlayer.LocalUi
 
             if (removeIndex >= 0)
                 _plugin.RemoveRegisteredPlotAt(removeIndex);
+        }
+
+        private void DrawCurrentPlotLine(HousePlotRead read)
+        {
+            string text = "当前：" + Plugin.FormatHousePlot(read.WorldName, read.District, read.Subdivision, read.Ward, read.Plot, read.Indoor);
+            bool registered = _plugin.IsPlotRegistered(read);
+            const string registeredLabel = "（已登记）";
+            const string registerLabel = "登记";
+            float gap = ImGui.GetStyle().ItemSpacing.X;
+            float suffixWidth = registered
+                ? ImGui.CalcTextSize(registeredLabel).X
+                : ImGui.CalcTextSize(registerLabel).X + ImGui.GetStyle().FramePadding.X * 2f;
+            float textWidth = ImGui.GetContentRegionAvail().X - suffixWidth - gap;
+
+            ImGui.AlignTextToFramePadding();
+            string shown = Ellipsize(text, Math.Max(48f, textWidth));
+            ImGui.TextUnformatted(shown);
+            if (ImGui.IsItemHovered() && shown != text)
+                ImGui.SetTooltip(text);
+
+            ImGui.SameLine(0, gap);
+            if (registered)
+            {
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextDisabled(registeredLabel);
+                return;
+            }
+
+            if (ImGui.SmallButton(registerLabel))
+                _plugin.RegisterCurrentPlot();
         }
 
         private static bool DrawAlignedCombo(string label, string id, float labelColumn, ref int value, string[] items)

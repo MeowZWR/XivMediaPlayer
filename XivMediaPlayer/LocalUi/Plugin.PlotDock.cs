@@ -14,6 +14,7 @@ namespace XivMediaPlayer
         private Vector2 _playbackPanelSize = new(480f, 180f);
         private bool _playbackPanelPlaced;
         private bool _plotDockActive;
+        private bool _screenEdgeFallback;
         private bool _ignoreNextPanelClose;
         private bool _plotPlaceTracked;
         private int _keepPlaybackPanelTicks;
@@ -215,17 +216,44 @@ namespace XivMediaPlayer
             RegisteredPlot? match = read.Kind == HousePlotReadKind.OnPlot ? FindRegisteredPlot(read) : null;
             if (match == null || !ScopeAllows(match, read.Indoor))
             {
+                if (ShouldShowScreenEdgeFallback())
+                {
+                    bool leavingPlotDock = _plotDockActive && !_screenEdgeFallback;
+                    _screenEdgeFallback = true;
+                    _plotDockActive = true;
+                    if (leavingPlotDock && placeChanged && !_dockMotion.Active && _localMediaWindow?.IsOpen == true && _keepPlaybackPanelTicks == 0)
+                        _localMediaWindow.IsOpen = false;
+                    EnsurePlotDockVisible();
+                    if (motionDone && _dockMotion.Active)
+                        FinishDockMotion();
+                    return;
+                }
+
+                _screenEdgeFallback = false;
                 if (_plotDockActive)
                     DismissPlotPlaybackDock(closePanel: placeChanged && _keepPlaybackPanelTicks == 0);
                 return;
             }
 
+            _screenEdgeFallback = false;
             _plotDockActive = true;
             if (placeChanged)
                 ApplyPlotArrival(match);
             EnsurePlotDockVisible();
             if (motionDone && _dockMotion.Active)
                 FinishDockMotion();
+        }
+
+        private bool ShouldShowScreenEdgeFallback()
+        {
+            if (!_config.ShowEdgeIconWhenScreenDetected)
+                return false;
+
+            uint territoryId = _clientState.TerritoryType;
+            if (territoryId == 0 || !TryClassifyHousingTerritory(territoryId, out _, out _))
+                return false;
+
+            return HasRoomTvsForCurrentLocation();
         }
 
         private void FinishDockMotion()
