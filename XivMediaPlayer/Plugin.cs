@@ -162,6 +162,8 @@ namespace XivMediaPlayer
         private bool _bgmWasMutedByUs;
         private bool _wasHousingMenuOpen = false;
         private bool _pendingConfigSave;
+        private bool _pendingLocalUiSave;
+        private DateTime _nextLocalUiSaveAttemptUtc = DateTime.MinValue;
         private DateTime _configDirtyAtUtc = DateTime.MinValue;
         private DateTime _lastConfigSaveUtc = DateTime.MinValue;
         private DateTime _nextConfigSaveAttemptUtc = DateTime.MinValue;
@@ -680,10 +682,14 @@ namespace XivMediaPlayer
             // Load configuration
             _config = (Configuration)_pluginInterface.GetPluginConfig()
                  ?? new Configuration();
-            _config.Initialize(_pluginInterface, MarkConfigDirty);
+            _config.Initialize(_pluginInterface, MarkConfigDirty, MarkLocalUiDirty);
             if (_config.Migrate())
             {
                 MarkConfigDirty();
+            }
+            if (!_config.LoadLocalUi())
+            {
+                MarkLocalUiDirty();
             }
             InitializeLocalization();
             RefreshDiagnosticReportEligibility();
@@ -6201,8 +6207,14 @@ namespace XivMediaPlayer
             }
         }
 
+        private void MarkLocalUiDirty()
+        {
+            _pendingLocalUiSave = true;
+        }
+
         private void FlushPendingConfigSave()
         {
+            FlushPendingLocalUiSave();
             if (_disposed || !_pendingConfigSave) return;
 
             var now = DateTime.UtcNow;
@@ -6233,6 +6245,25 @@ namespace XivMediaPlayer
                 case ConfigSaveResult.Failed:
                     // Silent retry with backoff — file locks are usually transient.
                     _nextConfigSaveAttemptUtc = now.AddSeconds(5);
+                    break;
+            }
+        }
+
+        private void FlushPendingLocalUiSave()
+        {
+            if (_disposed || !_pendingLocalUiSave) return;
+            if (DateTime.UtcNow < _nextLocalUiSaveAttemptUtc) return;
+
+            switch (_config.SaveLocalImmediate())
+            {
+                case ConfigSaveResult.Saved:
+                    _pendingLocalUiSave = false;
+                    _nextLocalUiSaveAttemptUtc = DateTime.MinValue;
+                    break;
+                case ConfigSaveResult.SkippedInProgress:
+                    break;
+                case ConfigSaveResult.Failed:
+                    _nextLocalUiSaveAttemptUtc = DateTime.UtcNow.AddSeconds(5);
                     break;
             }
         }
@@ -6938,6 +6969,8 @@ namespace XivMediaPlayer
         public void Dispose()
         {
             if (_disposed) return;
+            if (_pendingLocalUiSave)
+                _config.SaveLocalImmediate();
             _disposed = true;
 
             try

@@ -114,7 +114,7 @@ namespace XivMediaPlayer
                 Ward = read.Ward,
                 Plot = read.Plot,
             });
-            _config.Save();
+            _config.SaveLocal();
             return true;
         }
 
@@ -125,7 +125,7 @@ namespace XivMediaPlayer
                 return;
             KeepPlaybackPanelOpen();
             plots.RemoveAt(index);
-            _config.Save();
+            _config.SaveLocal();
         }
 
         internal void KeepPlaybackPanelOpen()

@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
+using XivMediaPlayer.LocalUi;
 using XivMediaPlayer.Localization;
 
 namespace XivMediaPlayer {
@@ -119,6 +120,13 @@ namespace XivMediaPlayer {
     public float PlaybackEdgeAnchor { get; set; } = 0.42f;
     public bool PlaybackLightlessStyle { get; set; } = true;
 
+    public bool ShouldSerializeLocalPlaylist() => false;
+    public bool ShouldSerializeLocalPlaybackMode() => false;
+    public bool ShouldSerializeRegisteredPlots() => false;
+    public bool ShouldSerializePlaybackEdgeSide() => false;
+    public bool ShouldSerializePlaybackEdgeAnchor() => false;
+    public bool ShouldSerializePlaybackLightlessStyle() => false;
+
     public string ServerUrl
     {
       get
@@ -147,6 +155,8 @@ namespace XivMediaPlayer {
     private IDalamudPluginInterface? pluginInterface;
     [NonSerialized]
     private Action? deferSave;
+    [NonSerialized]
+    private Action? deferLocalSave;
 
     private static readonly JsonSerializerSettings ConfigJsonSettings = new() {
       Formatting = Formatting.Indented,
@@ -162,9 +172,10 @@ namespace XivMediaPlayer {
     /// <summary>
     /// Call after construction or deserialization to wire up the save interface.
     /// </summary>
-    public void Initialize(IDalamudPluginInterface pi, Action deferSaveAction) {
+    public void Initialize(IDalamudPluginInterface pi, Action deferSaveAction, Action deferLocalSaveAction) {
       this.pluginInterface = pi;
       this.deferSave = deferSaveAction;
+      this.deferLocalSave = deferLocalSaveAction;
       CleanupStaleTempFiles(pi);
     }
 
@@ -173,6 +184,10 @@ namespace XivMediaPlayer {
     /// </summary>
     public void Save() {
       deferSave?.Invoke();
+    }
+
+    public void SaveLocal() {
+      deferLocalSave?.Invoke();
     }
 
     /// <summary>
@@ -218,6 +233,7 @@ namespace XivMediaPlayer {
     }
 
     private int _saveInProgress;
+    private int _localSaveInProgress;
     private string _serverUrl = "http://50.70.102.177:5000";
 
     private static void CleanupStaleTempFiles(IDalamudPluginInterface pi)
@@ -227,18 +243,21 @@ namespace XivMediaPlayer {
         var directory = pi.ConfigDirectory.FullName;
         if (!Directory.Exists(directory)) return;
 
-        foreach (var tempFile in Directory.EnumerateFiles(directory, ".XivMediaPlayer.json.*.new"))
+        foreach (var pattern in new[] { ".XivMediaPlayer.json.*.new", ".local-ui.json.*.new" })
         {
-          try
+          foreach (var tempFile in Directory.EnumerateFiles(directory, pattern))
           {
-            if (File.GetLastWriteTimeUtc(tempFile) < DateTime.UtcNow.AddHours(-1))
+            try
             {
-              File.Delete(tempFile);
+              if (File.GetLastWriteTimeUtc(tempFile) < DateTime.UtcNow.AddHours(-1))
+              {
+                File.Delete(tempFile);
+              }
             }
-          }
-          catch
-          {
-            // Best effort.
+            catch
+            {
+              // Best effort.
+            }
           }
         }
 
@@ -311,5 +330,76 @@ namespace XivMediaPlayer {
         Interlocked.Exchange(ref _saveInProgress, 0);
       }
     }
+
+    public bool LoadLocalUi() {
+      if (pluginInterface == null) return true;
+
+      var path = Path.Combine(pluginInterface.ConfigDirectory.FullName, LocalUiConfig.FileName);
+      if (File.Exists(path)) {
+        try {
+          var loaded = JsonConvert.DeserializeObject<LocalUiConfig>(File.ReadAllText(path));
+          if (loaded != null) ApplyLocalUi(loaded);
+        }
+        catch {
+          // Keep values already read from the main config for this session.
+        }
+        return true;
+      }
+
+      return SaveLocalImmediate() == ConfigSaveResult.Saved;
+    }
+
+    public ConfigSaveResult SaveLocalImmediate() {
+      if (pluginInterface == null) return ConfigSaveResult.Failed;
+      if (Interlocked.CompareExchange(ref _localSaveInProgress, 1, 0) != 0)
+        return ConfigSaveResult.SkippedInProgress;
+
+      try {
+        WriteLocalUi(pluginInterface);
+        return ConfigSaveResult.Saved;
+      }
+      catch {
+        return ConfigSaveResult.Failed;
+      }
+      finally {
+        Interlocked.Exchange(ref _localSaveInProgress, 0);
+      }
+    }
+
+    private void ApplyLocalUi(LocalUiConfig loaded) {
+      LocalPlaylist = loaded.LocalPlaylist ?? new List<string>();
+      LocalPlaybackMode = loaded.LocalPlaybackMode;
+      RegisteredPlots = loaded.RegisteredPlots ?? new List<RegisteredPlot>();
+      PlaybackEdgeSide = loaded.PlaybackEdgeSide;
+      PlaybackEdgeAnchor = loaded.PlaybackEdgeAnchor;
+      PlaybackLightlessStyle = loaded.PlaybackLightlessStyle;
+    }
+
+    private static void WriteLocalUi(IDalamudPluginInterface pi, Configuration source) {
+      var directory = pi.ConfigDirectory.FullName;
+      Directory.CreateDirectory(directory);
+      var path = Path.Combine(directory, LocalUiConfig.FileName);
+      var snapshot = new LocalUiConfig {
+        LocalPlaylist = source.LocalPlaylist ?? new List<string>(),
+        LocalPlaybackMode = source.LocalPlaybackMode,
+        RegisteredPlots = source.RegisteredPlots ?? new List<RegisteredPlot>(),
+        PlaybackEdgeSide = source.PlaybackEdgeSide,
+        PlaybackEdgeAnchor = source.PlaybackEdgeAnchor,
+        PlaybackLightlessStyle = source.PlaybackLightlessStyle,
+      };
+      var json = JsonConvert.SerializeObject(snapshot, LocalUiConfig.JsonSettings);
+      var tempPath = Path.Combine(directory, $".local-ui.json.{Guid.NewGuid():N}.new");
+      File.WriteAllText(tempPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+      try {
+        if (File.Exists(path)) File.Delete(path);
+        File.Move(tempPath, path);
+      }
+      catch {
+        try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+        throw;
+      }
+    }
+
+    private void WriteLocalUi(IDalamudPluginInterface pi) => WriteLocalUi(pi, this);
   }
 }

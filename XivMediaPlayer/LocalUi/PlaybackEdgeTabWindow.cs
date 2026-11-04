@@ -100,7 +100,7 @@ namespace XivMediaPlayer.LocalUi
             if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
             {
                 if (_dragging)
-                    _plugin.Config.Save();
+                    _plugin.Config.SaveLocal();
                 _dragging = false;
                 _suppressClick = false;
             }

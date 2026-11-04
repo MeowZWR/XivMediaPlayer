@@ -32,7 +32,7 @@ namespace XivMediaPlayer
         {
             if (_config.LocalPlaybackMode == enabled) return;
             _config.LocalPlaybackMode = enabled;
-            _config.Save();
+            _config.SaveLocal();
             if (enabled)
             {
                 _suppressServerSync = true;
@@ -57,7 +57,7 @@ namespace XivMediaPlayer
             if (!_config.LocalPlaybackMode && !_suppressServerSync) return;
             _config.LocalPlaybackMode = false;
             _suppressServerSync = false;
-            _config.Save();
+            _config.SaveLocal();
             PrintPlain("已切换到同步模式。");
         }
         public string CurrentMediaTitle =>
@@ -245,7 +245,7 @@ namespace XivMediaPlayer
             {
                 _config.LocalPlaylist ??= new List<string>();
                 _config.LocalPlaylist.Add(url);
-                _config.Save();
+                _config.SaveLocal();
                 return;
             }
 
@@ -415,7 +415,7 @@ namespace XivMediaPlayer
                     LocalMediaPaths.IsLocalFile(item)
                     && string.Equals(PlaylistKey(item), key, StringComparison.OrdinalIgnoreCase));
                 if (removed == 0) return false;
-                _config.Save();
+                _config.SaveLocal();
                 return true;
             }
 
@@ -437,7 +437,7 @@ namespace XivMediaPlayer
                 local.RemoveAt(index);
                 if (_localPlaylistIndex == index) _localPlaylistIndex = -1;
                 else if (_localPlaylistIndex > index) _localPlaylistIndex--;
-                _config.Save();
+                _config.SaveLocal();
                 return;
             }
 
@@ -455,7 +455,7 @@ namespace XivMediaPlayer
             {
                 _config.LocalPlaylist = new List<string>();
                 _localPlaylistIndex = -1;
-                _config.Save();
+                _config.SaveLocal();
                 return;
             }
 

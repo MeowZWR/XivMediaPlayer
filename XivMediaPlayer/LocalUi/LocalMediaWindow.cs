@@ -280,7 +280,7 @@ namespace XivMediaPlayer.LocalUi
                 {
                     _plugin.KeepPlaybackPanelOpen();
                     plot.Scope = (PlotTriggerScope)scope;
-                    _plugin.Config.Save();
+                    _plugin.Config.SaveLocal();
                 }
                 if (ImGui.IsItemHovered())
                 {
@@ -294,7 +294,7 @@ namespace XivMediaPlayer.LocalUi
                 {
                     _plugin.KeepPlaybackPanelOpen();
                     plot.Arrival = (PlotArrivalAction)arrival;
-                    _plugin.Config.Save();
+                    _plugin.Config.SaveLocal();
                 }
 
                 ImGui.PopID();
@@ -330,7 +330,7 @@ namespace XivMediaPlayer.LocalUi
             if (ImGui.MenuItem("Lightless 风格", string.Empty, lightless))
             {
                 _plugin.Config.PlaybackLightlessStyle = !lightless;
-                _plugin.Config.Save();
+                _plugin.Config.SaveLocal();
             }
             if (ImGui.MenuItem("刷新"))
                 _plugin.RefreshCurrentMedia();
