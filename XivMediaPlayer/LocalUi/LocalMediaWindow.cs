@@ -133,11 +133,10 @@ namespace XivMediaPlayer.LocalUi
 
         private void DrawTitleRow()
         {
-            const int titleButtons = 2;
             float iconW = CompactButtonWidth();
             float syncW = ModeSwitchWidth();
             float spacing = ImGui.GetStyle().ItemSpacing.X;
-            float textWidth = ImGui.GetContentRegionAvail().X - iconW * titleButtons - syncW - spacing * (titleButtons + 1);
+            float textWidth = ImGui.GetContentRegionAvail().X - iconW - syncW - spacing * 2f;
             string title = string.IsNullOrEmpty(_plugin.CurrentMediaTitle) ? "未在播放" : _plugin.CurrentMediaTitle;
             string url = _plugin.RememberedMediaUrl;
             bool missing = LocalMediaPaths.IsMissing(url);
@@ -159,15 +158,12 @@ namespace XivMediaPlayer.LocalUi
             ImGui.SameLine();
             DrawModeSwitch();
 
-            float buttonsW = iconW * titleButtons + spacing * (titleButtons - 1);
-            float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - buttonsW;
+            float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - iconW;
             if (buttonsX > ImGui.GetCursorPosX())
                 ImGui.SameLine(buttonsX);
             else
                 ImGui.SameLine();
             DrawPlotGear();
-            ImGui.SameLine(0, spacing);
-            DrawMenu();
         }
 
         private void DrawModeSwitch()
@@ -471,19 +467,6 @@ namespace XivMediaPlayer.LocalUi
             return ImGui.Combo(id, ref value, items, items.Length);
         }
 
-        private void DrawMenu()
-        {
-            if (CompactIconButton(FontAwesomeIcon.Bars, "more", "更多"))
-                ImGui.OpenPopup("xmp-local-more");
-
-            if (!ImGui.BeginPopup("xmp-local-more")) return;
-            if (ImGui.MenuItem("刷新"))
-                _plugin.RefreshCurrentMedia();
-            if (ImGui.MenuItem("重启播放器"))
-                _plugin.RequestKillAndRestart();
-            ImGui.EndPopup();
-        }
-
         private void DrawSeek()
         {
             var active = _plugin.MediaManager?.ActiveStream;
@@ -539,7 +522,7 @@ namespace XivMediaPlayer.LocalUi
 
         private void DrawControls()
         {
-            bool enabled = CanControl();
+            bool enabled = CanControl() && _plugin.HasPlayableScreen();
             if (!enabled) ImGui.BeginDisabled();
 
             const float gap = 4f;
@@ -576,19 +559,26 @@ namespace XivMediaPlayer.LocalUi
             var active = _plugin.MediaManager?.ActiveStream;
             bool playing = active != null && active.PlaybackState == PlaybackState.Playing && !_plugin.IsIntentionallyPaused;
 
-            if (IconButton(FontAwesomeIcon.StepBackward, "prev", "上一首"))
+            if (StartPlaybackButton(FontAwesomeIcon.StepBackward, "prev", "上一首", false))
                 _plugin.PlayPrevious();
             ImGui.SameLine(0, gap);
             if (IconButton(FontAwesomeIcon.Backward, "back", $"后退 {step} 秒"))
                 _plugin.SeekRelative(-step);
             ImGui.SameLine(0, gap);
-            if (IconButton(playing ? FontAwesomeIcon.Pause : FontAwesomeIcon.Play, "play", playing ? "暂停" : "播放"))
+            if (playing)
+            {
+                if (IconButton(FontAwesomeIcon.Pause, "play", "暂停"))
+                    _plugin.TogglePlayPause();
+            }
+            else if (StartPlaybackButton(FontAwesomeIcon.Play, "play", "播放", false))
+            {
                 _plugin.TogglePlayPause();
+            }
             ImGui.SameLine(0, gap);
             if (IconButton(FontAwesomeIcon.Forward, "fwd", $"快进 {step} 秒"))
                 _plugin.SeekRelative(step);
             ImGui.SameLine(0, gap);
-            if (IconButton(FontAwesomeIcon.StepForward, "next", "下一首"))
+            if (StartPlaybackButton(FontAwesomeIcon.StepForward, "next", "下一首", false))
                 _plugin.PlayNext();
             ImGui.SameLine(0, gap);
             if (IconButton(FontAwesomeIcon.Stop, "stop", "停止"))
@@ -675,10 +665,10 @@ namespace XivMediaPlayer.LocalUi
             FitIconField(3);
             ImGui.InputTextWithHint("##media-url", "输入视频链接", ref _urlInput, 1024);
             ImGui.SameLine(0, CompactGap);
-            if (CompactIconButton(FontAwesomeIcon.Play, "url-play", "播放链接"))
+            if (StartPlaybackButton(FontAwesomeIcon.Play, "url-play", "播放链接", true))
                 _plugin.PlayMediaUrl(_urlInput);
             ImGui.SameLine(0, CompactGap);
-            if (CompactIconButton(FontAwesomeIcon.Paste, "url-paste", "粘贴并播放"))
+            if (StartPlaybackButton(FontAwesomeIcon.Paste, "url-paste", "粘贴并播放", true))
             {
                 string clip = ImGui.GetClipboardText() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(clip))
@@ -703,10 +693,16 @@ namespace XivMediaPlayer.LocalUi
                 OpenLocalFileDialog();
             ImGui.SameLine(0, CompactGap);
             bool localMode = _plugin.IsLocalPlaybackMode;
-            if (!localMode) ImGui.BeginDisabled();
-            if (CompactIconButton(FontAwesomeIcon.Play, "file-play", localMode ? "播放本地文件" : "同步模式不能播放本地视频"))
+            bool canPlayFile = localMode && _plugin.HasPlayableScreen();
+            string fileTip = !localMode
+                ? "同步模式不能播放本地视频"
+                : canPlayFile ? "播放本地文件" : NoScreenTip;
+            if (!canPlayFile) ImGui.BeginDisabled();
+            if (CompactIconButton(FontAwesomeIcon.Play, "file-play", fileTip))
                 _plugin.PlayLocalFile(_filePath);
+            if (!canPlayFile) ImGui.EndDisabled();
             ImGui.SameLine(0, CompactGap);
+            if (!localMode) ImGui.BeginDisabled();
             if (CompactIconButton(FontAwesomeIcon.Plus, "file-queue", localMode ? "加入列表" : "同步模式不能添加本地视频"))
                 _plugin.EnqueueMedia(_filePath);
             if (!localMode) ImGui.EndDisabled();
@@ -721,7 +717,7 @@ namespace XivMediaPlayer.LocalUi
             for (int i = 0; i < queue.Length; i++)
             {
                 ImGui.PushID(i);
-                if (CompactIconButton(FontAwesomeIcon.Play, "play", "播放"))
+                if (StartPlaybackButton(FontAwesomeIcon.Play, "play", "播放", true))
                     _plugin.PlayMediaUrl(queue[i]);
                 ImGui.SameLine(0, CompactGap);
                 if (CompactIconButton(FontAwesomeIcon.Trash, "remove", "移除"))
@@ -754,7 +750,7 @@ namespace XivMediaPlayer.LocalUi
             {
                 var entry = ordered[i];
                 ImGui.PushID(1000 + i);
-                if (CompactIconButton(FontAwesomeIcon.Play, "play", "播放"))
+                if (StartPlaybackButton(FontAwesomeIcon.Play, "play", "播放", true))
                     _plugin.PlayMediaUrl(entry.Url);
                 ImGui.SameLine(0, CompactGap);
                 if (!QueueContains(queue, entry.Url))
@@ -831,6 +827,21 @@ namespace XivMediaPlayer.LocalUi
             value = value.Trim().Trim('"');
             if (!LocalMediaPaths.IsLocalFile(value)) return value;
             return LocalMediaPaths.Normalize(value).Replace('/', '\\');
+        }
+
+        private const string NoScreenTip = "当前区域没有屏幕，无法播放。";
+
+        private bool StartPlaybackButton(FontAwesomeIcon icon, string id, string tooltip, bool compact)
+        {
+            bool blocked = !_plugin.HasPlayableScreen();
+            if (blocked)
+                ImGui.BeginDisabled();
+            bool pressed = compact
+                ? CompactIconButton(icon, id, blocked ? NoScreenTip : tooltip)
+                : IconButton(icon, id, blocked ? NoScreenTip : tooltip);
+            if (blocked)
+                ImGui.EndDisabled();
+            return !blocked && pressed;
         }
 
         private bool IconButton(FontAwesomeIcon icon, string id, string tooltip, bool highlight = false, Vector4? color = null, Vector4? hoveredColor = null)

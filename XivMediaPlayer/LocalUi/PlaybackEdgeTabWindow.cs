@@ -11,8 +11,10 @@ namespace XivMediaPlayer.LocalUi
     internal sealed class PlaybackEdgeTabWindow : Window
     {
         private const float MarqueeSecondsPerLine = 0.3f;
-        private const float TitleGap = 12f;
+        private const float TitleGap = 6f;
         private const float MarqueePad = 4f;
+        private const float ChipPad = 3f;
+        private const float TextNarrower = 8f;
 
         private readonly Plugin _plugin;
         private readonly ImGuiWindowFlags _baseFlags;
@@ -92,26 +94,16 @@ namespace XivMediaPlayer.LocalUi
 
             if (!split)
             {
-                DrawEdgeIcon(0f, false, 0f, framed: false);
+                DrawEdgeIcon(default, default, framed: false);
                 FinishPointer();
                 return;
             }
 
-            float originX = ImGui.GetCursorPosX();
-            bool alignEnd = layout.Edge == PlaybackScreenEdge.Right;
-            float column = Math.Max(layout.TextSize.X, EdgeIconWidth());
-            if (layout.TextFirst)
-            {
-                DrawEdgeTitle(layout, originX, column, alignEnd);
-                MovePastGap(layout.Vertical, originX);
-                DrawEdgeIcon(originX, alignEnd, column, framed: true);
-            }
-            else
-            {
-                DrawEdgeIcon(originX, alignEnd, column, framed: true);
-                MovePastGap(layout.Vertical, originX);
-                DrawEdgeTitle(layout, originX, column, alignEnd);
-            }
+            var origin = ImGui.GetCursorPos();
+            ContentSlots(layout, out Vector2 content, out Vector2 textOffset, out Vector2 iconOffset);
+            ImGui.Dummy(content);
+            DrawEdgeTitle(layout, origin + textOffset);
+            DrawEdgeIcon(origin + iconOffset, layout, framed: true);
 
             FinishPointer();
         }
@@ -185,13 +177,58 @@ namespace XivMediaPlayer.LocalUi
             PlaybackScreenEdge edge = NormalizeEdge(_plugin.Config.PlaybackEdgeSide);
             bool vertical = edge is PlaybackScreenEdge.Left or PlaybackScreenEdge.Right;
             bool onStartSide = IconOnStartSide(edge);
-            float length = MarqueeLength();
-            float thick = MarqueeThickness(title, vertical);
-            var text = vertical
-                ? new Vector2(thick + MarqueePad * 2f, length + MarqueePad * 2f)
-                : new Vector2(length + MarqueePad * 2f, thick + MarqueePad * 2f);
-            layout = new TitleLayout(title, edge, vertical, textFirst: !onStartSide, scrollPositive: onStartSide, text);
+            MeasurePair(title, vertical, out Vector2 text, out Vector2 iconChip);
+            layout = new TitleLayout(title, edge, vertical, textFirst: !onStartSide, scrollPositive: onStartSide, text, iconChip);
             return true;
+        }
+
+        private void MeasurePair(string title, bool vertical, out Vector2 textSize, out Vector2 iconChip)
+        {
+            float iconW = EdgeIconWidth();
+            float iconH = ImGui.GetFrameHeight();
+            float iconCross = (vertical ? iconW : iconH) + ChipPad * 2f;
+            float iconAlong = (vertical ? iconH : iconW) + ChipPad * 2f;
+            float textCross = (vertical ? MarqueeThickness(title, true) : ImGui.GetTextLineHeight()) + MarqueePad * 2f;
+            if (vertical)
+            {
+                if (iconCross - textCross < TextNarrower)
+                    iconCross = textCross + TextNarrower;
+            }
+            else
+            {
+                iconCross = textCross;
+            }
+            float along = MarqueeLength() + MarqueePad * 2f;
+            textSize = vertical ? new Vector2(textCross, along) : new Vector2(along, textCross);
+            iconChip = vertical ? new Vector2(iconCross, iconAlong) : new Vector2(iconAlong, iconCross);
+        }
+
+        private static void ContentSlots(TitleLayout layout, out Vector2 content, out Vector2 textOffset, out Vector2 iconOffset)
+        {
+            float cross = layout.Vertical
+                ? Math.Max(layout.TextSize.X, layout.IconChip.X)
+                : Math.Max(layout.TextSize.Y, layout.IconChip.Y);
+            textOffset = Vector2.Zero;
+            iconOffset = Vector2.Zero;
+            if (layout.Vertical)
+            {
+                content = new Vector2(cross, layout.TextSize.Y + TitleGap + layout.IconChip.Y);
+                textOffset.X = (cross - layout.TextSize.X) * 0.5f;
+                iconOffset.X = (cross - layout.IconChip.X) * 0.5f;
+                if (layout.TextFirst)
+                    iconOffset.Y = layout.TextSize.Y + TitleGap;
+                else
+                    textOffset.Y = layout.IconChip.Y + TitleGap;
+                return;
+            }
+
+            content = new Vector2(layout.TextSize.X + TitleGap + layout.IconChip.X, cross);
+            textOffset.Y = (cross - layout.TextSize.Y) * 0.5f;
+            iconOffset.Y = (cross - layout.IconChip.Y) * 0.5f;
+            if (layout.TextFirst)
+                iconOffset.X = layout.TextSize.X + TitleGap;
+            else
+                textOffset.X = layout.IconChip.X + TitleGap;
         }
 
         private bool IconOnStartSide(PlaybackScreenEdge edge)
@@ -208,101 +245,87 @@ namespace XivMediaPlayer.LocalUi
             var style = ImGui.GetStyle();
             float padX = style.WindowPadding.X;
             float padY = style.WindowPadding.Y;
-            float iconW = EdgeIconWidth();
-            float iconH = ImGui.GetFrameHeight();
-            float iconX;
-            float iconY;
-            float contentW;
-            float contentH;
-            if (layout.Vertical)
-            {
-                contentW = Math.Max(iconW, layout.TextSize.X);
-                contentH = layout.TextSize.Y + TitleGap + iconH;
-                iconY = layout.TextFirst ? layout.TextSize.Y + TitleGap : 0f;
-                iconX = layout.Edge == PlaybackScreenEdge.Right ? contentW - iconW : 0f;
-            }
-            else
-            {
-                contentW = layout.TextSize.X + TitleGap + iconW;
-                contentH = Math.Max(iconH, layout.TextSize.Y);
-                iconX = layout.TextFirst ? layout.TextSize.X + TitleGap : 0f;
-                iconY = 0f;
-            }
-
-            float windowW = Math.Max(1f, contentW + padX * 2f);
-            float windowH = Math.Max(1f, contentH + padY * 2f);
+            ContentSlots(layout, out Vector2 content, out _, out Vector2 iconOffset);
+            float windowW = Math.Max(1f, content.X + padX * 2f);
+            float windowH = Math.Max(1f, content.Y + padY * 2f);
             float along = layout.Vertical
-                ? (padY + iconY + iconH * 0.5f) / windowH
-                : (padX + iconX + iconW * 0.5f) / windowW;
+                ? (padY + iconOffset.Y + layout.IconChip.Y * 0.5f) / windowH
+                : (padX + iconOffset.X + layout.IconChip.X * 0.5f) / windowW;
             return layout.Vertical
                 ? new Vector2(layout.Edge == PlaybackScreenEdge.Right ? 1f : 0f, along)
                 : new Vector2(along, layout.Edge == PlaybackScreenEdge.Bottom ? 1f : 0f);
         }
 
-        private void DrawEdgeIcon(float originX, bool alignEnd, float column, bool framed)
+        private void DrawEdgeIcon(Vector2 cursor, TitleLayout layout, bool framed)
         {
-            float width = EdgeIconWidth();
-            if (alignEnd)
-                ImGui.SetCursorPosX(originX + Math.Max(0f, column - width));
-
-            var drawList = ImGui.GetWindowDrawList();
-            if (framed)
+            if (!framed)
             {
-                drawList.ChannelsSplit(2);
-                drawList.ChannelsSetCurrent(1);
+                DrawLoneIcon();
+                return;
             }
 
-            int pushedColors = 0;
-            bool pushedBorder = false;
-            if (framed)
+            ImGui.SetCursorPos(cursor);
+            var chipMin = ImGui.GetCursorScreenPos();
+            var chipMax = chipMin + layout.IconChip;
+            DrawRegion(chipMin, chipMax, raised: true);
+            bool clicked = ImGui.InvisibleButton("##edge-icon", layout.IconChip);
+            bool hovered = ImGui.IsItemHovered();
+            NotePointer(clicked);
+            DrawPlayGlyph(chipMin, chipMax);
+            if (_chromePushed)
             {
-                var clear = Vector4.Zero;
-                ImGui.PushStyleColor(ImGuiCol.Button, clear);
-                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, clear);
-                ImGui.PushStyleColor(ImGuiCol.ButtonActive, clear);
-                ImGui.PushStyleColor(ImGuiCol.Border, clear);
-                pushedColors = 4;
-                ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f);
-                pushedBorder = true;
+                var inset = new Vector2(2f, 2f);
+                PlaybackPanelChrome.DrawEdgeAtmosphere(chipMin + inset, chipMax - inset);
             }
-            else if (_chromePushed)
-            {
+            if (hovered && !_dragging)
+                ImGui.SetTooltip(EdgeTooltip());
+        }
+
+        private void DrawLoneIcon()
+        {
+            if (_chromePushed)
                 ImGui.PushStyleColor(ImGuiCol.Button, Vector4.Zero);
-                pushedColors = 1;
-            }
-
             bool clicked = ImGuiComponents.IconButton("open-playback", FontAwesomeIcon.Play);
             var iconMin = ImGui.GetItemRectMin();
             var iconMax = ImGui.GetItemRectMax();
             bool hovered = ImGui.IsItemHovered();
             NotePointer(clicked);
-            if (pushedBorder)
-                ImGui.PopStyleVar();
-            if (pushedColors > 0)
-                ImGui.PopStyleColor(pushedColors);
-
-            if (framed)
+            if (_chromePushed)
             {
-                drawList.ChannelsSetCurrent(0);
-                var pad = new Vector2(3f, 3f);
-                DrawRegion(iconMin - pad, iconMax + pad, raised: true);
-                drawList.ChannelsMerge();
+                ImGui.PopStyleColor();
                 PlaybackPanelChrome.DrawEdgeAtmosphere(iconMin, iconMax);
             }
-            else if (_chromePushed)
-            {
-                PlaybackPanelChrome.DrawEdgeAtmosphere(iconMin, iconMax);
-            }
-
             if (hovered && !_dragging)
-                ImGui.SetTooltip("播放控制。按住可沿屏幕四边拖动。");
+                ImGui.SetTooltip(EdgeTooltip());
         }
 
-        private void DrawEdgeTitle(TitleLayout layout, float originX, float column, bool alignEnd)
-        {
-            if (layout.Vertical && alignEnd)
-                ImGui.SetCursorPosX(originX + Math.Max(0f, column - layout.TextSize.X));
+        private string EdgeTooltip()
+            => _plugin.Config.KeepEdgeIconWithPanel && _plugin.IsPlaybackPanelOpen
+                ? "关闭播放控制。按住可沿屏幕四边拖动。"
+                : "播放控制。按住可沿屏幕四边拖动。";
 
+        private static void DrawPlayGlyph(Vector2 min, Vector2 max)
+        {
+            string glyph = FontAwesomeIcon.Play.ToIconString();
+            var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
+            var drawList = ImGui.GetWindowDrawList();
+            uint color = ImGui.GetColorU32(ImGuiCol.Text);
+            if (handle.Available)
+                using (handle.Push())
+                    DrawGlyph(drawList, glyph, min, max, color);
+            else
+                DrawGlyph(drawList, glyph, min, max, color);
+        }
+
+        private static void DrawGlyph(ImDrawListPtr drawList, string glyph, Vector2 min, Vector2 max, uint color)
+        {
+            var glyphSize = ImGui.CalcTextSize(glyph);
+            drawList.AddText(min + (max - min - glyphSize) * 0.5f, color, glyph);
+        }
+
+        private void DrawEdgeTitle(TitleLayout layout, Vector2 cursor)
+        {
+            ImGui.SetCursorPos(cursor);
             var origin = ImGui.GetCursorScreenPos();
             var size = layout.TextSize;
             bool showBackground = !_plugin.Config.HideEdgeTitleBackground;
@@ -330,18 +353,6 @@ namespace XivMediaPlayer.LocalUi
                 var pad = new Vector2(2f, 2f);
                 PlaybackPanelChrome.DrawTitleAtmosphere(origin + pad, origin + size - pad);
             }
-        }
-
-        private void MovePastGap(bool stacked, float originX)
-        {
-            if (!stacked)
-            {
-                ImGui.SameLine(0f, TitleGap);
-                return;
-            }
-
-            float y = ImGui.GetCursorPosY() - ImGui.GetStyle().ItemSpacing.Y + TitleGap;
-            ImGui.SetCursorPos(new Vector2(originX, y));
         }
 
         private void FinishPointer()
@@ -379,7 +390,7 @@ namespace XivMediaPlayer.LocalUi
             }
 
             if (clicked && !_suppressClick)
-                _plugin.OpenPlaybackPanel();
+                _plugin.TogglePlaybackPanelFromEdge();
         }
 
         private void DrawScrollingText(ImDrawListPtr drawList, string title, Vector2 min, Vector2 max, bool vertical, bool positive)
@@ -504,7 +515,7 @@ namespace XivMediaPlayer.LocalUi
 
         private readonly struct TitleLayout
         {
-            public TitleLayout(string title, PlaybackScreenEdge edge, bool vertical, bool textFirst, bool scrollPositive, Vector2 textSize)
+            public TitleLayout(string title, PlaybackScreenEdge edge, bool vertical, bool textFirst, bool scrollPositive, Vector2 textSize, Vector2 iconChip)
             {
                 Title = title;
                 Edge = edge;
@@ -512,6 +523,7 @@ namespace XivMediaPlayer.LocalUi
                 TextFirst = textFirst;
                 ScrollPositive = scrollPositive;
                 TextSize = textSize;
+                IconChip = iconChip;
             }
 
             public string Title { get; }
@@ -520,6 +532,7 @@ namespace XivMediaPlayer.LocalUi
             public bool TextFirst { get; }
             public bool ScrollPositive { get; }
             public Vector2 TextSize { get; }
+            public Vector2 IconChip { get; }
         }
 
         private readonly struct GlyphRun

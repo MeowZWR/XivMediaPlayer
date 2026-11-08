@@ -150,6 +150,22 @@ namespace XivMediaPlayer
             _playbackPanelPlaced = true;
         }
 
+        internal bool IsPlaybackPanelOpen => _localMediaWindow?.IsOpen == true;
+
+        internal void TogglePlaybackPanelFromEdge()
+        {
+            if (_localMediaWindow == null)
+                return;
+
+            if (_config.KeepEdgeIconWithPanel && _localMediaWindow.IsOpen)
+            {
+                BeginClosePlaybackPanel();
+                return;
+            }
+
+            OpenPlaybackPanel();
+        }
+
         internal void OpenPlaybackPanel()
         {
             if (_localMediaWindow == null)
@@ -177,18 +193,17 @@ namespace XivMediaPlayer
                 return;
             }
 
-            if (!_plotDockActive || _playbackEdgeWindow == null || _localMediaWindow == null)
-                return;
+            BeginClosePlaybackPanel();
+        }
 
-            if (_config.KeepEdgeIconWithPanel)
+        private void BeginClosePlaybackPanel()
+        {
+            if (_localMediaWindow == null)
+                return;
+            if (!_plotDockActive || _playbackEdgeWindow == null)
             {
                 _dockMotion.Stop();
-                _playbackEdgeWindow.IsOpen = true;
-                if (_localMediaWindow.IsOpen)
-                {
-                    _ignoreNextPanelClose = true;
-                    _localMediaWindow.IsOpen = false;
-                }
+                _localMediaWindow.IsOpen = false;
                 return;
             }
 

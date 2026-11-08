@@ -124,6 +124,8 @@ namespace XivMediaPlayer
             return HasRoomTvsForCurrentLocation();
         }
 
+        internal bool HasPlayableScreen() => HasRoomTvsForCurrentLocation();
+
         internal bool HasRoomTvsForCurrentLocation()
         {
             string primaryKey = GetLocationKey();
@@ -1524,9 +1526,18 @@ namespace XivMediaPlayer
 
         #region Stream Management
 
+        private bool RefusePlaybackWithoutScreen(bool isAutoSync)
+        {
+            if (isAutoSync || HasActiveWorldScreens())
+                return false;
+            PrintPlainError("当前区域没有屏幕，无法播放。");
+            return true;
+        }
+
         private void TuneIntoStream(string url, MediaPlayerCore.IMediaGameObject audioGameObject, int startTimeMs = 0, Dictionary<string, string>? httpHeaders = null, bool isAutoSync = false)
         {
             if (_disposed) return;
+            if (RefusePlaybackWithoutScreen(isAutoSync)) return;
             if (!AllowPlaybackDuringLocalSession(url, isAutoSync)) return;
             if (BlockDisplacedSyncReplay(url)) return;
 
@@ -2143,6 +2154,7 @@ namespace XivMediaPlayer
         private void PlayViaYtDlp(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
             if (_disposed) return;
+            if (RefusePlaybackWithoutScreen(isAutoSync)) return;
             UpdateWatchHistory();
             DateTime resolutionStartTime = DateTime.UtcNow;
 
@@ -6893,6 +6905,8 @@ namespace XivMediaPlayer
                     return;
                 }
 
+                if (RefusePlaybackWithoutScreen(false))
+                    return;
                 activeStream.Resume();
                 _isIntentionallyPaused = false;
             }
