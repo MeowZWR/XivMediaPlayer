@@ -139,13 +139,21 @@ namespace XivMediaPlayer.LocalUi
             float spacing = ImGui.GetStyle().ItemSpacing.X;
             float textWidth = ImGui.GetContentRegionAvail().X - iconW * titleButtons - syncW - spacing * (titleButtons + 1);
             string title = string.IsNullOrEmpty(_plugin.CurrentMediaTitle) ? "未在播放" : _plugin.CurrentMediaTitle;
+            string url = _plugin.RememberedMediaUrl;
+            bool missing = LocalMediaPaths.IsMissing(url);
 
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(Ellipsize(title, Math.Max(48f, textWidth)));
+            string shown = Ellipsize(title, Math.Max(48f, textWidth));
+            if (missing)
+                ImGui.TextColored(MissingText, shown);
+            else
+                ImGui.TextUnformatted(shown);
             if (ImGui.IsItemHovered())
             {
-                string url = _plugin.RememberedMediaUrl;
-                ImGui.SetTooltip(string.IsNullOrEmpty(url) ? title : title + "\n" + url);
+                string tip = string.IsNullOrEmpty(url) ? title : title + "\n" + url;
+                if (missing)
+                    tip += "\n这个本地文件已经不存在。";
+                ImGui.SetTooltip(tip);
             }
 
             ImGui.SameLine();

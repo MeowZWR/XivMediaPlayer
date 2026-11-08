@@ -10,9 +10,14 @@ namespace XivMediaPlayer
     public sealed partial class Plugin
     {
         private bool _suppressServerSync;
+        private bool _syncDisplayOnly;
+        private string _syncDisplayLocationKey = "";
+        private readonly HashSet<string> _syncDisplayUrls = new(StringComparer.OrdinalIgnoreCase);
         private LocalMediaWindow? _localMediaWindow;
         private string _resumeAfterStopUrl = "";
         private string _resumeAfterStopTitle = "";
+        private long _resumeAfterStopTimecodeMs;
+        private bool _resumeAfterStopIsLive;
         private int _localPlaylistIndex = -1;
 
         private void ApplySavedPlaybackMode()
@@ -20,7 +25,13 @@ namespace XivMediaPlayer
             _config.LocalPlaylist ??= new List<string>();
             _config.RegisteredPlots ??= new List<RegisteredPlot>();
             if (_config.LocalPlaybackMode)
+            {
                 _suppressServerSync = true;
+                HydrateLocalPlaybackMemory();
+                return;
+            }
+
+            HydrateSyncPlaybackMemory();
         }
 
         internal bool GameUiHidden => _gameGui.GameUiHidden;
@@ -36,6 +47,11 @@ namespace XivMediaPlayer
             if (enabled)
             {
                 _suppressServerSync = true;
+                if (_mediaManager?.ActiveStream == null && string.IsNullOrEmpty(_lastStreamURL))
+                {
+                    ClearSyncDisplay(forgetBookmark: false);
+                    HydrateLocalPlaybackMemory();
+                }
                 PrintPlain("已切换到本地模式。播放不会同步到房间，播完也不会从列表移除。");
                 return;
             }
@@ -47,6 +63,8 @@ namespace XivMediaPlayer
                 _mediaManager?.StopStream();
                 ResetStreamValues(false);
             }
+            ClearResumeDisplay();
+            HydrateSyncPlaybackMemory();
             _ = FetchMediaFromServerAsync();
             PrintPlain("已切换到同步模式。本地视频不能加入播放列表。");
         }
@@ -152,13 +170,13 @@ namespace XivMediaPlayer
             _currentStreamer = "Local File";
         }
 
-        public void PlayMediaUrl(string url)
+        public void PlayMediaUrl(string url, int startTimeMs = 0)
         {
             if (string.IsNullOrWhiteSpace(url)) return;
             url = url.Trim().Trim('"');
             if (LocalMediaPaths.IsLocalFile(url))
             {
-                PlayLocalFile(url);
+                PlayLocalFile(url, startTimeMs);
                 return;
             }
 
@@ -171,10 +189,10 @@ namespace XivMediaPlayer
             }
 
             _lastStreamObject = CurrentAudioSource;
-            PlayRouted(url, CurrentAudioSource);
+            PlayRouted(url, CurrentAudioSource, startTimeMs);
         }
 
-        public void PlayLocalFile(string path)
+        public void PlayLocalFile(string path, int startTimeMs = 0)
         {
             if (string.IsNullOrWhiteSpace(path)) return;
             if (!IsLocalPlaybackMode)
@@ -212,7 +230,7 @@ namespace XivMediaPlayer
             }
 
             _lastStreamObject = CurrentAudioSource;
-            PlayRouted(path, CurrentAudioSource);
+            PlayRouted(path, CurrentAudioSource, startTimeMs);
         }
 
         public void EnqueueMedia(string url)
@@ -249,6 +267,7 @@ namespace XivMediaPlayer
                 return;
             }
 
+            ReleaseDisplacedSyncDisplay(url);
             _mediaQueue.Enqueue(url);
             PrintVerboseFormat("[Media Player] Queued ({0}): {1}", _mediaQueue.Count, url);
             _ = PushMediaToServerAsync(isBackgroundSync: false);
@@ -261,16 +280,24 @@ namespace XivMediaPlayer
             _resumeAfterStopTitle = string.IsNullOrEmpty(_currentMediaTitle)
                 ? _lastStreamURL
                 : _currentMediaTitle;
+            _resumeAfterStopIsLive = _lastStreamIsLive;
+            long time = _mediaManager?.ActiveStream?.Time ?? _resumeAfterStopTimecodeMs;
+            _resumeAfterStopTimecodeMs = time < 0 ? 0 : time;
         }
 
         internal bool TryReplayStoppedMedia()
         {
+            if (_syncDisplayOnly && !IsLocalPlaybackMode)
+                return TryPlayDisplayedSyncMedia();
+
             string url = !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : _resumeAfterStopUrl;
             if (string.IsNullOrEmpty(url)) return false;
             if (LocalMediaPaths.IsMissing(url))
             {
                 _resumeAfterStopUrl = "";
                 _resumeAfterStopTitle = "";
+                _resumeAfterStopTimecodeMs = 0;
+                _resumeAfterStopIsLive = false;
                 PrintPlainError("上次播放的本地文件已经不存在。");
                 if (!IsLocalPlaybackMode && _mediaQueue.Count > 0)
                     PlayNext();
@@ -278,7 +305,9 @@ namespace XivMediaPlayer
             }
             if (!CanControlCurrentTvPlayback()) return false;
             _isIntentionallyPaused = false;
-            PlayMediaUrl(url);
+            bool live = _lastStreamIsLive || _resumeAfterStopIsLive;
+            int start = live ? 0 : ClampStartTime(_resumeAfterStopTimecodeMs);
+            PlayMediaUrl(url, start);
             return true;
         }
 
@@ -339,6 +368,253 @@ namespace XivMediaPlayer
         {
             if (skipped <= 0) return;
             PrintPlainError($"有 {skipped} 个本地文件已不存在，已跳过。");
+        }
+
+        private void HydrateLocalPlaybackMemory()
+        {
+            string url = _config.LastPlayedUrl ?? "";
+            if (string.IsNullOrWhiteSpace(url)) return;
+            _resumeAfterStopUrl = url;
+            _resumeAfterStopTitle = string.IsNullOrWhiteSpace(_config.LastPlayedTitle) ? url : _config.LastPlayedTitle;
+            _resumeAfterStopTimecodeMs = Math.Max(0, _config.LastPlayedTimecodeMs);
+            _resumeAfterStopIsLive = _config.LastPlayedIsLive;
+            _localPlaylistIndex = ResolveLocalPlaylistIndex(url, _config.LastPlayedPlaylistIndex);
+        }
+
+        private void HydrateSyncPlaybackMemory()
+        {
+            if (IsLocalPlaybackMode) return;
+            string key = _config.LastSyncLocationKey ?? "";
+            if (string.IsNullOrEmpty(key)) return;
+            if (!_config.RoomMediaStates.TryGetValue(key, out var state)) return;
+            ShowRememberedSyncState(key, state);
+        }
+
+        private void ShowRememberedSyncState(string key, RoomMediaState state)
+        {
+            if (IsLocalPlaybackMode || state == null) return;
+            if (_mediaManager?.ActiveStream != null || _isResolvingMedia) return;
+            if (string.IsNullOrWhiteSpace(state.CurrentUrl) && (state.Playlist == null || state.Playlist.Count == 0))
+                return;
+
+            _mediaQueue.Clear();
+            _syncDisplayUrls.Clear();
+            if (state.Playlist != null)
+            {
+                foreach (string item in state.Playlist)
+                {
+                    if (string.IsNullOrWhiteSpace(item)) continue;
+                    _mediaQueue.Enqueue(item);
+                    _syncDisplayUrls.Add(CleanUrl(item));
+                }
+            }
+
+            _syncDisplayOnly = true;
+            _syncDisplayLocationKey = key ?? "";
+            _resumeAfterStopUrl = state.CurrentUrl ?? "";
+            _resumeAfterStopTimecodeMs = Math.Max(0, state.TimecodeMs);
+            _resumeAfterStopIsLive = false;
+            _resumeAfterStopTitle = DescribeRememberedMedia(_resumeAfterStopUrl);
+            if (!string.IsNullOrWhiteSpace(_resumeAfterStopUrl))
+                _syncDisplayUrls.Add(CleanUrl(_resumeAfterStopUrl));
+            _lastStreamURL = "";
+            _currentMediaTitle = "";
+        }
+
+        private void RememberSyncLocationKey(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            if (string.Equals(_config.LastSyncLocationKey, key, StringComparison.Ordinal)) return;
+            _config.LastSyncLocationKey = key;
+            _config.SaveLocal();
+        }
+
+        private bool IsCurrentSyncDisplayLocation()
+        {
+            if (string.IsNullOrEmpty(_syncDisplayLocationKey)) return false;
+            string? here = CurrentTvPlacement?.LocationKey;
+            if (string.IsNullOrEmpty(here))
+                here = GetLocationKey();
+            return string.Equals(here, _syncDisplayLocationKey, StringComparison.Ordinal);
+        }
+
+        private bool IsDisplayedSyncUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            url = CleanUrl(url);
+            if (string.Equals(url, CleanUrl(_resumeAfterStopUrl ?? ""), StringComparison.OrdinalIgnoreCase)) return true;
+            return _syncDisplayUrls.Contains(url);
+        }
+
+        private bool BlockDisplacedSyncReplay(string url)
+        {
+            if (!_syncDisplayOnly) return false;
+            if (IsCurrentSyncDisplayLocation()) return false;
+
+            if (IsDisplayedSyncUrl(url))
+            {
+                PrintPlainError("现在不在上次播放的地点，不能从这里续播。");
+                return true;
+            }
+
+            ReleaseDisplacedSyncDisplay(url);
+            return false;
+        }
+
+        private void ReleaseDisplacedSyncDisplay(string url)
+        {
+            if (!_syncDisplayOnly || IsCurrentSyncDisplayLocation() || IsDisplayedSyncUrl(url)) return;
+            _syncDisplayOnly = false;
+            _syncDisplayLocationKey = "";
+            _syncDisplayUrls.Clear();
+            _mediaQueue.Clear();
+            ClearResumeDisplay();
+        }
+
+        private void PromoteSyncDisplay()
+        {
+            if (!_syncDisplayOnly) return;
+            _syncDisplayOnly = false;
+            _syncDisplayUrls.Clear();
+        }
+
+        private bool TryPlayDisplayedSyncMedia()
+        {
+            string url = _resumeAfterStopUrl;
+            if (string.IsNullOrWhiteSpace(url)) return false;
+            if (!IsCurrentSyncDisplayLocation())
+            {
+                PrintPlainError("现在不在上次播放的地点，不能从这里续播。");
+                return true;
+            }
+            if (!CanControlCurrentTvPlayback()) return false;
+            if (_playerObject == null)
+            {
+                PrintPlainError("播放器还没准备好。请先进入游戏。");
+                return true;
+            }
+
+            int start = ClampStartTime(_resumeAfterStopTimecodeMs);
+            _syncDisplayOnly = false;
+            _syncDisplayUrls.Clear();
+            _isIntentionallyPaused = false;
+            _lastStreamObject = CurrentAudioSource;
+            PlayRouted(url, CurrentAudioSource, start, isAutoSync: false);
+            return true;
+        }
+
+        private void ClearSyncDisplay(bool forgetBookmark)
+        {
+            _syncDisplayOnly = false;
+            _syncDisplayLocationKey = "";
+            _syncDisplayUrls.Clear();
+            _mediaQueue.Clear();
+            ClearResumeDisplay();
+            if (!forgetBookmark || string.IsNullOrEmpty(_config.LastSyncLocationKey)) return;
+            _config.LastSyncLocationKey = "";
+            _config.SaveLocal();
+        }
+
+        private void ClearResumeDisplay()
+        {
+            _resumeAfterStopUrl = "";
+            _resumeAfterStopTitle = "";
+            _resumeAfterStopTimecodeMs = 0;
+            _resumeAfterStopIsLive = false;
+        }
+
+        private void NoteLocalPlaybackSnapshot(long? timecodeMs = null)
+        {
+            if (!IsLocalPlaybackMode || string.IsNullOrEmpty(_lastStreamURL)) return;
+            if (_lastStreamURL.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)) return;
+
+            long time = _lastStreamIsLive
+                ? 0
+                : timecodeMs ?? _mediaManager?.ActiveStream?.Time ?? _resumeAfterStopTimecodeMs;
+            if (time < 0) time = 0;
+            string title = _currentMediaTitle;
+            if (string.IsNullOrWhiteSpace(title) || title == "Loading...")
+                title = _lastStreamURL;
+            int index = ResolveLocalPlaylistIndex(_lastStreamURL, _localPlaylistIndex);
+
+            if (string.Equals(_config.LastPlayedUrl, _lastStreamURL, StringComparison.Ordinal)
+                && string.Equals(_config.LastPlayedTitle, title, StringComparison.Ordinal)
+                && _config.LastPlayedTimecodeMs == time
+                && _config.LastPlayedPlaylistIndex == index
+                && _config.LastPlayedIsLive == _lastStreamIsLive)
+            {
+                return;
+            }
+
+            _config.LastPlayedUrl = _lastStreamURL;
+            _config.LastPlayedTitle = title;
+            _config.LastPlayedTimecodeMs = time;
+            _config.LastPlayedPlaylistIndex = index;
+            _config.LastPlayedIsLive = _lastStreamIsLive;
+            _config.SaveLocal();
+        }
+
+        private void ClearPersistedLocalPlayback()
+        {
+            if (string.IsNullOrEmpty(_config.LastPlayedUrl)
+                && string.IsNullOrEmpty(_config.LastPlayedTitle)
+                && _config.LastPlayedTimecodeMs == 0
+                && _config.LastPlayedPlaylistIndex < 0
+                && !_config.LastPlayedIsLive)
+            {
+                return;
+            }
+
+            _config.LastPlayedUrl = "";
+            _config.LastPlayedTitle = "";
+            _config.LastPlayedTimecodeMs = 0;
+            _config.LastPlayedPlaylistIndex = -1;
+            _config.LastPlayedIsLive = false;
+            _config.SaveLocal();
+        }
+
+        private void ForgetFinishedLocalPlayback(string endedUrl)
+        {
+            ClearPersistedLocalPlayback();
+            if (string.IsNullOrEmpty(endedUrl)) return;
+            if (!string.Equals(_resumeAfterStopUrl, endedUrl, StringComparison.OrdinalIgnoreCase)) return;
+            ClearResumeDisplay();
+        }
+
+        private int ResolveLocalPlaylistIndex(string url, int savedIndex)
+        {
+            var list = _config.LocalPlaylist;
+            if (list != null
+                && savedIndex >= 0
+                && savedIndex < list.Count
+                && string.Equals(PlaylistKey(list[savedIndex]), PlaylistKey(url), StringComparison.OrdinalIgnoreCase))
+            {
+                return savedIndex;
+            }
+
+            return FindLocalPlaylistIndex(url);
+        }
+
+        private string DescribeRememberedMedia(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return "";
+            if (_config.WatchHistory != null
+                && _config.WatchHistory.TryGetValue(url, out var entry)
+                && !string.IsNullOrWhiteSpace(entry.Title))
+            {
+                return entry.Title;
+            }
+
+            if (LocalMediaPaths.IsLocalFile(url))
+                return Path.GetFileName(LocalMediaPaths.Normalize(url));
+            return url;
+        }
+
+        private static int ClampStartTime(long timecodeMs)
+        {
+            if (timecodeMs <= 0) return 0;
+            if (timecodeMs >= int.MaxValue) return int.MaxValue;
+            return (int)timecodeMs;
         }
 
         private void NoteLocalPlaylistIndex(string url)

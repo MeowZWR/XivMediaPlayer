@@ -115,6 +115,12 @@ namespace XivMediaPlayer {
     public Dictionary<string, MediaHistoryEntry> WatchHistory { get; set; } = new Dictionary<string, MediaHistoryEntry>();
     public List<string> LocalPlaylist { get; set; } = new List<string>();
     public bool LocalPlaybackMode { get; set; }
+    public string LastPlayedUrl { get; set; } = "";
+    public string LastPlayedTitle { get; set; } = "";
+    public long LastPlayedTimecodeMs { get; set; }
+    public int LastPlayedPlaylistIndex { get; set; } = -1;
+    public bool LastPlayedIsLive { get; set; }
+    public string LastSyncLocationKey { get; set; } = "";
     public List<RegisteredPlot> RegisteredPlots { get; set; } = new List<RegisteredPlot>();
     public PlaybackScreenEdge PlaybackEdgeSide { get; set; } = PlaybackScreenEdge.Right;
     public float PlaybackEdgeAnchor { get; set; } = 0.42f;
@@ -123,6 +129,12 @@ namespace XivMediaPlayer {
 
     public bool ShouldSerializeLocalPlaylist() => false;
     public bool ShouldSerializeLocalPlaybackMode() => false;
+    public bool ShouldSerializeLastPlayedUrl() => false;
+    public bool ShouldSerializeLastPlayedTitle() => false;
+    public bool ShouldSerializeLastPlayedTimecodeMs() => false;
+    public bool ShouldSerializeLastPlayedPlaylistIndex() => false;
+    public bool ShouldSerializeLastPlayedIsLive() => false;
+    public bool ShouldSerializeLastSyncLocationKey() => false;
     public bool ShouldSerializeRegisteredPlots() => false;
     public bool ShouldSerializePlaybackEdgeSide() => false;
     public bool ShouldSerializePlaybackEdgeAnchor() => false;
@@ -371,6 +383,12 @@ namespace XivMediaPlayer {
     private void ApplyLocalUi(LocalUiConfig loaded) {
       LocalPlaylist = loaded.LocalPlaylist ?? new List<string>();
       LocalPlaybackMode = loaded.LocalPlaybackMode;
+      LastPlayedUrl = loaded.LastPlayedUrl ?? "";
+      LastPlayedTitle = loaded.LastPlayedTitle ?? "";
+      LastPlayedTimecodeMs = loaded.LastPlayedTimecodeMs;
+      LastPlayedPlaylistIndex = loaded.LastPlayedPlaylistIndex;
+      LastPlayedIsLive = loaded.LastPlayedIsLive;
+      LastSyncLocationKey = loaded.LastSyncLocationKey ?? "";
       RegisteredPlots = loaded.RegisteredPlots ?? new List<RegisteredPlot>();
       PlaybackEdgeSide = loaded.PlaybackEdgeSide;
       PlaybackEdgeAnchor = loaded.PlaybackEdgeAnchor;
@@ -385,6 +403,12 @@ namespace XivMediaPlayer {
       var snapshot = new LocalUiConfig {
         LocalPlaylist = source.LocalPlaylist ?? new List<string>(),
         LocalPlaybackMode = source.LocalPlaybackMode,
+        LastPlayedUrl = source.LastPlayedUrl ?? "",
+        LastPlayedTitle = source.LastPlayedTitle ?? "",
+        LastPlayedTimecodeMs = source.LastPlayedTimecodeMs,
+        LastPlayedPlaylistIndex = source.LastPlayedPlaylistIndex,
+        LastPlayedIsLive = source.LastPlayedIsLive,
+        LastSyncLocationKey = source.LastSyncLocationKey ?? "",
         RegisteredPlots = source.RegisteredPlots ?? new List<RegisteredPlot>(),
         PlaybackEdgeSide = source.PlaybackEdgeSide,
         PlaybackEdgeAnchor = source.PlaybackEdgeAnchor,

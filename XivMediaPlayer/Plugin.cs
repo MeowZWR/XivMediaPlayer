@@ -1530,6 +1530,7 @@ namespace XivMediaPlayer
         {
             if (_disposed) return;
             if (!AllowPlaybackDuringLocalSession(url, isAutoSync)) return;
+            if (BlockDisplacedSyncReplay(url)) return;
 
             // Auto-detect Emulation Server URLs (e.g. rtsp://10.0.0.30:8554/live/screen_43815929)
             // Replace any backslashes with forward slashes (FFXIV chat/clipboard can mangle them)
@@ -1552,6 +1553,7 @@ namespace XivMediaPlayer
                     _mediaManager?.PlayFFmpegStream(normalizedUrl, audioGameObject, true);
 
                     _lastStreamURL = normalizedUrl;
+                    PromoteSyncDisplay();
                     _currentStreamer = "Emulation";
                     _streamURLs = new string[] { normalizedUrl };
                     _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
@@ -1561,6 +1563,7 @@ namespace XivMediaPlayer
                         _ = PushMediaToServerAsync(isBackgroundSync: false);
                     }
                     _streamWasPlaying = true;
+                    NoteLocalPlaybackSnapshot(0);
 
                     try { MuteBgm(); } catch { }
                     return;
@@ -1578,6 +1581,7 @@ namespace XivMediaPlayer
                 return;
             }
 
+            PromoteSyncDisplay();
             _streamURLs = new string[] { url };
             _videoWindow.IsOpen = _config.DefaultVideoOpen == 0;
             if (_streamURLs.Length > 0)
@@ -1593,6 +1597,7 @@ namespace XivMediaPlayer
                 _lastStreamURL = url;
                 _currentStreamer = "Stream";
                 ApplyLocalFileLabels(url);
+                NoteLocalPlaybackSnapshot(startTimeMs);
                 PrintVerbose(@"[Media Player] Playing stream!" +
                   "\r\nUse \"/media video\" to toggle the video feed." +
                   "\r\nUse \"/media stop\" to stop the stream.");
@@ -2126,6 +2131,7 @@ namespace XivMediaPlayer
 
             url = CleanUrl(url);
             if (!AllowPlaybackDuringLocalSession(url, isAutoSync)) return;
+            if (BlockDisplacedSyncReplay(url)) return;
 
             if (YtDlpManager.IsUrlSupported(url) && _ytDlpManager.IsAvailable())
             {
@@ -2177,6 +2183,7 @@ namespace XivMediaPlayer
                 }
             }
 
+            PromoteSyncDisplay();
             if (!isAutoSync)
             {
                 _isLocalDj = true;
@@ -2226,6 +2233,7 @@ namespace XivMediaPlayer
                         _currentMediaDurationMs = null;
                         _currentStreamer = "Direct Stream";
                         _currentMediaTitle = "Direct Stream";
+                        NoteLocalPlaybackSnapshot(startTimeMs);
 
                         PrintVerbose("[Media Player] Playing direct stream!\r\nUse \"/media video\" to toggle the video feed.\r\nUse \"/media stop\" to stop.");
 
@@ -2488,6 +2496,7 @@ namespace XivMediaPlayer
                         _currentMediaDurationMs = resolvedDurationMs;
                         _currentStreamer = !string.IsNullOrEmpty(uploader) ? uploader : title;
                         _currentMediaTitle = title;
+                        NoteLocalPlaybackSnapshot(finalStartTimeMs);
 
                         PrintVerboseFormat("[Media Player] Now playing: {0}{1}{2}\r\nUse \"/media video\" to toggle the video feed.\r\nUse \"/media stop\" to stop.",
                             title,
@@ -2626,6 +2635,7 @@ namespace XivMediaPlayer
 
             if (IsLocalPlaybackMode)
             {
+                ForgetFinishedLocalPlayback(_lastStreamURL);
                 ResetStreamValues();
                 return;
             }
@@ -2702,6 +2712,11 @@ namespace XivMediaPlayer
 
         private void OnTerritoryChanged(uint territoryId)
         {
+            if (IsLocalPlaybackMode)
+            {
+                NoteLocalPlaybackSnapshot();
+                RememberStoppedMedia();
+            }
             SaveMediaStateForCurrentLocation();
             _videoWindow.IsOpen = false;
             if (_screenSettingsWindow != null) _screenSettingsWindow.IsOpen = false;
@@ -4325,7 +4340,7 @@ namespace XivMediaPlayer
         {
             key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             state = new RoomMediaState();
-            if (string.IsNullOrEmpty(key) || _suppressServerSync) return false;
+            if (string.IsNullOrEmpty(key) || _suppressServerSync || _syncDisplayOnly) return false;
 
             var activeStream = _mediaManager?.ActiveStream;
             if (activeStream != null && !string.IsNullOrEmpty(activeStream.SoundPath))
@@ -4367,6 +4382,8 @@ namespace XivMediaPlayer
             }
 
             _config.RoomMediaStates[key] = state;
+            if (!string.IsNullOrWhiteSpace(state.CurrentUrl) || state.Playlist.Count > 0)
+                RememberSyncLocationKey(key);
             if (queueDiskSave)
             {
                 MarkConfigDirty();
@@ -4452,8 +4469,21 @@ namespace XivMediaPlayer
             if (_config.RoomMediaStates.TryGetValue(key, out var state))
             {
                 _pluginLog.Information($"Restoring media state for {key}");
+                RememberSyncLocationKey(key);
 
-                // Restore queue
+                bool resume = _config.AutoResumeMedia
+                    && !string.IsNullOrEmpty(state.CurrentUrl)
+                    && _playerObject != null
+                    && HasActiveWorldScreens();
+                if (!resume)
+                {
+                    if (_config.AutoResumeMedia && !string.IsNullOrEmpty(state.CurrentUrl) && _playerObject != null)
+                        _pluginLog.Information($"[Media Player] Skipping media resume for {key}: no screens in this area.");
+                    ShowRememberedSyncState(key, state);
+                    return;
+                }
+
+                _syncDisplayOnly = false;
                 _mediaQueue.Clear();
                 if (state.Playlist != null)
                 {
@@ -4463,25 +4493,19 @@ namespace XivMediaPlayer
                     }
                 }
 
-                // Start playback if there was a URL and auto resume is enabled
-                if (_config.AutoResumeMedia && !string.IsNullOrEmpty(state.CurrentUrl) && _playerObject != null)
-                {
-                    if (!HasActiveWorldScreens())
-                    {
-                        _pluginLog.Information($"[Media Player] Skipping media resume for {key}: no screens in this area.");
-                        return;
-                    }
-
-                    PrintVerbose("[Media Player] Resuming playback in this room...");
-                    _lastStreamObject = CurrentAudioSource;
-                    PlayRouted(state.CurrentUrl, CurrentAudioSource, (int)state.TimecodeMs, isAutoSync: true);
-                }
+                PrintVerbose("[Media Player] Resuming playback in this room...");
+                _lastStreamObject = CurrentAudioSource;
+                PlayRouted(state.CurrentUrl, CurrentAudioSource, (int)state.TimecodeMs, isAutoSync: true);
+                return;
             }
+
+            if (!IsLocalPlaybackMode && !IsMediaSyncLocation(key))
+                HydrateSyncPlaybackMemory();
         }
 
         public async Task PushMediaToServerAsync(bool isBackgroundSync, long? overrideTimeMs = null)
         {
-            if (_suppressServerSync) return;
+            if (_suppressServerSync || _syncDisplayOnly) return;
 
             var key = CurrentTvPlacement?.LocationKey ?? _lastLocationKey;
             
@@ -4655,6 +4679,25 @@ namespace XivMediaPlayer
             {
                 _pluginLog.Information("[Social] Reclaiming DJ status and trusting local timecode over server state. The room was empty.");
                 _isLocalDj = true;
+                List<string> playlist;
+                try
+                {
+                    playlist = System.Text.Json.JsonSerializer.Deserialize<List<string>>(sync.PlaylistJson) ?? new List<string>();
+                }
+                catch
+                {
+                    playlist = localState.Playlist ?? new List<string>();
+                }
+                if (playlist.Count == 0 && localState.Playlist != null)
+                    playlist = localState.Playlist;
+                var displayState = new RoomMediaState
+                {
+                    CurrentUrl = localState.CurrentUrl,
+                    TimecodeMs = localState.TimecodeMs,
+                    Playlist = playlist,
+                };
+                string displayKey = key;
+                EnqueueFrameworkAction(() => ShowRememberedSyncState(displayKey, displayState));
                 return;
             }
 
@@ -4683,6 +4726,7 @@ namespace XivMediaPlayer
                 Playlist = new List<string>(System.Text.Json.JsonSerializer.Deserialize<string[]>(sync.PlaylistJson) ?? Array.Empty<string>())
             };
             _config.RoomMediaStates[key] = state;
+            RememberSyncLocationKey(key);
             _config.Save();
 
             // Actually play it if it's different or out of sync
@@ -4728,6 +4772,7 @@ namespace XivMediaPlayer
                         if (!HasActiveWorldScreens())
                         {
                             StopMediaIfNoPlayableTarget();
+                            ShowRememberedSyncState(key, state);
                             return;
                         }
 
@@ -6537,6 +6582,8 @@ namespace XivMediaPlayer
 
             long clamped = ClampSeekTimeMs(targetMs);
             activeStream.Time = clamped;
+            if (userInitiated)
+                NoteLocalPlaybackSnapshot(clamped);
 
             if (syncToServer && _isLocalDj)
             {
@@ -6668,8 +6715,15 @@ namespace XivMediaPlayer
 
             if (IsLocalPlaybackMode)
             {
+                ClearPersistedLocalPlayback();
                 _mediaManager?.StopStream();
                 ResetStreamValues(false);
+                return;
+            }
+
+            if (_syncDisplayOnly && !IsCurrentSyncDisplayLocation())
+            {
+                ClearSyncDisplay(forgetBookmark: true);
                 return;
             }
 
@@ -6687,6 +6741,8 @@ namespace XivMediaPlayer
                 return;
             }
 
+            _syncDisplayOnly = false;
+
             PrintVerbose("[Media Player] Stopping media and clearing queue...");
             _mediaManager?.StopStream();
             _mediaQueue.Clear();
@@ -6698,6 +6754,11 @@ namespace XivMediaPlayer
             {
                 _config.RoomMediaStates.Remove(key);
                 _config.Save();
+            }
+            if (!string.IsNullOrEmpty(key) && string.Equals(_config.LastSyncLocationKey, key, StringComparison.Ordinal))
+            {
+                _config.LastSyncLocationKey = "";
+                _config.SaveLocal();
             }
         }
 
@@ -6722,6 +6783,7 @@ namespace XivMediaPlayer
             {
                 activeStream.Pause();
                 _isIntentionallyPaused = true;
+                NoteLocalPlaybackSnapshot();
             }
             else
             {
@@ -6969,6 +7031,7 @@ namespace XivMediaPlayer
         public void Dispose()
         {
             if (_disposed) return;
+            NoteLocalPlaybackSnapshot();
             if (_pendingLocalUiSave)
                 _config.SaveLocalImmediate();
             _disposed = true;
