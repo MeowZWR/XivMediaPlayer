@@ -19,7 +19,13 @@ namespace XivMediaPlayer.LocalUi
         public PlaybackScreenEdge PlaybackEdgeSide { get; set; } = PlaybackScreenEdge.Right;
         public float PlaybackEdgeAnchor { get; set; } = 0.42f;
         public bool PlaybackLightlessStyle { get; set; } = true;
+        public bool RestoreGameBgmOnStop { get; set; } = true;
         public bool ShowEdgeIconWhenScreenDetected { get; set; }
+        public bool ShowEdgePlaybackTitle { get; set; } = true;
+        public bool HideEdgeTitleBackground { get; set; }
+        public float EdgeTitleScrollSpeed { get; set; } = 1f;
+        public float EdgeTitleMarqueeLines { get; set; } = 8f;
+        public bool KeepEdgeIconWithPanel { get; set; }
 
         public static readonly JsonSerializerSettings JsonSettings = new()
         {

@@ -125,7 +125,13 @@ namespace XivMediaPlayer {
     public PlaybackScreenEdge PlaybackEdgeSide { get; set; } = PlaybackScreenEdge.Right;
     public float PlaybackEdgeAnchor { get; set; } = 0.42f;
     public bool PlaybackLightlessStyle { get; set; } = true;
+    public bool RestoreGameBgmOnStop { get; set; } = true;
     public bool ShowEdgeIconWhenScreenDetected { get; set; }
+    public bool ShowEdgePlaybackTitle { get; set; } = true;
+    public bool HideEdgeTitleBackground { get; set; }
+    public float EdgeTitleScrollSpeed { get; set; } = 1f;
+    public float EdgeTitleMarqueeLines { get; set; } = 8f;
+    public bool KeepEdgeIconWithPanel { get; set; }
 
     public bool ShouldSerializeLocalPlaylist() => false;
     public bool ShouldSerializeLocalPlaybackMode() => false;
@@ -139,7 +145,13 @@ namespace XivMediaPlayer {
     public bool ShouldSerializePlaybackEdgeSide() => false;
     public bool ShouldSerializePlaybackEdgeAnchor() => false;
     public bool ShouldSerializePlaybackLightlessStyle() => false;
+    public bool ShouldSerializeRestoreGameBgmOnStop() => false;
     public bool ShouldSerializeShowEdgeIconWhenScreenDetected() => false;
+    public bool ShouldSerializeShowEdgePlaybackTitle() => false;
+    public bool ShouldSerializeHideEdgeTitleBackground() => false;
+    public bool ShouldSerializeEdgeTitleScrollSpeed() => false;
+    public bool ShouldSerializeEdgeTitleMarqueeLines() => false;
+    public bool ShouldSerializeKeepEdgeIconWithPanel() => false;
 
     public string ServerUrl
     {
@@ -393,7 +405,13 @@ namespace XivMediaPlayer {
       PlaybackEdgeSide = loaded.PlaybackEdgeSide;
       PlaybackEdgeAnchor = loaded.PlaybackEdgeAnchor;
       PlaybackLightlessStyle = loaded.PlaybackLightlessStyle;
+      RestoreGameBgmOnStop = loaded.RestoreGameBgmOnStop;
       ShowEdgeIconWhenScreenDetected = loaded.ShowEdgeIconWhenScreenDetected;
+      ShowEdgePlaybackTitle = loaded.ShowEdgePlaybackTitle;
+      HideEdgeTitleBackground = loaded.HideEdgeTitleBackground;
+      EdgeTitleScrollSpeed = loaded.EdgeTitleScrollSpeed;
+      EdgeTitleMarqueeLines = loaded.EdgeTitleMarqueeLines;
+      KeepEdgeIconWithPanel = loaded.KeepEdgeIconWithPanel;
     }
 
     private static void WriteLocalUi(IDalamudPluginInterface pi, Configuration source) {
@@ -413,7 +431,13 @@ namespace XivMediaPlayer {
         PlaybackEdgeSide = source.PlaybackEdgeSide,
         PlaybackEdgeAnchor = source.PlaybackEdgeAnchor,
         PlaybackLightlessStyle = source.PlaybackLightlessStyle,
+        RestoreGameBgmOnStop = source.RestoreGameBgmOnStop,
         ShowEdgeIconWhenScreenDetected = source.ShowEdgeIconWhenScreenDetected,
+        ShowEdgePlaybackTitle = source.ShowEdgePlaybackTitle,
+        HideEdgeTitleBackground = source.HideEdgeTitleBackground,
+        EdgeTitleScrollSpeed = source.EdgeTitleScrollSpeed,
+        EdgeTitleMarqueeLines = source.EdgeTitleMarqueeLines,
+        KeepEdgeIconWithPanel = source.KeepEdgeIconWithPanel,
       };
       var json = JsonConvert.SerializeObject(snapshot, LocalUiConfig.JsonSettings);
       var tempPath = Path.Combine(directory, $".local-ui.json.{Guid.NewGuid():N}.new");

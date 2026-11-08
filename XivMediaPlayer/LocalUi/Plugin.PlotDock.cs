@@ -137,7 +137,8 @@ namespace XivMediaPlayer
 
         internal bool PlaybackDockMoving => _dockMotion.Active;
         internal float PlaybackPanelReveal => _dockMotion.Active ? _dockMotion.PanelAlpha : 1f;
-        internal float PlaybackEdgeReveal => _dockMotion.Active ? 1f - _dockMotion.PanelAlpha : 1f;
+        internal float PlaybackEdgeReveal =>
+            _config.KeepEdgeIconWithPanel || !_dockMotion.Active ? 1f : 1f - _dockMotion.PanelAlpha;
         internal Vector2 PlaybackPanelMotionPos => _dockMotion.PanelPos;
 
         internal void NotePlaybackPanelBounds(Vector2 pos, Vector2 size)
@@ -160,7 +161,7 @@ namespace XivMediaPlayer
             {
                 _dockMotion.Stop();
                 if (_playbackEdgeWindow != null)
-                    _playbackEdgeWindow.IsOpen = false;
+                    _playbackEdgeWindow.IsOpen = _plotDockActive && _config.KeepEdgeIconWithPanel;
                 return;
             }
 
@@ -178,6 +179,18 @@ namespace XivMediaPlayer
 
             if (!_plotDockActive || _playbackEdgeWindow == null || _localMediaWindow == null)
                 return;
+
+            if (_config.KeepEdgeIconWithPanel)
+            {
+                _dockMotion.Stop();
+                _playbackEdgeWindow.IsOpen = true;
+                if (_localMediaWindow.IsOpen)
+                {
+                    _ignoreNextPanelClose = true;
+                    _localMediaWindow.IsOpen = false;
+                }
+                return;
+            }
 
             _localMediaWindow.IsOpen = true;
             _playbackEdgeWindow.IsOpen = true;
@@ -262,7 +275,7 @@ namespace XivMediaPlayer
             _dockMotion.Stop();
             if (opening)
             {
-                if (_playbackEdgeWindow != null)
+                if (_playbackEdgeWindow != null && !_config.KeepEdgeIconWithPanel)
                     _playbackEdgeWindow.IsOpen = false;
                 return;
             }
@@ -340,7 +353,7 @@ namespace XivMediaPlayer
             if (_localMediaWindow?.IsOpen == true)
             {
                 if (_playbackEdgeWindow != null)
-                    _playbackEdgeWindow.IsOpen = false;
+                    _playbackEdgeWindow.IsOpen = _config.KeepEdgeIconWithPanel;
                 return;
             }
 

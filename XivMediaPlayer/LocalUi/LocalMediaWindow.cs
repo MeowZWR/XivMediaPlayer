@@ -219,7 +219,7 @@ namespace XivMediaPlayer.LocalUi
                 }
             }
 
-            if (CompactIconButton(FontAwesomeIcon.Home, "plots", "地块登记", _plotRegistryOpen, openFace, openHover))
+            if (CompactIconButton(FontAwesomeIcon.Cog, "plots", "设置", _plotRegistryOpen, openFace, openHover))
                 _plotRegistryOpen = !_plotRegistryOpen;
         }
 
@@ -227,34 +227,116 @@ namespace XivMediaPlayer.LocalUi
         {
             ImGui.Spacing();
             ImGui.Separator();
-            ImGui.TextUnformatted("地块登记");
 
-            HousePlotRead read = _plugin.ReadHousePlot();
-            if (read.Kind == HousePlotReadKind.Unknown)
+            float tableWidth = ImGui.GetContentRegionAvail().X;
+            if (ImGui.BeginTable("##playback-settings", 2, ImGuiTableFlags.SizingStretchSame, new Vector2(tableWidth, 0f)))
             {
-                ImGui.TextDisabled("正在读取所在地块…");
-            }
-            else if (read.Kind != HousePlotReadKind.OnPlot)
-            {
-                ImGui.TextWrapped("当前不在地块上。走到庭院范围内，或进入房屋后再登记。");
-            }
-            else
-            {
-                DrawCurrentPlotLine(read);
-            }
+                ImGui.TableSetupColumn("left", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableSetupColumn("right", ImGuiTableColumnFlags.WidthStretch, 1f);
 
-            bool showEdge = _plugin.Config.ShowEdgeIconWhenScreenDetected;
-            if (ImGui.Checkbox("检测到屏幕时显示边缘图标", ref showEdge))
-            {
-                _plugin.KeepPlaybackPanelOpen();
-                _plugin.Config.ShowEdgeIconWhenScreenDetected = showEdge;
-                _plugin.Config.SaveLocal();
+                bool lightless = _plugin.Config.PlaybackLightlessStyle;
+                ImGui.TableNextColumn();
+                if (ImGui.Checkbox("Lightless 风格", ref lightless))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    _plugin.Config.PlaybackLightlessStyle = lightless;
+                    _plugin.Config.SaveLocal();
+                }
+
+                bool restoreBgm = _plugin.Config.RestoreGameBgmOnStop;
+                ImGui.TableNextColumn();
+                if (ImGui.Checkbox("停止播放后恢复游戏BGM", ref restoreBgm))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    _plugin.SetRestoreGameBgmOnStop(restoreBgm);
+                }
+                bool restoreBgmHovered = ImGui.IsItemHovered();
+
+                bool showEdge = _plugin.Config.ShowEdgeIconWhenScreenDetected;
+                ImGui.TableNextColumn();
+                if (ImGui.Checkbox("检测到屏幕时显示边缘图标", ref showEdge))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    _plugin.Config.ShowEdgeIconWhenScreenDetected = showEdge;
+                    _plugin.Config.SaveLocal();
+                }
+                bool showEdgeHovered = ImGui.IsItemHovered();
+                bool keepEdge = _plugin.Config.KeepEdgeIconWithPanel;
+                ImGui.TableNextColumn();
+                if (ImGui.Checkbox("打开面板时保留边缘图标", ref keepEdge))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    _plugin.Config.KeepEdgeIconWithPanel = keepEdge;
+                    _plugin.Config.SaveLocal();
+                }
+                bool keepEdgeHovered = ImGui.IsItemHovered();
+
+                bool showTitle = _plugin.Config.ShowEdgePlaybackTitle;
+                ImGui.TableNextColumn();
+                if (ImGui.Checkbox("边缘图标旁显示滚动标题", ref showTitle))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    _plugin.Config.ShowEdgePlaybackTitle = showTitle;
+                    _plugin.Config.SaveLocal();
+                }
+                bool showTitleHovered = ImGui.IsItemHovered();
+                bool hideBackground = _plugin.Config.HideEdgeTitleBackground;
+                ImGui.TableNextColumn();
+                if (ImGui.Checkbox("隐藏滚动区域背景", ref hideBackground))
+                {
+                    _plugin.KeepPlaybackPanelOpen();
+                    _plugin.Config.HideEdgeTitleBackground = hideBackground;
+                    _plugin.Config.SaveLocal();
+                }
+                bool hideBackgroundHovered = ImGui.IsItemHovered();
+
+                float scrollSpeed = Math.Clamp(_plugin.Config.EdgeTitleScrollSpeed, 0f, 3f);
+                ImGui.TableNextColumn();
+                if (DrawLabeledSlider("速度", ref scrollSpeed, 0f, 3f, "%.2f", ImGui.GetContentRegionAvail().X))
+                    _plugin.Config.EdgeTitleScrollSpeed = scrollSpeed;
+                bool speedActive = ImGui.IsItemActive();
+                bool speedDone = ImGui.IsItemDeactivatedAfterEdit();
+                bool speedHovered = ImGui.IsItemHovered();
+
+                float marqueeLines = _plugin.Config.EdgeTitleMarqueeLines;
+                if (marqueeLines < 3f)
+                    marqueeLines = 8f;
+                marqueeLines = Math.Clamp(marqueeLines, 3f, 16f);
+                ImGui.TableNextColumn();
+                if (DrawLabeledSlider("长度", ref marqueeLines, 3f, 16f, "%.0f", ImGui.GetContentRegionAvail().X))
+                    _plugin.Config.EdgeTitleMarqueeLines = marqueeLines;
+                bool lengthActive = ImGui.IsItemActive();
+                bool lengthDone = ImGui.IsItemDeactivatedAfterEdit();
+                bool lengthHovered = ImGui.IsItemHovered();
+
+                ImGui.EndTable();
+
+                if (restoreBgmHovered)
+                    ImGui.SetTooltip("播放时仍会暂时关闭游戏背景音乐。停止播放或离开当前区域后，再把游戏背景音乐打开。");
+                if (showEdgeHovered)
+                    ImGui.SetTooltip("只在住宅区生效。当前地点已经有屏幕，且没有被登记地块的动作接管时，显示边缘图标。");
+                if (keepEdgeHovered)
+                    ImGui.SetTooltip("打开播放控制面板后，边缘图标继续留在屏幕边上，不再收起。");
+                if (showTitleHovered)
+                    ImGui.SetTooltip("有播放内容时，在边缘图标旁用固定长度滚动标题。图标在屏幕左右时，标题在图标上侧或下侧；在屏幕上下时，标题与图标同一行，在左侧或右侧。哪一侧由屏幕中心决定，使标题留在屏幕内。");
+                if (hideBackgroundHovered)
+                    ImGui.SetTooltip("隐藏滚动文字的边框、背景、粒子和流星，只留下文字。");
+                if (speedActive || lengthActive)
+                    _plugin.KeepPlaybackPanelOpen();
+                if (speedDone || lengthDone)
+                    _plugin.Config.SaveLocal();
+                if (speedHovered)
+                    ImGui.SetTooltip("文字滚动速度。0 为静止，1 为默认速度。");
+                if (lengthHovered)
+                    ImGui.SetTooltip("滚动区域可见长度，按大约能看见的字数计算。");
             }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("只在住宅区生效。当前地点已经有屏幕，且没有被登记地块的动作接管时，显示边缘图标。");
 
             ImGui.Spacing();
+            DrawCurrentPlotStatus();
+            ImGui.Spacing();
             var plots = _plugin.RegisteredPlots;
+            if (!ImGui.CollapsingHeader($"已登记房屋 ({plots.Count})"))
+                return;
             if (plots.Count == 0)
             {
                 ImGui.TextDisabled("还没有登记的地块。");
@@ -319,6 +401,24 @@ namespace XivMediaPlayer.LocalUi
                 _plugin.RemoveRegisteredPlotAt(removeIndex);
         }
 
+        private void DrawCurrentPlotStatus()
+        {
+            HousePlotRead read = _plugin.ReadHousePlot();
+            if (read.Kind == HousePlotReadKind.Unknown)
+            {
+                ImGui.TextDisabled("正在读取所在地块…");
+                return;
+            }
+
+            if (read.Kind != HousePlotReadKind.OnPlot)
+            {
+                ImGui.TextWrapped("当前不在地块上。走到庭院范围内，或进入房屋后再登记。");
+                return;
+            }
+
+            DrawCurrentPlotLine(read);
+        }
+
         private void DrawCurrentPlotLine(HousePlotRead read)
         {
             string text = "当前：" + Plugin.FormatHousePlot(read.WorldName, read.District, read.Subdivision, read.Ward, read.Plot, read.Indoor);
@@ -349,6 +449,13 @@ namespace XivMediaPlayer.LocalUi
                 _plugin.RegisterCurrentPlot();
         }
 
+        private static bool DrawLabeledSlider(string label, ref float value, float min, float max, string format, float width)
+        {
+            float labelW = ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemInnerSpacing.X;
+            ImGui.SetNextItemWidth(Math.Max(48f, width - labelW));
+            return ImGui.SliderFloat(label, ref value, min, max, format);
+        }
+
         private static bool DrawAlignedCombo(string label, string id, float labelColumn, ref int value, string[] items)
         {
             float spacing = ImGui.GetStyle().ItemSpacing.X;
@@ -370,12 +477,6 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.OpenPopup("xmp-local-more");
 
             if (!ImGui.BeginPopup("xmp-local-more")) return;
-            bool lightless = _plugin.Config.PlaybackLightlessStyle;
-            if (ImGui.MenuItem("Lightless 风格", string.Empty, lightless))
-            {
-                _plugin.Config.PlaybackLightlessStyle = !lightless;
-                _plugin.Config.SaveLocal();
-            }
             if (ImGui.MenuItem("刷新"))
                 _plugin.RefreshCurrentMedia();
             if (ImGui.MenuItem("重启播放器"))

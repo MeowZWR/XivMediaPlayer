@@ -160,6 +160,8 @@ namespace XivMediaPlayer
         private bool _streamWasPlaying;
         private bool _disposed;
         private bool _bgmWasMutedByUs;
+        private bool _bgmRestoreAfterZone;
+        private int _bgmRestoreAttempts;
         private bool _wasHousingMenuOpen = false;
         private bool _pendingConfigSave;
         private bool _pendingLocalUiSave;
@@ -924,6 +926,10 @@ namespace XivMediaPlayer
                     StopMediaIfNoPlayableTarget();
                     RestoreMediaForCurrentLocation();
                     _ = FetchServerDataForCurrentLocationAsync();
+                    if (_mediaManager?.ActiveStream == null)
+                        ScheduleBgmRestore();
+                    else
+                        CancelBgmRestore();
                 }
                 else
                 {
@@ -933,16 +939,7 @@ namespace XivMediaPlayer
             }
 
             if (_deferredBgmRestoreTime.HasValue && DateTime.UtcNow >= _deferredBgmRestoreTime.Value)
-            {
-                unsafe
-                {
-                    if (!Conditions.Instance()->BetweenAreas)
-                    {
-                        _deferredBgmRestoreTime = null;
-                        RestoreBgm();
-                    }
-                }
-            }
+                ApplyBgmRestore();
 
             if (!_hasBeenInitialized && _clientState.IsLoggedIn)
             {
@@ -1424,13 +1421,14 @@ namespace XivMediaPlayer
 
                 case "stop":
                     _mediaManager?.StopStream();
-                    RestoreBgm();
                     ResetStreamValues();
+                    ScheduleBgmRestore();
                     PrintVerbose("[Media Player] Stream stopped.");
                     break;
 
                 case "fixaudio":
-                    RestoreBgm();
+                    _bgmWasMutedByUs = true;
+                    RestoreBgm(ignoreOption: true);
                     FixWindowsVolume();
                     PrintChat("[Media Player] Game audio restored.");
                     break;
@@ -2687,9 +2685,7 @@ namespace XivMediaPlayer
             ClearLocalPlaybackSyncProtection();
 
             if (wasPlaying)
-            {
-                _deferredBgmRestoreTime = DateTime.UtcNow.AddSeconds(1);
-            }
+                ScheduleBgmRestore();
 
             if (IsLocalPlaybackMode)
             {
@@ -2756,6 +2752,7 @@ namespace XivMediaPlayer
             {
                 _mediaManager?.StopStream();
                 _pluginLog.Information("[Media Player] Stopped playback because this area has no screens.");
+                ScheduleBgmRestore();
             }
         }
 
@@ -2777,6 +2774,8 @@ namespace XivMediaPlayer
             _screenSettingsWindow?.SyncFromTransform();
             _mediaManager?.StopStream();
             RestoreMediaForCurrentLocation();
+            if (_mediaManager?.ActiveStream == null)
+                ScheduleBgmRestore();
             _lastServerSyncFetch = DateTime.MinValue;
             _ = FetchServerDataForCurrentLocationAsync();
         }
@@ -5095,20 +5094,111 @@ namespace XivMediaPlayer
         /// <summary>
         /// Restores BGM if we were the ones who muted it.
         /// </summary>
-        private void RestoreBgm()
+        private void RestoreBgm(bool ignoreOption = false)
         {
             try
             {
-                if (_bgmWasMutedByUs)
-                {
-                    _bgmWasMutedByUs = false;
-                    _gameConfig.Set(SystemConfigOption.IsSndBgm, false);
-                }
+                if (!ignoreOption && !_config.RestoreGameBgmOnStop)
+                    return;
+                if (!_bgmWasMutedByUs && !_bgmRestoreAfterZone)
+                    return;
+                if (_mediaManager?.ActiveStream != null)
+                    return;
+
+                _gameConfig.Set(SystemConfigOption.IsSndBgm, false);
+                _bgmWasMutedByUs = false;
+                _bgmRestoreAfterZone = false;
+                _deferredBgmRestoreTime = null;
+                _bgmRestoreAttempts = 0;
             }
             catch (Exception e)
             {
                 _pluginLog.Warning(e, "[Media Player] Failed to restore BGM");
             }
+        }
+
+        private void ScheduleBgmRestore()
+        {
+            if (!_config.RestoreGameBgmOnStop || !_bgmWasMutedByUs)
+                return;
+            _bgmRestoreAfterZone = true;
+            _bgmRestoreAttempts = 6;
+            _deferredBgmRestoreTime = DateTime.UtcNow.AddMilliseconds(400);
+        }
+
+        private void CancelBgmRestore()
+        {
+            _bgmRestoreAfterZone = false;
+            _deferredBgmRestoreTime = null;
+            _bgmRestoreAttempts = 0;
+        }
+
+        private void ApplyBgmRestore()
+        {
+            if (!_config.RestoreGameBgmOnStop)
+            {
+                CancelBgmRestore();
+                return;
+            }
+
+            if (!_bgmWasMutedByUs && !_bgmRestoreAfterZone)
+                return;
+            if (IsBetweenAreas())
+            {
+                _deferredBgmRestoreTime = DateTime.UtcNow.AddMilliseconds(200);
+                return;
+            }
+
+            if (_mediaManager?.ActiveStream != null)
+            {
+                CancelBgmRestore();
+                return;
+            }
+
+            try
+            {
+                _gameConfig.Set(SystemConfigOption.IsSndBgm, false);
+            }
+            catch (Exception e)
+            {
+                _pluginLog.Warning(e, "[Media Player] Failed to restore BGM");
+            }
+
+            bool zonePending = _deferredTerritoryChangeTime.HasValue;
+            if (zonePending || _bgmRestoreAttempts > 1)
+            {
+                if (!zonePending)
+                    _bgmRestoreAttempts--;
+                _bgmWasMutedByUs = true;
+                _bgmRestoreAfterZone = true;
+                _deferredBgmRestoreTime = DateTime.UtcNow.AddMilliseconds(500);
+                return;
+            }
+
+            _bgmWasMutedByUs = false;
+            _bgmRestoreAfterZone = false;
+            _deferredBgmRestoreTime = null;
+            _bgmRestoreAttempts = 0;
+        }
+
+        private unsafe bool IsBetweenAreas()
+        {
+            var conditions = Conditions.Instance();
+            return conditions != null && conditions->BetweenAreas;
+        }
+
+        internal void SetRestoreGameBgmOnStop(bool enabled)
+        {
+            _config.RestoreGameBgmOnStop = enabled;
+            _config.SaveLocal();
+            if (!enabled)
+            {
+                CancelBgmRestore();
+                return;
+            }
+
+            if (_mediaManager?.ActiveStream == null)
+                ScheduleBgmRestore();
         }
 
         /// <summary>

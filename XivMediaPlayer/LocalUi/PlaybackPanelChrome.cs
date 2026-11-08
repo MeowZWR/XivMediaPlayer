@@ -44,6 +44,7 @@ namespace XivMediaPlayer.LocalUi
 
         private static readonly SparkField PanelField = new();
         private static readonly SparkField EdgeField = new();
+        private static readonly SparkField TitleField = new();
         private static readonly Random Random = new();
 
         public static void Push()
@@ -90,6 +91,31 @@ namespace XivMediaPlayer.LocalUi
             ImGui.PopStyleColor(ColorCount);
         }
 
+        public static void DrawChip(Vector2 min, Vector2 max, bool raised)
+        {
+            if (max.X <= min.X + 1f || max.Y <= min.Y + 1f)
+                return;
+
+            float rounding = raised ? 5f : 6f;
+            var drawList = ImGui.GetWindowDrawList();
+            ImGuiHelpers.PrependBlurBehind(
+                drawList,
+                min,
+                max,
+                2f,
+                rounding,
+                noiseOpacity: 0.1f * ImGui.GetStyle().Alpha);
+            var fill = raised ? new Vector4(VoidRaised.X, VoidRaised.Y, VoidRaised.Z, 0.96f) : Alpha(Void, 0.94f);
+            drawList.AddRectFilled(min, max, ImGui.GetColorU32(fill), rounding);
+            drawList.AddRect(
+                min,
+                max,
+                ImGui.GetColorU32(Alpha(Accent, raised ? 0.9f : 0.45f)),
+                rounding,
+                ImDrawFlags.None,
+                raised ? 1.5f : 1f);
+        }
+
         public static void DrawBackdrop()
         {
             var min = ImGui.GetWindowPos();
@@ -122,6 +148,11 @@ namespace XivMediaPlayer.LocalUi
         public static void DrawEdgeAtmosphere(Vector2 min, Vector2 max)
         {
             DrawField(EdgeField, min, max, 3, 2f, 1.22f, false);
+        }
+
+        public static void DrawTitleAtmosphere(Vector2 min, Vector2 max)
+        {
+            DrawField(TitleField, min, max, 3, 2f, 1.22f, false);
         }
 
         private static void DrawField(SparkField field, Vector2 min, Vector2 max, int maxSparks, float edgeFade, float markScale, bool drawDots)
