@@ -123,7 +123,7 @@ namespace XivMediaPlayer {
     public string LastSyncLocationKey { get; set; } = "";
     public List<RegisteredPlot> RegisteredPlots { get; set; } = new List<RegisteredPlot>();
     public PlaybackScreenEdge PlaybackEdgeSide { get; set; } = PlaybackScreenEdge.Right;
-    public float PlaybackEdgeAnchor { get; set; } = 0.42f;
+    public float PlaybackEdgeAnchor { get; set; } = 0.6f;
     public bool PlaybackLightlessStyle { get; set; } = true;
     public bool RestoreGameBgmOnStop { get; set; }
     public bool ShowEdgeIconWhenScreenDetected { get; set; } = true;
