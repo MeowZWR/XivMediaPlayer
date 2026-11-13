@@ -50,5 +50,34 @@ namespace XivMediaPlayer.LocalUi
 
             return path;
         }
+
+        public static bool TrySplitLocalName(string title, string? url, out string name, out string tag)
+        {
+            name = title ?? "";
+            tag = "";
+            if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(url) || !IsLocalFile(url))
+                return false;
+
+            string ext = Path.GetExtension(Path.GetFileName(Normalize(url)));
+            if (ext.Length < 2 || ext.Length > 9)
+                return false;
+
+            string body = ext.Substring(1);
+            foreach (char c in body)
+            {
+                if (!char.IsLetterOrDigit(c))
+                    return false;
+            }
+
+            string stem = title;
+            if (title.EndsWith(ext, StringComparison.OrdinalIgnoreCase) && title.Length > ext.Length)
+                stem = title.Substring(0, title.Length - ext.Length).TrimEnd();
+            if (string.IsNullOrWhiteSpace(stem))
+                return false;
+
+            name = stem;
+            tag = body.ToUpperInvariant();
+            return true;
+        }
     }
 }

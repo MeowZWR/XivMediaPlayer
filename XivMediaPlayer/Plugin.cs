@@ -6193,6 +6193,24 @@ namespace XivMediaPlayer
             _settingsWindow.Toggle();
         }
 
+        public bool IsConfigUiOpen => _settingsWindow?.IsOpen == true;
+
+        public unsafe void ExecuteChatCommand(string command)
+        {
+            if (string.IsNullOrWhiteSpace(command)) return;
+            var ui = FFXIVClientStructs.FFXIV.Client.UI.UIModule.Instance();
+            if (ui == null) return;
+            var text = new FFXIVClientStructs.FFXIV.Client.System.String.Utf8String(command);
+            try
+            {
+                ui->ProcessChatBoxEntry(&text);
+            }
+            finally
+            {
+                text.Dtor(false);
+            }
+        }
+
         public void HandleOutdoorSettingToggled()
         {
             var key = GetLocationKey();

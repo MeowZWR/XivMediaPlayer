@@ -150,7 +150,14 @@ namespace XivMediaPlayer.LocalUi
         }
 
         private string EdgeTitle()
-            => _plugin.Config.ShowEdgePlaybackTitle ? DisplayTitle() : "";
+        {
+            if (!_plugin.Config.ShowEdgePlaybackTitle)
+                return "";
+            string title = DisplayTitle();
+            if (LocalMediaPaths.TrySplitLocalName(title, _plugin.RememberedMediaUrl, out string name, out _))
+                return name;
+            return title;
+        }
 
         private bool TryGetTitleLayout(out TitleLayout layout)
         {
@@ -334,7 +341,11 @@ namespace XivMediaPlayer.LocalUi
             bool clicked = ImGui.InvisibleButton("##edge-title", size);
             NotePointer(clicked);
             if (ImGui.IsItemHovered() && !_dragging)
-                ImGui.SetTooltip(layout.Title);
+            {
+                string tip = DisplayTitle();
+                if (tip.Length > 0)
+                    ImGui.SetTooltip(tip);
+            }
 
             var inset = layout.Vertical
                 ? new Vector2(MarqueePad * 0.5f, MarqueePad)

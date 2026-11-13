@@ -197,6 +197,25 @@ namespace XivMediaPlayer.LocalUi
         public static float PillWidth(string label)
             => PillPadX * 2f + PillDot * 2f + PillGap + ImGui.CalcTextSize(label).X;
 
+        public static Vector2 ExtensionTagSize(string tag)
+        {
+            var text = ImGui.CalcTextSize(tag);
+            return new Vector2(text.X + 10f, text.Y + 2f);
+        }
+
+        public static void DrawExtensionTag(ImDrawListPtr drawList, Vector2 pos, string tag, Vector4 color)
+        {
+            var size = ExtensionTagSize(tag);
+            var max = pos + size;
+            if (max.X <= pos.X || max.Y <= pos.Y)
+                return;
+
+            float rounding = size.Y * 0.5f;
+            drawList.AddRectFilled(pos, max, ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, 0.22f)), rounding);
+            drawList.AddRect(pos, max, ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, 0.72f)), rounding, ImDrawFlags.None, 1f);
+            drawList.AddText(new Vector2(pos.X + 5f, pos.Y + 1f), ImGui.GetColorU32(color), tag);
+        }
+
         public static bool DrawPill(string id, string label, Vector4 accent, string tooltip)
         {
             float height = ImGui.GetFrameHeight();

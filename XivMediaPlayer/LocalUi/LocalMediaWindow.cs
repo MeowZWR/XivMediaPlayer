@@ -133,37 +133,72 @@ namespace XivMediaPlayer.LocalUi
 
         private void DrawTitleRow()
         {
-            float iconW = CompactButtonWidth();
             float syncW = ModeSwitchWidth();
             float spacing = ImGui.GetStyle().ItemSpacing.X;
-            float textWidth = ImGui.GetContentRegionAvail().X - iconW - syncW - spacing * 2f;
-            string title = string.IsNullOrEmpty(_plugin.CurrentMediaTitle) ? "未在播放" : _plugin.CurrentMediaTitle;
+            string raw = _plugin.CurrentMediaTitle;
+            bool hasTitle = !string.IsNullOrWhiteSpace(raw);
+            string title = hasTitle ? raw.Trim() : "未在播放";
             string url = _plugin.RememberedMediaUrl;
             bool missing = LocalMediaPaths.IsMissing(url);
+            string name = title;
+            string tag = "";
+            bool hasTag = hasTitle && LocalMediaPaths.TrySplitLocalName(title, url, out name, out tag);
+            float tagWidth = hasTag ? PlaybackPanelChrome.ExtensionTagSize(tag).X : 0f;
+            float toolsWidth = TitleToolWidth();
+            float textWidth = ImGui.GetContentRegionAvail().X - syncW - toolsWidth - spacing * (hasTag ? 3f : 2f) - tagWidth;
 
             ImGui.AlignTextToFramePadding();
-            string shown = Ellipsize(title, Math.Max(48f, textWidth));
+            string shown = Ellipsize(name, Math.Max(48f, textWidth));
             if (missing)
                 ImGui.TextColored(MissingText, shown);
             else
                 ImGui.TextUnformatted(shown);
             if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(TitleTip(title, url, missing));
+
+            if (hasTag)
             {
-                string tip = string.IsNullOrEmpty(url) ? title : title + "\n" + url;
-                if (missing)
-                    tip += "\n这个本地文件已经不存在。";
-                ImGui.SetTooltip(tip);
+                ImGui.SameLine(0, spacing);
+                DrawExtensionTag(tag, missing);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(TitleTip(title, url, missing));
             }
 
             ImGui.SameLine();
             DrawModeSwitch();
 
-            float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - iconW;
+            float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - toolsWidth;
             if (buttonsX > ImGui.GetCursorPosX())
                 ImGui.SameLine(buttonsX);
             else
                 ImGui.SameLine();
-            DrawPlotGear();
+            DrawTitleTools(spacing);
+        }
+
+        private static string TitleTip(string title, string url, bool missing)
+        {
+            string tip = string.IsNullOrEmpty(url) ? title : title + "\n" + url;
+            if (missing)
+                tip += "\n此文件已经不存在。";
+            return tip;
+        }
+
+        private void DrawExtensionTag(string tag, bool missing)
+        {
+            Vector4 color = missing
+                ? MissingTag
+                : _chromePushed
+                    ? PlaybackPanelChrome.Accent
+                    : new Vector4(0.55f, 0.75f, 0.95f, 1f);
+            var size = PlaybackPanelChrome.ExtensionTagSize(tag);
+            float frame = ImGui.GetFrameHeight();
+            ImGui.Dummy(new Vector2(size.X, frame));
+            var item = ImGui.GetItemRectMin();
+            PlaybackPanelChrome.DrawExtensionTag(
+                ImGui.GetWindowDrawList(),
+                new Vector2(item.X, item.Y + (frame - size.Y) * 0.5f),
+                tag,
+                color);
         }
 
         private void DrawModeSwitch()
@@ -196,11 +231,30 @@ namespace XivMediaPlayer.LocalUi
             _plugin.OnPlaybackPanelClosed(hostNotify: true);
         }
 
-        private void DrawPlotGear()
+        private void DrawTitleTools(float spacing)
+        {
+            DrawMarkedIcon(FontAwesomeIcon.Bars, "plots", "播放设置", _plotRegistryOpen, () => _plotRegistryOpen = !_plotRegistryOpen);
+            ImGui.SameLine(0, spacing);
+            if (CompactIconButton(FontAwesomeIcon.HouseChimney, "housing", "房屋菜单"))
+                _plugin.ExecuteChatCommand("/housing");
+            ImGui.SameLine(0, spacing);
+            DrawMarkedIcon(FontAwesomeIcon.Cog, "plugin-settings", "插件设置", _plugin.IsConfigUiOpen, _plugin.ToggleConfigUi);
+        }
+
+        private float TitleToolWidth()
+        {
+            float spacing = ImGui.GetStyle().ItemSpacing.X;
+            return CompactIconWidth(FontAwesomeIcon.Bars)
+                + CompactIconWidth(FontAwesomeIcon.HouseChimney)
+                + CompactIconWidth(FontAwesomeIcon.Cog)
+                + spacing * 2f;
+        }
+
+        private void DrawMarkedIcon(FontAwesomeIcon icon, string id, string tooltip, bool open, Action onClick)
         {
             Vector4? openFace = null;
             Vector4? openHover = null;
-            if (_plotRegistryOpen)
+            if (open)
             {
                 if (_chromePushed)
                 {
@@ -215,8 +269,8 @@ namespace XivMediaPlayer.LocalUi
                 }
             }
 
-            if (CompactIconButton(FontAwesomeIcon.Cog, "plots", "设置", _plotRegistryOpen, openFace, openHover))
-                _plotRegistryOpen = !_plotRegistryOpen;
+            if (CompactIconButton(icon, id, tooltip, open, openFace, openHover))
+                onClick();
         }
 
         private void DrawPlotRegistry()
@@ -884,7 +938,7 @@ namespace XivMediaPlayer.LocalUi
                 if (!string.Equals(text, url, StringComparison.OrdinalIgnoreCase))
                     tip = text + "\n" + url;
                 if (missing)
-                    tip += "\n这个本地文件已经不存在。";
+                    tip += "\n此文件已经不存在。";
                 ImGui.SetTooltip(tip);
             }
 
@@ -961,15 +1015,19 @@ namespace XivMediaPlayer.LocalUi
 
         private float CompactButtonWidth() => IconWidth() + CompactPadX * 2f;
 
+        private float CompactIconWidth(FontAwesomeIcon icon) => IconGlyphWidth(icon) + CompactPadX * 2f;
+
         private float PlaybackButtonWidth() => IconWidth() + ImGui.GetStyle().FramePadding.X * 2f;
 
-        private float IconWidth()
+        private float IconWidth() => IconGlyphWidth(FontAwesomeIcon.Play);
+
+        private static float IconGlyphWidth(FontAwesomeIcon icon)
         {
             var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
             if (!handle.Available)
                 return ImGui.GetFrameHeight() - ImGui.GetStyle().FramePadding.Y * 2f;
             using (handle.Push())
-                return ImGui.CalcTextSize(FontAwesomeIcon.Play.ToIconString()).X;
+                return ImGui.CalcTextSize(icon.ToIconString()).X;
         }
 
         private float ModeSwitchWidth()

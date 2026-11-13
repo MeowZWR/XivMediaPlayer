@@ -208,7 +208,7 @@ namespace XivMediaPlayer
                 int remaining = _config.LocalPlaylist?.Count ?? 0;
                 if (removed && remaining > 0 && _playerObject != null)
                 {
-                    PrintPlainError("这个本地文件已经不存在，改为播放下一项。");
+                    PrintPlainError("此文件已经不存在，改为播放下一项。");
                     if (_localPlaylistIndex < 0 || _localPlaylistIndex >= remaining)
                         _localPlaylistIndex = 0;
                     PlayMediaUrl(_config.LocalPlaylist![_localPlaylistIndex]);
@@ -216,7 +216,7 @@ namespace XivMediaPlayer
                 }
 
                 PrintPlainError(removed
-                    ? "这个本地文件已经不存在，已从播放列表移除。"
+                    ? "此文件已经不存在，已从播放列表移除。"
                     : "找不到这个本地视频文件。");
                 return;
             }
@@ -668,7 +668,10 @@ namespace XivMediaPlayer
             int guard = list.Count;
             while (guard-- > 0)
             {
-                if (next < 0 || next >= list.Count) return;
+                if (delta > 0 && next >= list.Count)
+                    next = 0;
+                else if (next < 0 || next >= list.Count)
+                    return;
                 if (!LocalMediaPaths.IsMissing(list[next]))
                 {
                     _localPlaylistIndex = next;
