@@ -454,7 +454,9 @@ namespace XivMediaPlayer
             _titleTextureManager?.InvalidateLoadingCache();
             UpdateMediaCommandHelp();
 
-            if (lang != (int)LanguageEnum.English)
+            bool skipProbe = lang == (int)LanguageEnum.Chinese
+                && Translator.GetBuiltinCount(LanguageEnum.Chinese) > 0;
+            if (lang != (int)LanguageEnum.English && !skipProbe)
             {
                 _ = Task.Run(async () => await Translator.ProbeServerAsync());
             }
@@ -520,6 +522,7 @@ namespace XivMediaPlayer
             string cachePath = Path.Combine(_pluginInterface.ConfigDirectory.FullName, "translation-cache.json");
             Translator.CacheLocation = cachePath;
             Translator.LoadCache(cachePath);
+            Translator.LoadBuiltinPacks();
             ApplyUiLanguageFromConfig();
             Translator.OnTranslationEvent += (_, _) =>
             {
@@ -529,7 +532,9 @@ namespace XivMediaPlayer
             Translator.OnError += (_, ex) =>
             {
                 _pluginLog.Warning($"[Localization] {ex.Message}");
-                if (_config.UiLanguage != (int)LanguageEnum.English && !_translationServerErrorNotified)
+                if (_config.UiLanguage != (int)LanguageEnum.English
+                    && !_translationServerErrorNotified
+                    && Translator.GetCachedCount((LanguageEnum)_config.UiLanguage) == 0)
                 {
                     _translationServerErrorNotified = true;
                     EnqueueFrameworkAction(() =>

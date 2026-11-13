@@ -28,6 +28,7 @@
   <None Update="XivMediaPlayer.json">
    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
   </None>
+  <EmbeddedResource Include="Localization\zh-CN.json" LogicalName="XivMediaPlayer.Localization.zh-CN.json" />
  </ItemGroup>
 
  <ItemGroup>

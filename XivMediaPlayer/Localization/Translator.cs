@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
@@ -17,7 +18,10 @@ namespace XivMediaPlayer.Localization
     /// </summary>
     public static class Translator
     {
+        private const string ChineseBuiltinResourceName = "XivMediaPlayer.Localization.zh-CN.json";
+
         private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, string>> Dictionary = new();
+        private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, string>> Builtin = new();
         private static readonly ConcurrentQueue<TranslationWorkItem> WorkQueue = new();
         private static readonly ConcurrentDictionary<string, byte> PendingKeys = new();
 
@@ -84,10 +88,65 @@ namespace XivMediaPlayer.Localization
         public static int GetCachedCount(LanguageEnum language)
         {
             int languageId = (int)language;
-            return Dictionary.TryGetValue(languageId, out var bucket) ? bucket.Count : 0;
+            Builtin.TryGetValue(languageId, out ConcurrentDictionary<string, string>? builtinBucket);
+            Dictionary.TryGetValue(languageId, out ConcurrentDictionary<string, string>? cacheBucket);
+
+            int builtinCount = builtinBucket?.Count ?? 0;
+            if (cacheBucket == null || cacheBucket.IsEmpty)
+            {
+                return builtinCount;
+            }
+
+            if (builtinCount == 0)
+            {
+                return cacheBucket.Count;
+            }
+
+            int count = builtinCount;
+            foreach (string key in cacheBucket.Keys)
+            {
+                if (!builtinBucket!.ContainsKey(key))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        public static int GetBuiltinCount(LanguageEnum language)
+        {
+            return Builtin.TryGetValue((int)language, out ConcurrentDictionary<string, string>? bucket)
+                ? bucket.Count
+                : 0;
         }
 
         public static void ClearLastError() => LastErrorMessage = string.Empty;
+
+        public static void LoadBuiltinPacks()
+        {
+            try
+            {
+                using Stream? stream = typeof(Translator).Assembly.GetManifestResourceStream(ChineseBuiltinResourceName);
+                if (stream == null)
+                {
+                    return;
+                }
+
+                using var reader = new StreamReader(stream, Encoding.UTF8);
+                var entries = JsonConvert.DeserializeObject<Dictionary<string, string>>(reader.ReadToEnd());
+                if (entries == null || entries.Count == 0)
+                {
+                    return;
+                }
+
+                Builtin[(int)LanguageEnum.Chinese] = new ConcurrentDictionary<string, string>(entries);
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke(null, ex);
+            }
+        }
 
         public static async Task ProbeServerAsync()
         {
@@ -427,6 +486,13 @@ namespace XivMediaPlayer.Localization
 
         private static string? GetCachedTranslation(string translationValue, int languageId)
         {
+            if (Builtin.TryGetValue(languageId, out ConcurrentDictionary<string, string>? builtinBucket)
+                && builtinBucket.TryGetValue(translationValue, out string? builtinValue)
+                && !string.IsNullOrWhiteSpace(builtinValue))
+            {
+                return builtinValue.CleanPunctuation();
+            }
+
             if (!Dictionary.ContainsKey(languageId))
             {
                 Dictionary[languageId] = new ConcurrentDictionary<string, string>();
