@@ -182,7 +182,7 @@ namespace XivMediaPlayer.LocalUi
         private string DisplayTitle()
         {
             if (!_plugin.HasPlayableScreen())
-                return "未找到屏幕";
+                return "";
             return MediaTitle();
         }
 
@@ -443,6 +443,7 @@ namespace XivMediaPlayer.LocalUi
             uint color = ImGui.GetColorU32(ImGuiCol.Text);
             int copies = Math.Max(3, (int)Math.Ceiling(view / cycle) + 2);
             float textY = min.Y + (max.Y - min.Y - line) * 0.5f;
+            int vertexStart = drawList.VtxBuffer.Size;
 
             for (int copy = -1; copy <= copies; copy++)
             {
@@ -468,6 +469,37 @@ namespace XivMediaPlayer.LocalUi
 
                     cursor = next;
                 }
+            }
+
+            FadeMarqueeEnds(drawList, vertexStart, minAlong, maxAlong, vertical);
+        }
+
+        private static unsafe void FadeMarqueeEnds(ImDrawListPtr drawList, int firstVertex, float start, float end, bool vertical)
+        {
+            int count = drawList.VtxBuffer.Size;
+            if (count <= firstVertex)
+                return;
+
+            float span = end - start;
+            if (span <= 1f)
+                return;
+
+            float fade = Math.Min(ImGui.GetTextLineHeight() * 1.25f, span * 0.22f);
+            if (fade < 1f)
+                return;
+
+            ImDrawVert* vertices = drawList.VtxBuffer.Data;
+            for (int i = firstVertex; i < count; i++)
+            {
+                float along = vertical ? vertices[i].Pos.Y : vertices[i].Pos.X;
+                float t = Math.Min(along - start, end - along) / fade;
+                if (t >= 1f)
+                    continue;
+
+                uint color = vertices[i].Col;
+                float shaped = t <= 0f ? 0f : t * t * (3f - 2f * t);
+                uint alpha = (uint)(((color >> 24) & 0xFFu) * shaped);
+                vertices[i].Col = (color & 0x00FFFFFFu) | (alpha << 24);
             }
         }
 
