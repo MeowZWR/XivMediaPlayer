@@ -6,6 +6,7 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using NAudio.Wave;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 
@@ -15,8 +16,6 @@ namespace XivMediaPlayer.LocalUi
     {
         private static readonly Vector4 SyncOn = new(0.45f, 0.85f, 0.5f, 1f);
         private static readonly Vector4 SyncOff = new(1f, 0.75f, 0.25f, 1f);
-        private static readonly Vector4 ToggleOn = new(0.2f, 0.55f, 0.3f, 1f);
-        private static readonly Vector4 LockOn = new(0.75f, 0.55f, 0.15f, 1f);
         private static readonly Vector4 VolumeIcon = new(0.68f, 0.68f, 0.70f, 1f);
         private static readonly Vector4 MissingTag = new(0.85f, 0.45f, 0.40f, 1f);
         private static readonly Vector4 MissingText = new(0.62f, 0.62f, 0.62f, 1f);
@@ -31,7 +30,7 @@ namespace XivMediaPlayer.LocalUi
         private readonly Plugin _plugin;
         private readonly FileDialogManager _fileDialogs = new();
         private static readonly string[] ScopeLabels = { "庭院和室内", "仅室外", "仅室内" };
-        private static readonly string[] ArrivalLabels = { "只显示边缘图标", "进入时打开面板" };
+        private static readonly string[] ArrivalLabels = { "只显示悬浮图标", "进入时打开面板" };
 
         private string _urlInput = string.Empty;
         private string _filePath = string.Empty;
@@ -44,6 +43,10 @@ namespace XivMediaPlayer.LocalUi
         private bool _plotRegistryOpen;
         private bool _chromePushed;
         private bool _pushedAlpha;
+        private int _edgeTransportDrag = -1;
+        private bool _edgeTransportDragMoved;
+        private bool _edgeTransportDirty;
+        private Vector2 _edgeTransportPress;
 
         public LocalMediaWindow(Plugin plugin)
             : base(
@@ -59,6 +62,10 @@ namespace XivMediaPlayer.LocalUi
                 MaximumSize = new Vector2(460, 820),
             };
         }
+
+        internal void TogglePlaybackSettings() => _plotRegistryOpen = !_plotRegistryOpen;
+
+        internal void SetPlaybackSettingsOpen(bool open) => _plotRegistryOpen = open;
 
         public override bool DrawConditions()
             => !_plugin.GameUiHidden;
@@ -288,7 +295,7 @@ namespace XivMediaPlayer.LocalUi
 
                 bool showEdge = _plugin.Config.ShowEdgeIconWhenScreenDetected;
                 ImGui.TableNextColumn();
-                if (ImGui.Checkbox("检测到屏幕时显示边缘图标", ref showEdge))
+                if (ImGui.Checkbox("检测到屏幕时显示悬浮图标", ref showEdge))
                 {
                     _plugin.Config.ShowEdgeIconWhenScreenDetected = showEdge;
                     _plugin.Config.SaveLocal();
@@ -296,7 +303,7 @@ namespace XivMediaPlayer.LocalUi
                 bool showEdgeHovered = ImGui.IsItemHovered();
                 bool keepEdge = _plugin.Config.KeepEdgeIconWithPanel;
                 ImGui.TableNextColumn();
-                if (ImGui.Checkbox("打开面板时保留边缘图标", ref keepEdge))
+                if (ImGui.Checkbox("打开面板时保留悬浮图标", ref keepEdge))
                 {
                     _plugin.Config.KeepEdgeIconWithPanel = keepEdge;
                     _plugin.Config.SaveLocal();
@@ -305,7 +312,7 @@ namespace XivMediaPlayer.LocalUi
 
                 bool showTitle = _plugin.Config.ShowEdgePlaybackTitle;
                 ImGui.TableNextColumn();
-                if (ImGui.Checkbox("边缘图标旁显示滚动标题", ref showTitle))
+                if (ImGui.Checkbox("悬浮图标旁显示滚动标题", ref showTitle))
                 {
                     _plugin.Config.ShowEdgePlaybackTitle = showTitle;
                     _plugin.Config.SaveLocal();
@@ -325,16 +332,18 @@ namespace XivMediaPlayer.LocalUi
                 if (restoreBgmHovered)
                     ImGui.SetTooltip("停止播放后恢复游戏BGM状态。");
                 if (showEdgeHovered)
-                    ImGui.SetTooltip("只在住宅区生效。当前地点已有屏幕，且没有被登记地块的动作接管时，显示边缘图标。");
+                    ImGui.SetTooltip("只在住宅区生效。当前地点已有屏幕，且没有被登记地块的动作接管时，显示悬浮图标。");
                 if (keepEdgeHovered)
-                    ImGui.SetTooltip("打开播放控制面板后，边缘图标继续留在屏幕边上，不再收起。");
+                    ImGui.SetTooltip("打开播放控制面板后，悬浮图标继续留在屏幕边上，不再收起。");
                 if (showTitleHovered)
-                    ImGui.SetTooltip("有播放内容时，在边缘图标旁用固定长度滚动标题。");
+                    ImGui.SetTooltip("有播放内容时，在悬浮图标旁用固定长度滚动标题。");
                 if (hideBackgroundHovered)
                     ImGui.SetTooltip("隐藏滚动文字的边框、背景，只留下文字。");
 
                 DrawPlaybackSliders();
             }
+
+            DrawEdgeTransportIcons();
 
             ImGui.Spacing();
             DrawCurrentPlotStatus();
@@ -454,12 +463,187 @@ namespace XivMediaPlayer.LocalUi
                 _plugin.RegisterCurrentPlot();
         }
 
+        private void DrawEdgeTransportIcons()
+        {
+            ImGui.Spacing();
+            const string label = "悬浮图标扩展按钮";
+            float chip = EdgeTransportChipSize();
+            float spacing = CompactGap + 2f;
+            var order = EnsureEdgeTransportOrder();
+            Span<Vector2> mins = stackalloc Vector2[EdgeTransportCatalog.Count];
+            Span<Vector2> maxs = stackalloc Vector2[EdgeTransportCatalog.Count];
+
+            for (int i = 0; i < order.Count; i++)
+            {
+                if (i > 0)
+                    ImGui.SameLine(0, spacing);
+
+                int action = order[i];
+                bool on = EdgeTransportCatalog.GetShow(_plugin.Config, action);
+                bool dragging = _edgeTransportDragMoved && _edgeTransportDrag == i;
+                bool clicked = DrawEdgeTransportToggle(
+                    EdgeTransportCatalog.ConfigIcon(action),
+                    $"edge-cfg-{action}",
+                    EdgeTransportCatalog.ConfigLabel(action),
+                    on,
+                    dragging,
+                    out Vector2 min,
+                    out Vector2 max);
+                mins[i] = min;
+                maxs[i] = max;
+
+                if (ImGui.IsItemActivated())
+                {
+                    _edgeTransportDrag = i;
+                    _edgeTransportDragMoved = false;
+                    _edgeTransportPress = ImGui.GetMousePos();
+                }
+
+                if (_edgeTransportDrag == i && ImGui.IsItemActive()
+                    && Vector2.Distance(ImGui.GetMousePos(), _edgeTransportPress) >= 4f)
+                    _edgeTransportDragMoved = true;
+
+                if (clicked && !_edgeTransportDragMoved)
+                {
+                    EdgeTransportCatalog.SetShow(_plugin.Config, action, !on);
+                    _edgeTransportDirty = true;
+                }
+            }
+
+            if (_edgeTransportDrag >= 0 && _edgeTransportDragMoved && ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                var mouse = ImGui.GetMousePos();
+                for (int target = 0; target < order.Count; target++)
+                {
+                    if (target == _edgeTransportDrag)
+                        continue;
+                    if (mouse.X < mins[target].X || mouse.Y < mins[target].Y
+                        || mouse.X >= maxs[target].X || mouse.Y >= maxs[target].Y)
+                        continue;
+
+                    int moved = order[_edgeTransportDrag];
+                    order.RemoveAt(_edgeTransportDrag);
+                    order.Insert(target, moved);
+                    _edgeTransportDrag = target;
+                    _edgeTransportDirty = true;
+                    break;
+                }
+            }
+
+            if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
+            {
+                if (_edgeTransportDirty)
+                {
+                    _plugin.Config.SaveLocal();
+                    _edgeTransportDirty = false;
+                }
+
+                _edgeTransportDrag = -1;
+                _edgeTransportDragMoved = false;
+            }
+
+            float labelWidth = ImGui.CalcTextSize(label).X;
+            float labelX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - labelWidth;
+            if (labelX > ImGui.GetCursorPosX())
+                ImGui.SameLine(labelX);
+            else
+                ImGui.SameLine(0, spacing);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + Math.Max(0f, (chip - ImGui.GetTextLineHeight()) * 0.5f));
+            ImGui.TextDisabled(label);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("点亮后会出现在悬浮图标的扩展条中。\n拖动图标可调整显示顺序。");
+        }
+
+        private List<int> EnsureEdgeTransportOrder()
+        {
+            var normalized = EdgeTransportCatalog.NormalizeOrder(_plugin.Config.EdgeTransportOrder);
+            _plugin.Config.EdgeTransportOrder = normalized;
+            return normalized;
+        }
+
+        private static float EdgeTransportChipSize()
+            => Math.Max(18f, ImGui.GetFrameHeight() * 0.72f);
+
+        private bool DrawEdgeTransportToggle(
+            FontAwesomeIcon icon,
+            string id,
+            string tip,
+            bool on,
+            bool dragging,
+            out Vector2 min,
+            out Vector2 max)
+        {
+            float size = EdgeTransportChipSize();
+            bool clicked = ImGui.InvisibleButton($"##{id}", new Vector2(size, size));
+            bool hovered = ImGui.IsItemHovered();
+            min = ImGui.GetItemRectMin();
+            max = ImGui.GetItemRectMax();
+            var list = ImGui.GetWindowDrawList();
+            float rounding = 3f;
+            var inset = new Vector2(3.5f, 3.5f);
+
+            Vector4 accent = _chromePushed
+                ? PlaybackPanelChrome.Accent
+                : ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive];
+            accent.W = 1f;
+
+            if (on)
+            {
+                var fill = accent;
+                fill.W = dragging ? 0.50f : hovered ? 0.40f : 0.26f;
+                list.AddRectFilled(min, max, ImGui.GetColorU32(fill), rounding);
+                list.AddRect(min, max, ImGui.GetColorU32(accent), rounding, ImDrawFlags.None, dragging ? 1.75f : 1.25f);
+                Vector4 glyph = _chromePushed
+                    ? accent
+                    : ImGui.GetStyle().Colors[(int)ImGuiCol.Text];
+                glyph.W = 1f;
+                DrawEdgeTransportGlyph(icon, min + inset, max - inset, glyph);
+            }
+            else
+            {
+                var mute = ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled];
+                mute.W = dragging ? 0.70f : hovered ? 0.55f : 0.32f;
+                list.AddRect(min, max, ImGui.GetColorU32(mute), rounding, ImDrawFlags.None, dragging ? 1.5f : 1f);
+                var glyph = mute;
+                glyph.W = hovered || dragging ? 0.42f : 0.26f;
+                DrawEdgeTransportGlyph(icon, min + inset, max - inset, glyph);
+            }
+
+            if (hovered && !dragging)
+                ImGui.SetTooltip(on ? $"{tip}（已启用，可拖动排序）" : $"{tip}（未启用，可拖动排序）");
+            return clicked;
+        }
+
+        private static void DrawEdgeTransportGlyph(FontAwesomeIcon icon, Vector2 min, Vector2 max, Vector4 color)
+        {
+            string glyph = icon.ToIconString();
+            var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
+            ImGui.SetWindowFontScale(0.62f);
+            if (handle.Available)
+            {
+                using (handle.Push())
+                    DrawCenteredGlyph(glyph, min, max, color);
+            }
+            else
+            {
+                DrawCenteredGlyph(glyph, min, max, color);
+            }
+
+            ImGui.SetWindowFontScale(1f);
+        }
+
+        private static void DrawCenteredGlyph(string glyph, Vector2 min, Vector2 max, Vector4 color)
+        {
+            var size = ImGui.CalcTextSize(glyph);
+            ImGui.GetWindowDrawList().AddText(min + (max - min - size) * 0.5f, ImGui.GetColorU32(color), glyph);
+        }
+
         private void DrawPlaybackSliders()
         {
             float spacing = ImGui.GetStyle().ItemSpacing.X;
             float resetWidth = CompactButtonWidth();
             float labelWidth = 0f;
-            foreach (string name in new[] { "边缘图标屏幕边距", "文字滚动速度", "滚动区域长度", "滚动区域间距" })
+            foreach (string name in new[] { "悬浮图标屏幕边距", "文字滚动速度", "滚动区域长度", "滚动区域间距" })
                 labelWidth = Math.Max(labelWidth, ImGui.CalcTextSize(name).X);
             float sliderWidth = Math.Max(72f, ImGui.GetContentRegionAvail().X - resetWidth - labelWidth - spacing * 2f);
             bool done = false;
@@ -467,14 +651,14 @@ namespace XivMediaPlayer.LocalUi
             float margin = Math.Clamp(_plugin.Config.EdgeIconScreenMargin, 0f, LocalUiConfig.MaxEdgeIconScreenMargin);
             if (DrawResetSlider(
                 "edge-margin",
-                "边缘图标屏幕边距",
+                "悬浮图标屏幕边距",
                 ref margin,
                 0f,
                 LocalUiConfig.MaxEdgeIconScreenMargin,
                 "%.0f",
                 LocalUiConfig.DefaultEdgeIconScreenMargin,
                 sliderWidth,
-                "边缘图标离屏幕边缘的距离。",
+                "悬浮图标离屏幕边缘的距离。",
                 ref done))
                 _plugin.Config.EdgeIconScreenMargin = margin;
 
@@ -519,7 +703,7 @@ namespace XivMediaPlayer.LocalUi
                 "%.0f",
                 LocalUiConfig.DefaultEdgeTitleIconGap,
                 sliderWidth,
-                "滚动标题和边缘图标之间的空隙。",
+                "滚动标题和悬浮图标之间的空隙。",
                 ref done))
                 _plugin.Config.EdgeTitleIconGap = titleGap;
 
@@ -803,7 +987,7 @@ namespace XivMediaPlayer.LocalUi
         private void DrawToggles(float gap)
         {
             bool loopOn = _plugin.Config.LoopEnabled;
-            if (IconButton(FontAwesomeIcon.Repeat, "loop", loopOn ? "循环：开" : "循环：关", loopOn, ToggleOn))
+            if (IconButton(FontAwesomeIcon.Repeat, "loop", loopOn ? "循环：开" : "循环：关", loopOn, EdgeTransportCatalog.ToggleActive))
             {
                 _plugin.Config.LoopEnabled = !loopOn;
                 _plugin.Config.Save();
@@ -811,7 +995,7 @@ namespace XivMediaPlayer.LocalUi
             ImGui.SameLine(0, gap);
 
             bool shuffleOn = _plugin.Config.ShuffleEnabled;
-            if (IconButton(FontAwesomeIcon.Random, "shuffle", shuffleOn ? "随机：开" : "随机：关", shuffleOn, ToggleOn))
+            if (IconButton(FontAwesomeIcon.Random, "shuffle", shuffleOn ? "随机：开" : "随机：关", shuffleOn, EdgeTransportCatalog.ToggleActive))
             {
                 _plugin.Config.ShuffleEnabled = !shuffleOn;
                 _plugin.Config.Save();
@@ -819,12 +1003,12 @@ namespace XivMediaPlayer.LocalUi
             ImGui.SameLine(0, gap);
 
             bool locked = _plugin.CurrentTvPlacement?.IsLocked == true;
-            if (IconButton(locked ? FontAwesomeIcon.Lock : FontAwesomeIcon.LockOpen, "lock", locked ? "已锁定" : "锁定", locked, LockOn))
+            if (IconButton(locked ? FontAwesomeIcon.Lock : FontAwesomeIcon.LockOpen, "lock", locked ? "已锁定" : "锁定", locked, EdgeTransportCatalog.LockActive))
                 _plugin.ToggleCurrentTvLock();
             ImGui.SameLine(0, gap);
 
             bool crop = _plugin.Config.CropToFill;
-            if (IconButton(FontAwesomeIcon.Crop, "crop", crop ? "裁切：开，铺满屏幕" : "裁切：关，完整显示", crop, ToggleOn))
+            if (IconButton(FontAwesomeIcon.Crop, "crop", crop ? "裁切：开，铺满屏幕" : "裁切：关，完整显示", crop, EdgeTransportCatalog.ToggleActive))
             {
                 _plugin.Config.CropToFill = !crop;
                 _plugin.Config.SaveLocal();
@@ -1028,16 +1212,18 @@ namespace XivMediaPlayer.LocalUi
             {
                 var entry = ordered[i];
                 ImGui.PushID(1000 + i);
-                if (StartPlaybackButton(FontAwesomeIcon.Play, "play", "播放", true))
+                bool blockLocal = !_plugin.IsLocalPlaybackMode && LocalMediaPaths.IsLocalFile(entry.Url);
+                if (blockLocal) ImGui.BeginDisabled();
+                if (StartPlaybackButton(FontAwesomeIcon.Play, "play", blockLocal ? "同步模式不能播放本地视频" : "播放", true))
                     _plugin.PlayMediaUrl(entry.Url);
+                if (blockLocal) ImGui.EndDisabled();
                 ImGui.SameLine(0, CompactGap);
                 if (!QueueContains(queue, entry.Url))
                 {
-                    bool blockLocalAdd = !_plugin.IsLocalPlaybackMode && LocalMediaPaths.IsLocalFile(entry.Url);
-                    if (blockLocalAdd) ImGui.BeginDisabled();
-                    if (CompactIconButton(FontAwesomeIcon.Plus, "add", blockLocalAdd ? "同步模式不能添加本地视频" : "加入列表"))
+                    if (blockLocal) ImGui.BeginDisabled();
+                    if (CompactIconButton(FontAwesomeIcon.Plus, "add", blockLocal ? "同步模式不能添加本地视频" : "加入列表"))
                         _plugin.EnqueueMedia(entry.Url);
-                    if (blockLocalAdd) ImGui.EndDisabled();
+                    if (blockLocal) ImGui.EndDisabled();
                     ImGui.SameLine(0, CompactGap);
                 }
                 string label = string.IsNullOrEmpty(entry.Title) ? entry.Url : entry.Title;
@@ -1319,7 +1505,6 @@ namespace XivMediaPlayer.LocalUi
                 : string.Format("{0}:{1:D2}", ts.Minutes, ts.Seconds);
         }
 
-        private static Vector4 Lighten(Vector4 color)
-            => new(Math.Min(color.X + 0.08f, 1f), Math.Min(color.Y + 0.08f, 1f), Math.Min(color.Z + 0.08f, 1f), color.W);
+        private static Vector4 Lighten(Vector4 color) => EdgeTransportCatalog.Lighten(color);
     }
 }

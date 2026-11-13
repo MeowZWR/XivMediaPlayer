@@ -34,6 +34,17 @@ namespace XivMediaPlayer.LocalUi
         public float EdgeIconScreenMargin { get; set; } = DefaultEdgeIconScreenMargin;
         public float EdgeTitleIconGap { get; set; } = DefaultEdgeTitleIconGap;
         public bool KeepEdgeIconWithPanel { get; set; } = true;
+        public bool ShowEdgeTransportPlayPause { get; set; } = true;
+        public bool ShowEdgeTransportPrevious { get; set; }
+        public bool ShowEdgeTransportNext { get; set; }
+        public bool ShowEdgeTransportPaste { get; set; } = true;
+        public bool ShowEdgeTransportLoop { get; set; }
+        public bool ShowEdgeTransportLock { get; set; }
+        public bool ShowEdgeTransportCrop { get; set; }
+        public bool ShowEdgeTransportPlaybackSettings { get; set; }
+        public bool ShowEdgeTransportHousing { get; set; }
+        public bool ShowEdgeTransportPluginSettings { get; set; }
+        public List<int> EdgeTransportOrder { get; set; } = EdgeTransportCatalog.DefaultOrder();
         public bool? CropToFill { get; set; }
 
         public static readonly JsonSerializerSettings JsonSettings = new()

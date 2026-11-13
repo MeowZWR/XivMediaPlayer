@@ -134,6 +134,17 @@ namespace XivMediaPlayer {
     public float EdgeIconScreenMargin { get; set; } = LocalUiConfig.DefaultEdgeIconScreenMargin;
     public float EdgeTitleIconGap { get; set; } = LocalUiConfig.DefaultEdgeTitleIconGap;
     public bool KeepEdgeIconWithPanel { get; set; } = true;
+    public bool ShowEdgeTransportPlayPause { get; set; } = true;
+    public bool ShowEdgeTransportPrevious { get; set; }
+    public bool ShowEdgeTransportNext { get; set; }
+    public bool ShowEdgeTransportPaste { get; set; } = true;
+    public bool ShowEdgeTransportLoop { get; set; }
+    public bool ShowEdgeTransportLock { get; set; }
+    public bool ShowEdgeTransportCrop { get; set; }
+    public bool ShowEdgeTransportPlaybackSettings { get; set; }
+    public bool ShowEdgeTransportHousing { get; set; }
+    public bool ShowEdgeTransportPluginSettings { get; set; }
+    public List<int> EdgeTransportOrder { get; set; } = EdgeTransportCatalog.DefaultOrder();
 
     public bool ShouldSerializeLocalPlaylist() => false;
     public bool ShouldSerializeLocalPlaybackMode() => false;
@@ -156,6 +167,17 @@ namespace XivMediaPlayer {
     public bool ShouldSerializeEdgeIconScreenMargin() => false;
     public bool ShouldSerializeEdgeTitleIconGap() => false;
     public bool ShouldSerializeKeepEdgeIconWithPanel() => false;
+    public bool ShouldSerializeShowEdgeTransportPlayPause() => false;
+    public bool ShouldSerializeShowEdgeTransportPrevious() => false;
+    public bool ShouldSerializeShowEdgeTransportNext() => false;
+    public bool ShouldSerializeShowEdgeTransportPaste() => false;
+    public bool ShouldSerializeShowEdgeTransportLoop() => false;
+    public bool ShouldSerializeShowEdgeTransportLock() => false;
+    public bool ShouldSerializeShowEdgeTransportCrop() => false;
+    public bool ShouldSerializeShowEdgeTransportPlaybackSettings() => false;
+    public bool ShouldSerializeShowEdgeTransportHousing() => false;
+    public bool ShouldSerializeShowEdgeTransportPluginSettings() => false;
+    public bool ShouldSerializeEdgeTransportOrder() => false;
     public bool ShouldSerializeCropToFill() => false;
 
     public string ServerUrl
@@ -420,6 +442,7 @@ namespace XivMediaPlayer {
       EdgeIconScreenMargin = loaded.EdgeIconScreenMargin;
       EdgeTitleIconGap = loaded.EdgeTitleIconGap;
       KeepEdgeIconWithPanel = loaded.KeepEdgeIconWithPanel;
+      EdgeTransportCatalog.CopyShow(loaded, this);
       if (loaded.CropToFill is bool cropToFill)
         CropToFill = cropToFill;
     }
@@ -452,6 +475,7 @@ namespace XivMediaPlayer {
         KeepEdgeIconWithPanel = source.KeepEdgeIconWithPanel,
         CropToFill = source.CropToFill,
       };
+      EdgeTransportCatalog.CopyShow(source, snapshot);
       var json = JsonConvert.SerializeObject(snapshot, LocalUiConfig.JsonSettings);
       var tempPath = Path.Combine(directory, $".local-ui.json.{Guid.NewGuid():N}.new");
       File.WriteAllText(tempPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));

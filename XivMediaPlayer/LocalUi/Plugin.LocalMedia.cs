@@ -849,5 +849,20 @@ namespace XivMediaPlayer
                 PrintChat("[Media Player] You do not own this TV.");
             }
         }
+
+        internal void TogglePlaybackSettingsFromEdge()
+        {
+            if (_localMediaWindow == null)
+                return;
+
+            if (!_localMediaWindow.IsOpen)
+            {
+                OpenPlaybackPanel();
+                _localMediaWindow.SetPlaybackSettingsOpen(true);
+                return;
+            }
+
+            _localMediaWindow.TogglePlaybackSettings();
+        }
     }
 }
