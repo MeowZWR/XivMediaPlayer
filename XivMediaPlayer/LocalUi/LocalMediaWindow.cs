@@ -112,8 +112,6 @@ namespace XivMediaPlayer.LocalUi
             DrawTitleRow();
             if (_chromePushed)
                 PlaybackPanelChrome.DrawHairline();
-            if (_plugin.IsMediaLoading && !string.IsNullOrEmpty(_plugin.MediaLoadingMessage))
-                ImGui.TextDisabled(_plugin.MediaLoadingMessage);
 
             DrawSeek();
             DrawControls();
