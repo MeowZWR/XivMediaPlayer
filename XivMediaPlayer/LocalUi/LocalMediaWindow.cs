@@ -202,7 +202,7 @@ namespace XivMediaPlayer.LocalUi
             string label = local ? "本地" : "同步";
             string tooltip = local
                 ? "本地模式。播放不参与房间同步，播完不会从列表移除。点击切换到同步模式。"
-                : "同步模式。播放列表与房间一起出队，不能添加本地视频。点击切换到本地模式。";
+                : "同步模式。面板里的列表保持不动，房间同步的是当前这首之后的队列。不能添加本地视频。点击切换到本地模式。";
             if (_chromePushed)
             {
                 if (PlaybackPanelChrome.DrawPill("##playback-mode", label, local ? SyncOff : SyncOn, tooltip))
@@ -920,7 +920,7 @@ namespace XivMediaPlayer.LocalUi
             }
 
             var queue = _plugin.CopyMediaQueue();
-            if (ImGui.BeginTabItem($"播放列表 ({queue.Length})"))
+            if (ImGui.BeginTabItem($"播放列表 ({queue.Length})###xmp-playlist"))
             {
                 DrawQueue(queue);
                 ImGui.EndTabItem();
@@ -992,13 +992,16 @@ namespace XivMediaPlayer.LocalUi
             for (int i = 0; i < queue.Length; i++)
             {
                 ImGui.PushID(i);
+                bool current = IsCurrentQueueItem(i, queue[i]);
+                if (current)
+                    DrawCurrentRowMarker();
                 if (StartPlaybackButton(FontAwesomeIcon.Play, "play", "播放", true))
-                    _plugin.PlayMediaUrl(queue[i]);
+                    _plugin.PlayQueuedMedia(i);
                 ImGui.SameLine(0, CompactGap);
                 if (CompactIconButton(FontAwesomeIcon.Trash, "remove", "移除"))
                     _plugin.RemoveQueuedMedia(i);
                 ImGui.SameLine(0, CompactGap);
-                DrawTaggedText(queue[i], queue[i]);
+                DrawTaggedText(PlaylistLabel(queue[i]), queue[i], current);
                 ImGui.PopID();
             }
             ImGui.EndChild();
@@ -1044,7 +1047,97 @@ namespace XivMediaPlayer.LocalUi
             ImGui.EndChild();
         }
 
-        private void DrawTaggedText(string text, string url)
+        private bool IsCurrentQueueItem(int index, string url)
+        {
+            if (_plugin.MediaManager?.ActiveStream == null)
+                return false;
+            string playing = _plugin.LastStreamURL;
+            if (string.IsNullOrEmpty(playing) || !SameMedia(playing, url))
+                return false;
+            int currentIndex = _plugin.CurrentLocalPlaylistIndex;
+            return currentIndex == index;
+        }
+
+        private string PlaylistLabel(string url)
+        {
+            if (TryCurrentTitle(url, out string current))
+                return current;
+            if (TryHistoryTitle(url, out string history))
+                return history;
+            if (LocalMediaPaths.IsLocalFile(url))
+            {
+                string name = Path.GetFileName(LocalMediaPaths.Normalize(url));
+                if (!string.IsNullOrWhiteSpace(name))
+                    return name;
+            }
+
+            return url;
+        }
+
+        private bool TryCurrentTitle(string url, out string title)
+        {
+            title = "";
+            string playing = _plugin.LastStreamURL;
+            if (string.IsNullOrEmpty(playing) || !SameMedia(playing, url))
+                return false;
+            return DistinctTitle(_plugin.PlayingMediaTitle, url, out title);
+        }
+
+        private bool TryHistoryTitle(string url, out string title)
+        {
+            title = "";
+            var history = _plugin.Config.WatchHistory;
+            if (history == null || history.Count == 0)
+                return false;
+            if (history.TryGetValue(url, out var exact) && DistinctTitle(exact.Title, url, out title))
+                return true;
+
+            foreach (var entry in history.Values)
+            {
+                if (entry == null || !SameMedia(entry.Url, url))
+                    continue;
+                if (DistinctTitle(entry.Title, url, out title))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool DistinctTitle(string title, string url, out string shown)
+        {
+            shown = title?.Trim() ?? "";
+            if (shown.Length == 0 || shown == "Loading...")
+                return false;
+            return !SameMedia(shown, url);
+        }
+
+        private static bool SameMedia(string left, string right)
+            => string.Equals(MediaKey(left ?? ""), MediaKey(right ?? ""), StringComparison.OrdinalIgnoreCase);
+
+        private Vector4 CurrentAccent()
+        {
+            Vector4 color = _chromePushed
+                ? PlaybackPanelChrome.Accent
+                : ImGui.GetStyle().Colors[(int)ImGuiCol.SliderGrab];
+            color.W = 1f;
+            return color;
+        }
+
+        private void DrawCurrentRowMarker()
+        {
+            float height = ImGui.GetFrameHeight();
+            var min = ImGui.GetCursorScreenPos();
+            float width = Math.Max(0f, ImGui.GetContentRegionAvail().X);
+            var max = new Vector2(min.X + width, min.Y + height);
+            var accent = CurrentAccent();
+            var fill = accent;
+            fill.W = 0.18f;
+            var list = ImGui.GetWindowDrawList();
+            list.AddRectFilled(min, max, ImGui.GetColorU32(fill), 3f);
+            list.AddRectFilled(min, new Vector2(min.X + 3f, max.Y), ImGui.GetColorU32(accent), 2f);
+        }
+
+        private void DrawTaggedText(string text, string url, bool current = false)
         {
             const string localKind = "本地";
             const string linkKind = "链接";
@@ -1063,12 +1156,15 @@ namespace XivMediaPlayer.LocalUi
             string shown = Ellipsize(text, textWidth);
             if (missing)
                 ImGui.TextColored(MissingText, shown);
+            else if (current)
+                ImGui.TextColored(CurrentAccent(), shown);
             else
                 ImGui.TextUnformatted(shown);
-            if (ImGui.IsItemHovered() && (missing || shown != text))
+            bool titled = !string.Equals(text, url, StringComparison.OrdinalIgnoreCase);
+            if (ImGui.IsItemHovered() && (missing || titled || shown != text))
             {
                 string tip = text;
-                if (!string.Equals(text, url, StringComparison.OrdinalIgnoreCase))
+                if (titled)
                     tip = text + "\n" + url;
                 if (missing)
                     tip += "\n此文件已经不存在。";

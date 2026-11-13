@@ -146,7 +146,6 @@ namespace XivMediaPlayer
             _screenSettingsWindow?.SyncFromTransform();
         }
         private Queue<string> _mediaQueue = new Queue<string>();
-        private Stack<string> _mediaHistory = new Stack<string>();
         private float _preMuteVolume = 0.5f;
         private bool _isMuted = false;
         private bool _wasDragging3DSeek = false;
@@ -2133,6 +2132,7 @@ namespace XivMediaPlayer
 
         private void PlayRouted(string url, IMediaGameObject audioGameObject, int startTimeMs = 0, bool isAutoSync = false)
         {
+            NoteSyncPlaylistIndex(url);
             if (startTimeMs == 0 && (url.Contains("youtube.com") || url.Contains("youtu.be")))
             {
                 startTimeMs = ExtractYouTubeStartTimeMs(url);
@@ -4373,7 +4373,7 @@ namespace XivMediaPlayer
                 state.TimecodeMs = activeStream.Time;
             }
 
-            state.Playlist = new System.Collections.Generic.List<string>(_mediaQueue);
+            state.Playlist = new System.Collections.Generic.List<string>(CopyUpcomingSyncPlaylist());
             return true;
         }
 
@@ -4535,7 +4535,7 @@ namespace XivMediaPlayer
             if (soundPath.Contains("127.0.0.1")) soundPath = "";
             long activeTime = overrideTimeMs ?? (long)(activeStream?.Time ?? 0);
             bool isIntentionallyPaused = _isIntentionallyPaused;
-            var mediaQueueArray = _mediaQueue.ToArray();
+            var mediaQueueArray = CopyUpcomingSyncPlaylist();
             var duration = _currentMediaDurationMs;
 
             await Task.Run(async () =>
@@ -5620,6 +5620,7 @@ namespace XivMediaPlayer
                                     _isQueueMenuOpen = false;
                                 } else if (action == "clear") {
                                     _mediaQueue.Clear();
+                                    _syncPlaylistIndex = -1;
                                     _ = PushMediaToServerAsync(false);
                                     _queueMenuTextureManager?.UpdateQueue(_mediaQueue,
                     string.IsNullOrEmpty(_currentMediaTitle) ? Translate("Nothing Playing") : _currentMediaTitle);
@@ -5660,6 +5661,8 @@ namespace XivMediaPlayer
                                         var list = _mediaQueue.ToList();
                                         if (idx >= 0 && idx < list.Count) {
                                             list.RemoveAt(idx);
+                                            if (_syncPlaylistIndex == idx) _syncPlaylistIndex = -1;
+                                            else if (_syncPlaylistIndex > idx) _syncPlaylistIndex--;
                                             _mediaQueue = new Queue<string>(list);
                                             _ = PushMediaToServerAsync(false);
                                             _queueMenuTextureManager?.UpdateQueue(_mediaQueue,
@@ -6913,6 +6916,7 @@ namespace XivMediaPlayer
             PrintVerbose("[Media Player] Stopping media and clearing queue...");
             _mediaManager?.StopStream();
             _mediaQueue.Clear();
+            _syncPlaylistIndex = -1;
             ResetStreamValues(true);
 
             // Clear the saved room state so it doesn't auto-resume next time we enter
@@ -6988,8 +6992,7 @@ namespace XivMediaPlayer
         public bool IsIntentionallyPaused => _isIntentionallyPaused;
 
         /// <summary>
-        /// Plays the next track from the media queue.
-        /// If shuffle is enabled, picks a random track from the queue.
+        /// Plays the next item in the playlist.
         /// </summary>
         public void PlayNext()
         {
@@ -7004,25 +7007,11 @@ namespace XivMediaPlayer
                 return;
             }
 
-            if (_mediaQueue.Count == 0 || _playerObject == null) return;
-
-            if (!TryDequeuePlayable(out string nextUrl, out int skipped))
-            {
-                ReportSkippedMissingFiles(skipped);
-                return;
-            }
-
-            if (!string.IsNullOrEmpty(_lastStreamURL))
-                _mediaHistory.Push(_lastStreamURL);
-
-            ReportSkippedMissingFiles(skipped);
-            PrintVerboseFormat("[Media Player] Playing next: {0}", nextUrl);
-            PlayRouted(nextUrl, CurrentAudioSource);
+            PlayAdjacentSyncItem(1);
         }
 
         /// <summary>
-        /// Plays the previous track from the media history stack.
-        /// Pushes the current track back onto the front of the queue.
+        /// Plays the previous item in the playlist.
         /// </summary>
         public void PlayPrevious()
         {
@@ -7037,24 +7026,7 @@ namespace XivMediaPlayer
                 return;
             }
 
-            if (_mediaHistory.Count == 0 || _playerObject == null) return;
-
-            if (!TryPopPlayableHistory(out string prevUrl, out int skipped))
-            {
-                ReportSkippedMissingFiles(skipped);
-                return;
-            }
-
-            if (!string.IsNullOrEmpty(_lastStreamURL))
-            {
-                var list = _mediaQueue.ToList();
-                list.Insert(0, _lastStreamURL);
-                _mediaQueue = new Queue<string>(list);
-            }
-
-            ReportSkippedMissingFiles(skipped);
-            PrintVerboseFormat("[Media Player] Playing previous: {0}", prevUrl);
-            PlayRouted(prevUrl, CurrentAudioSource);
+            PlayAdjacentSyncItem(-1);
         }
 
         /// <summary>

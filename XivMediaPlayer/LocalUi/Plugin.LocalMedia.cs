@@ -19,6 +19,7 @@ namespace XivMediaPlayer
         private long _resumeAfterStopTimecodeMs;
         private bool _resumeAfterStopIsLive;
         private int _localPlaylistIndex = -1;
+        private int _syncPlaylistIndex = -1;
 
         private void ApplySavedPlaybackMode()
         {
@@ -81,6 +82,8 @@ namespace XivMediaPlayer
         public string CurrentMediaTitle =>
             !string.IsNullOrEmpty(_currentMediaTitle) ? _currentMediaTitle : _resumeAfterStopTitle;
 
+        public string PlayingMediaTitle => _currentMediaTitle;
+
         public string RememberedMediaUrl =>
             !string.IsNullOrEmpty(_lastStreamURL) ? _lastStreamURL : _resumeAfterStopUrl;
 
@@ -110,6 +113,48 @@ namespace XivMediaPlayer
             IsLocalPlaybackMode
                 ? (_config.LocalPlaylist ?? new List<string>()).ToArray()
                 : _mediaQueue.ToArray();
+
+        private string[] CopyUpcomingSyncPlaylist()
+        {
+            var list = _mediaQueue.ToList();
+            if (list.Count == 0) return Array.Empty<string>();
+            int index = ResolveSyncPlaylistIndex(_lastStreamURL ?? "", _syncPlaylistIndex);
+            if (index < 0) return list.ToArray();
+            if (index >= list.Count - 1) return Array.Empty<string>();
+            var upcoming = new string[list.Count - index - 1];
+            list.CopyTo(index + 1, upcoming, 0, upcoming.Length);
+            return upcoming;
+        }
+
+        public int CurrentLocalPlaylistIndex
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(_lastStreamURL))
+                    return -1;
+                if (IsLocalPlaybackMode)
+                    return ResolveLocalPlaylistIndex(_lastStreamURL, _localPlaylistIndex);
+                return ResolveSyncPlaylistIndex(_lastStreamURL, _syncPlaylistIndex);
+            }
+        }
+
+        public void PlayQueuedMedia(int index)
+        {
+            if (IsLocalPlaybackMode)
+            {
+                var local = _config.LocalPlaylist;
+                if (local == null || index < 0 || index >= local.Count) return;
+                _localPlaylistIndex = index;
+                PlayMediaUrl(local[index]);
+                return;
+            }
+
+            if (!CanControlCurrentTvPlayback()) return;
+            var list = _mediaQueue.ToList();
+            if (index < 0 || index >= list.Count) return;
+            _syncPlaylistIndex = index;
+            PlayMediaUrl(list[index]);
+        }
 
         internal void PrintPlain(string text) => _chat.Print(text);
 
@@ -311,63 +356,44 @@ namespace XivMediaPlayer
             return true;
         }
 
-        private bool TryDequeuePlayable(out string url, out int skipped)
+        private void PlayAdjacentSyncItem(int delta)
         {
-            url = "";
-            skipped = 0;
-            while (_mediaQueue.Count > 0)
+            var list = _mediaQueue.ToList();
+            if (list.Count == 0 || _playerObject == null) return;
+
+            if (delta > 0 && _config.ShuffleEnabled && list.Count > 1)
             {
-                string candidate;
-                if (_config.ShuffleEnabled && _mediaQueue.Count > 1)
+                for (int attempt = 0; attempt < list.Count; attempt++)
                 {
-                    var list = _mediaQueue.ToList();
-                    int idx = _shuffleRandom.Next(list.Count);
-                    candidate = list[idx];
-                    list.RemoveAt(idx);
-                    _mediaQueue = new Queue<string>(list);
+                    int index = _shuffleRandom.Next(list.Count);
+                    if (index == _syncPlaylistIndex || LocalMediaPaths.IsMissing(list[index])) continue;
+                    _syncPlaylistIndex = index;
+                    PlayMediaUrl(list[index]);
+                    return;
                 }
-                else
-                {
-                    candidate = _mediaQueue.Dequeue();
-                }
-
-                if (LocalMediaPaths.IsMissing(candidate))
-                {
-                    skipped++;
-                    continue;
-                }
-
-                url = candidate;
-                return true;
             }
 
-            return false;
-        }
-
-        private bool TryPopPlayableHistory(out string url, out int skipped)
-        {
-            url = "";
-            skipped = 0;
-            while (_mediaHistory.Count > 0)
+            int start = _syncPlaylistIndex;
+            if (start < 0)
             {
-                string candidate = _mediaHistory.Pop();
-                if (LocalMediaPaths.IsMissing(candidate))
+                if (delta < 0) return;
+                start = -1;
+            }
+            int next = start + delta;
+            int guard = list.Count;
+            while (guard-- > 0)
+            {
+                if (next < 0 || next >= list.Count)
+                    return;
+                if (!LocalMediaPaths.IsMissing(list[next]))
                 {
-                    skipped++;
-                    continue;
+                    _syncPlaylistIndex = next;
+                    PlayMediaUrl(list[next]);
+                    return;
                 }
 
-                url = candidate;
-                return true;
+                next += delta == 0 ? 1 : delta;
             }
-
-            return false;
-        }
-
-        private void ReportSkippedMissingFiles(int skipped)
-        {
-            if (skipped <= 0) return;
-            PrintPlainError($"有 {skipped} 个本地文件已不存在，已跳过。");
         }
 
         private void HydrateLocalPlaybackMemory()
@@ -398,6 +424,7 @@ namespace XivMediaPlayer
                 return;
 
             _mediaQueue.Clear();
+            _syncPlaylistIndex = -1;
             _syncDisplayUrls.Clear();
             if (state.Playlist != null)
             {
@@ -468,6 +495,7 @@ namespace XivMediaPlayer
             _syncDisplayLocationKey = "";
             _syncDisplayUrls.Clear();
             _mediaQueue.Clear();
+            _syncPlaylistIndex = -1;
             ClearResumeDisplay();
         }
 
@@ -509,6 +537,7 @@ namespace XivMediaPlayer
             _syncDisplayLocationKey = "";
             _syncDisplayUrls.Clear();
             _mediaQueue.Clear();
+            _syncPlaylistIndex = -1;
             ClearResumeDisplay();
             if (!forgetBookmark || string.IsNullOrEmpty(_config.LastSyncLocationKey)) return;
             _config.LastSyncLocationKey = "";
@@ -620,12 +649,61 @@ namespace XivMediaPlayer
         private void NoteLocalPlaylistIndex(string url)
         {
             if (!IsLocalPlaybackMode) return;
+            var list = _config.LocalPlaylist;
+            if (list != null
+                && _localPlaylistIndex >= 0
+                && _localPlaylistIndex < list.Count
+                && string.Equals(PlaylistKey(list[_localPlaylistIndex]), PlaylistKey(url), StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             _localPlaylistIndex = FindLocalPlaylistIndex(url);
+        }
+
+        private void NoteSyncPlaylistIndex(string url)
+        {
+            if (IsLocalPlaybackMode) return;
+            var list = _mediaQueue.ToList();
+            if (_syncPlaylistIndex >= 0
+                && _syncPlaylistIndex < list.Count
+                && string.Equals(PlaylistKey(list[_syncPlaylistIndex]), PlaylistKey(url), StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _syncPlaylistIndex = FindSyncPlaylistIndex(list, url);
         }
 
         private int FindLocalPlaylistIndex(string url)
         {
             var list = _config.LocalPlaylist;
+            if (list == null || string.IsNullOrEmpty(url)) return -1;
+            string key = PlaylistKey(url);
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (string.Equals(PlaylistKey(list[i]), key, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private int ResolveSyncPlaylistIndex(string url, int savedIndex)
+        {
+            var list = _mediaQueue.ToList();
+            if (savedIndex >= 0
+                && savedIndex < list.Count
+                && string.Equals(PlaylistKey(list[savedIndex]), PlaylistKey(url), StringComparison.OrdinalIgnoreCase))
+            {
+                return savedIndex;
+            }
+
+            return FindSyncPlaylistIndex(list, url);
+        }
+
+        private static int FindSyncPlaylistIndex(List<string> list, string url)
+        {
             if (list == null || string.IsNullOrEmpty(url)) return -1;
             string key = PlaylistKey(url);
             for (int i = 0; i < list.Count; i++)
@@ -724,6 +802,8 @@ namespace XivMediaPlayer
             var list = _mediaQueue.ToList();
             if (index < 0 || index >= list.Count) return;
             list.RemoveAt(index);
+            if (_syncPlaylistIndex == index) _syncPlaylistIndex = -1;
+            else if (_syncPlaylistIndex > index) _syncPlaylistIndex--;
             _mediaQueue = new Queue<string>(list);
             _ = PushMediaToServerAsync(isBackgroundSync: false);
         }
@@ -740,6 +820,7 @@ namespace XivMediaPlayer
 
             if (!CanControlCurrentTvPlayback()) return;
             _mediaQueue.Clear();
+            _syncPlaylistIndex = -1;
             _ = PushMediaToServerAsync(isBackgroundSync: false);
         }
 
