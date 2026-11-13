@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using XivMediaPlayer.Networking.Models;
 using Dalamud.Plugin.Services;
@@ -15,6 +16,8 @@ namespace XivMediaPlayer.Networking
         private readonly string _baseUrl;
         public string BaseUrl => _baseUrl;
         private readonly IPluginLog _log;
+        private int _disposed;
+        private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
         public ServerClient(string baseUrl, IPluginLog log)
         {
@@ -47,7 +50,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to fetch server time");
+                LogRequestError(ex, "Failed to fetch server time");
             }
             return 0;
         }
@@ -65,7 +68,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to get TVs for room {locationKey}");
+                LogRequestError(ex, $"Failed to get TVs for room {locationKey}");
             }
             return new List<TvPlacement>();
         }
@@ -119,7 +122,9 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to register TV for room {locationKey}");
+                if (IsDisposed)
+                    return null;
+                LogRequestError(ex, $"Failed to register TV for room {locationKey}");
                 throw;
             }
             return null;
@@ -138,7 +143,9 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to delete TV for room {locationKey}");
+                if (IsDisposed)
+                    return false;
+                LogRequestError(ex, $"Failed to delete TV for room {locationKey}");
                 throw;
             }
         }
@@ -155,7 +162,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to get media state for room {locationKey}");
+                LogRequestError(ex, $"Failed to get media state for room {locationKey}");
             }
             return null;
         }
@@ -190,8 +197,10 @@ namespace XivMediaPlayer.Networking
             catch (UnauthorizedAccessException) { throw; }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to update media state for room {locationKey}");
-                throw; // Rethrow so the plugin can catch and handle it
+                if (IsDisposed)
+                    return null;
+                LogRequestError(ex, $"Failed to update media state for room {locationKey}");
+                throw;
             }
             return null;
         }
@@ -209,7 +218,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to get TVs in batch");
+                LogRequestError(ex, "Failed to get TVs in batch");
             }
             return new List<TvPlacement>();
         }
@@ -227,7 +236,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to get media states in batch");
+                LogRequestError(ex, "Failed to get media states in batch");
             }
             return new List<RoomMediaStateSync>();
         }
@@ -244,7 +253,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to get venue settings for room {locationKey}");
+                LogRequestError(ex, $"Failed to get venue settings for room {locationKey}");
             }
 
             return null;
@@ -269,7 +278,9 @@ namespace XivMediaPlayer.Networking
             catch (UnauthorizedAccessException) { throw; }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to update venue settings for room {locationKey}");
+                if (IsDisposed)
+                    return null;
+                LogRequestError(ex, $"Failed to update venue settings for room {locationKey}");
                 throw;
             }
 
@@ -289,7 +300,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to get banners for room {locationKey}");
+                LogRequestError(ex, $"Failed to get banners for room {locationKey}");
             }
 
             return new List<BannerPlacement>();
@@ -322,7 +333,9 @@ namespace XivMediaPlayer.Networking
             catch (UnauthorizedAccessException) { throw; }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to register banner for room {locationKey}");
+                if (IsDisposed)
+                    return null;
+                LogRequestError(ex, $"Failed to register banner for room {locationKey}");
                 throw;
             }
 
@@ -344,7 +357,9 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to delete banner for room {locationKey}");
+                if (IsDisposed)
+                    return false;
+                LogRequestError(ex, $"Failed to delete banner for room {locationKey}");
                 throw;
             }
         }
@@ -384,7 +399,9 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to upload diagnostic logs");
+                if (IsDisposed)
+                    return null;
+                LogRequestError(ex, "Failed to upload diagnostic logs");
             }
 
             return new DiagnosticLogSubmitResult
@@ -415,7 +432,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to fetch watch party events");
+                LogRequestError(ex, "Failed to fetch watch party events");
             }
             return new List<WatchPartyEvent>();
         }
@@ -435,7 +452,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to create watch party event");
+                LogRequestError(ex, "Failed to create watch party event");
             }
             return null;
         }
@@ -450,7 +467,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, $"Failed to delete watch party event {eventId}");
+                LogRequestError(ex, $"Failed to delete watch party event {eventId}");
             }
             return false;
         }
@@ -509,7 +526,9 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to generate Bot API Key");
+                if (IsDisposed)
+                    return (null, null);
+                LogRequestError(ex, "Failed to generate Bot API Key");
                 return (null, ex.Message);
             }
         }
@@ -533,7 +552,7 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to list Bot API Keys");
+                LogRequestError(ex, "Failed to list Bot API Keys");
             }
             return new List<BotApiKeyDto>();
         }
@@ -554,13 +573,21 @@ namespace XivMediaPlayer.Networking
             }
             catch (Exception ex)
             {
-                _log.Error(ex, "Failed to revoke Bot API Key");
+                LogRequestError(ex, "Failed to revoke Bot API Key");
             }
             return false;
         }
 
+        private void LogRequestError(Exception ex, string message)
+        {
+            if (IsDisposed)
+                return;
+            _log.Error(ex, message);
+        }
+
         public void Dispose()
         {
+            Interlocked.Exchange(ref _disposed, 1);
             _httpClient.Dispose();
         }
     }

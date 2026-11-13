@@ -283,15 +283,15 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.EndTable();
 
                 if (restoreBgmHovered)
-                    ImGui.SetTooltip("播放时仍会暂时关闭游戏背景音乐。停止播放或离开当前区域后，再把游戏背景音乐打开。");
+                    ImGui.SetTooltip("停止播放后恢复游戏BGM状态。");
                 if (showEdgeHovered)
-                    ImGui.SetTooltip("只在住宅区生效。当前地点已经有屏幕，且没有被登记地块的动作接管时，显示边缘图标。");
+                    ImGui.SetTooltip("只在住宅区生效。当前地点已有屏幕，且没有被登记地块的动作接管时，显示边缘图标。");
                 if (keepEdgeHovered)
                     ImGui.SetTooltip("打开播放控制面板后，边缘图标继续留在屏幕边上，不再收起。");
                 if (showTitleHovered)
-                    ImGui.SetTooltip("有播放内容时，在边缘图标旁用固定长度滚动标题。图标在屏幕左右时，标题在图标上侧或下侧；在屏幕上下时，标题与图标同一行，在左侧或右侧。哪一侧由屏幕中心决定，使标题留在屏幕内。");
+                    ImGui.SetTooltip("有播放内容时，在边缘图标旁用固定长度滚动标题。");
                 if (hideBackgroundHovered)
-                    ImGui.SetTooltip("隐藏滚动文字的边框、背景、粒子和流星，只留下文字。");
+                    ImGui.SetTooltip("隐藏滚动文字的边框、背景，只留下文字。");
 
                 DrawPlaybackSliders();
             }
@@ -304,7 +304,7 @@ namespace XivMediaPlayer.LocalUi
                 return;
             if (plots.Count == 0)
             {
-                ImGui.TextDisabled("还没有登记的地块。");
+                ImGui.TextDisabled("未进行过地块登记。");
                 return;
             }
 

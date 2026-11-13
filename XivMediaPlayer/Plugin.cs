@@ -4161,6 +4161,11 @@ namespace XivMediaPlayer
 
             var venueSettings = await ServerClient.GetVenueSettingsAsync(primaryKey);
             var banners = await ServerClient.GetBannersForRoomAsync(primaryKey);
+            if (_disposed)
+            {
+                await mediaSyncTask;
+                return;
+            }
 
             var roomTvsSnapshot = serverRoomTvs.ToList();
             var serverBannersSnapshot = banners.ToList();
@@ -4168,6 +4173,9 @@ namespace XivMediaPlayer
 
             RunOnFrameworkThread(() =>
             {
+                if (_disposed)
+                    return;
+
                 _nearbyTvs = nearbyCopy;
 
                 bool preferLocalPlacements = ShouldPreferLocalPlacementEdits();
@@ -4582,6 +4590,8 @@ namespace XivMediaPlayer
                 try
                 {
                     await ServerClient.UpdateMediaStateAsync(key, sync);
+                    if (_disposed)
+                        return;
                     _currentMediaOwnerId = _config.OwnerId;
 
                     // If we successfully pushed a foreground sync, we are definitely the DJ now.
@@ -4627,6 +4637,8 @@ namespace XivMediaPlayer
                 }
                 catch (HttpRequestException ex)
                 {
+                    if (_disposed)
+                        return;
                     _pluginLog.Warning(ex, "[Sync] Server connection failed.");
                     if (!isBackgroundSync)
                     {
@@ -4635,6 +4647,8 @@ namespace XivMediaPlayer
                 }
                 catch (Exception ex)
                 {
+                    if (_disposed)
+                        return;
                     _pluginLog.Error(ex, "[Sync] Failed to push media state to server.");
                 }
             });
@@ -4662,7 +4676,7 @@ namespace XivMediaPlayer
             if (!IsMediaSyncLocation(key)) return;
 
             var sync = await ServerClient.GetMediaStateAsync(key);
-            if (sync == null || string.IsNullOrEmpty(sync.CurrentUrl)) return;
+            if (_disposed || sync == null || string.IsNullOrEmpty(sync.CurrentUrl)) return;
 
             _lastServerMediaStateLocationKey = key;
             _currentMediaOwnerId = sync.OwnerId;
@@ -4986,6 +5000,8 @@ namespace XivMediaPlayer
             DismissPlotPlaybackDock();
             _mediaManager?.CleanSounds();
             ResetStreamValues();
+            // Logout can save system config before the deferred restore runs.
+            RestoreOwnedBgmNow();
         }
 
         private int _mediaErrorCount = 0;
@@ -5101,6 +5117,36 @@ namespace XivMediaPlayer
             {
                 _pluginLog.Warning(e, "[Media Player] Failed to mute BGM");
             }
+        }
+
+        /// <summary>
+        /// Writes the game BGM unmute immediately. Deferred restores never run after the
+        /// framework subscription is removed, and logout can save system config first.
+        /// </summary>
+        private void RestoreOwnedBgmNow()
+        {
+            if (!_config.RestoreGameBgmOnStop)
+                return;
+            if (!_bgmWasMutedByUs && !_bgmRestoreAfterZone)
+                return;
+
+            try
+            {
+                _gameConfig.Set(SystemConfigOption.IsSndBgm, false);
+            }
+            catch (Exception e)
+            {
+                _pluginLog.Warning(e, "[Media Player] Failed to restore BGM");
+            }
+        }
+
+        private void RestoreBgmForShutdown()
+        {
+            RestoreOwnedBgmNow();
+            _bgmWasMutedByUs = false;
+            _bgmRestoreAfterZone = false;
+            _deferredBgmRestoreTime = null;
+            _bgmRestoreAttempts = 0;
         }
 
         /// <summary>
@@ -7135,6 +7181,7 @@ namespace XivMediaPlayer
         public void Dispose()
         {
             if (_disposed) return;
+            RestoreBgmForShutdown();
             NoteLocalPlaybackSnapshot();
             if (_pendingLocalUiSave)
                 _config.SaveLocalImmediate();
