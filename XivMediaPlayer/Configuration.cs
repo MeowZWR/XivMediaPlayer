@@ -156,6 +156,7 @@ namespace XivMediaPlayer {
     public bool ShouldSerializeEdgeIconScreenMargin() => false;
     public bool ShouldSerializeEdgeTitleIconGap() => false;
     public bool ShouldSerializeKeepEdgeIconWithPanel() => false;
+    public bool ShouldSerializeCropToFill() => false;
 
     public string ServerUrl
     {
@@ -178,6 +179,7 @@ namespace XivMediaPlayer {
     public int SeekIncrementSeconds { get; set; } = 10;
     public bool LoopEnabled { get; set; } = false;
     public bool ShuffleEnabled { get; set; } = false;
+    public bool CropToFill { get; set; } = false;
 
     #endregion
 
@@ -418,6 +420,8 @@ namespace XivMediaPlayer {
       EdgeIconScreenMargin = loaded.EdgeIconScreenMargin;
       EdgeTitleIconGap = loaded.EdgeTitleIconGap;
       KeepEdgeIconWithPanel = loaded.KeepEdgeIconWithPanel;
+      if (loaded.CropToFill is bool cropToFill)
+        CropToFill = cropToFill;
     }
 
     private static void WriteLocalUi(IDalamudPluginInterface pi, Configuration source) {
@@ -446,6 +450,7 @@ namespace XivMediaPlayer {
         EdgeIconScreenMargin = source.EdgeIconScreenMargin,
         EdgeTitleIconGap = source.EdgeTitleIconGap,
         KeepEdgeIconWithPanel = source.KeepEdgeIconWithPanel,
+        CropToFill = source.CropToFill,
       };
       var json = JsonConvert.SerializeObject(snapshot, LocalUiConfig.JsonSettings);
       var tempPath = Path.Combine(directory, $".local-ui.json.{Guid.NewGuid():N}.new");

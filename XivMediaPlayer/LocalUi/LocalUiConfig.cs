@@ -34,6 +34,7 @@ namespace XivMediaPlayer.LocalUi
         public float EdgeIconScreenMargin { get; set; } = DefaultEdgeIconScreenMargin;
         public float EdgeTitleIconGap { get; set; } = DefaultEdgeTitleIconGap;
         public bool KeepEdgeIconWithPanel { get; set; } = true;
+        public bool? CropToFill { get; set; }
 
         public static readonly JsonSerializerSettings JsonSettings = new()
         {

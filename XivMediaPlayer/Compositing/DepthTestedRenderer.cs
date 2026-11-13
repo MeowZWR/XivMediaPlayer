@@ -103,6 +103,7 @@ namespace XivMediaPlayer.Compositing {
       public float SurfaceOnly;
       public float LightingOnly;
       public float StaticLightSource;
+      public float CropToFill;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -186,6 +187,7 @@ cbuffer Constants : register(b0) {
   float SurfaceOnly;
   float LightingOnly;
   float StaticLightSource;
+  float CropToFill;
 };
 
 cbuffer VisualFxConsts : register(b2) {
@@ -455,6 +457,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
   float t = -1.0;
 
   float2 sampleUV = float2(0.5, 0.5);
+  float2 contentUV = sampleUV;
   if (abs(denom) > 1e-6) {
       t = dot(CornerTL3D - rayOrigin, tvNormal) / denom;
       float3 hitPoint = rayOrigin + rayDir * t;
@@ -470,19 +473,25 @@ float4 PS(VS_OUT input) : SV_TARGET {
             float tvAspect = length(tvRight) / length(tvDown);
             float aspectDiff = abs(tvAspect - VideoAspectRatio) / max(tvAspect, VideoAspectRatio);
             if (aspectDiff > 0.005) {
+                bool crop = CropToFill > 0.5;
                 if (VideoAspectRatio > tvAspect) {
-                    // Video is wider than the TV. Pillarbox (side bars).
                     float scale = tvAspect / VideoAspectRatio;
-                    sampleUV.x = (sampleUV.x - 0.5) * scale + 0.5;
+                    if (crop)
+                        sampleUV.x = (sampleUV.x - 0.5) * scale + 0.5;
+                    else
+                        sampleUV.y = (sampleUV.y - 0.5) / scale + 0.5;
                 } else {
-                    // Video is taller than the TV. Letterbox (top/bottom bars).
                     float scale = VideoAspectRatio / tvAspect;
-                    sampleUV.y = (sampleUV.y - 0.5) * scale + 0.5;
+                    if (crop)
+                        sampleUV.y = (sampleUV.y - 0.5) * scale + 0.5;
+                    else
+                        sampleUV.x = (sampleUV.x - 0.5) / scale + 0.5;
                 }
             }
         }
+        contentUV = sampleUV;
         sampleUV.y = sampleUV.y * UVBottomEdge;
-          sampleUV.x = sampleUV.x * UVRightEdge;
+        sampleUV.x = sampleUV.x * UVRightEdge;
       }
   
   // Dynamic Resolution scaling: the depth buffer texture size might be larger than the actual rendered area
@@ -532,7 +541,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
 
   if (isInside && occlusion < 0.999 && LightingOnly < 0.5) {
       // Draw unoccluded TV
-      bool isOutOfBounds = (sampleUV.x < 0 || sampleUV.x > 1 || sampleUV.y < 0 || sampleUV.y > 1);
+      bool isOutOfBounds = (contentUV.x < 0 || contentUV.x > 1 || contentUV.y < 0 || contentUV.y > 1);
       
       if (isOutOfBounds && ShowScreensaver < 0.5) {
           color = float4(0, 0, 0, IsProjectorMode > 0.5 ? 0.0 : 1.0);
@@ -1611,7 +1620,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
       List<(int X, int Y, int W, int H, string Name)> uiRects, IntPtr titleSrvPtr = default,
       bool isLooping = false, bool isShuffle = false, float time = 0, float showScreensaver = 0,
       float videoAspectRatio = 0, IntPtr gbuffer2SrvPtr = default, IntPtr gbuffer3SrvPtr = default, IntPtr transparentUiSrvPtr = default, IntPtr vignetteExtrapolatedSrvPtr = default, bool useDifferenceFallback = false, float opacity = 1.0f, bool isProjectorMode = false, Vector3? screensaverColor = null, int screensaverStyle = 0, float uiBlendThreshold = 0.0f, float uvBottom = 1.0f, float uvRight = 1.0f, bool enableTvGlow = true, float loadingPulse = 0f, bool isLoadingOverlay = false, IntPtr idleBrandingSrvPtr = default, float idleBrandingAspect = 1.0f, bool surfaceOnly = false, bool lightingOnly = false, bool staticLightSource = false,
-      int visualEffectMode = 0, float effectIntensity = 0.65f, float effectSpeed = 1.0f, AudioVisualState? audioVisuals = null) {
+      int visualEffectMode = 0, float effectIntensity = 0.65f, float effectSpeed = 1.0f, AudioVisualState? audioVisuals = null, bool cropToFill = true) {
 
       if (!_initialized || _disposed || videoSrvPtr == IntPtr.Zero || depthSrv == null) return false;
 
@@ -1680,6 +1689,7 @@ float4 PS(VS_OUT input) : SV_TARGET {
           SurfaceOnly = surfaceOnly ? 1.0f : 0.0f,
           LightingOnly = lightingOnly ? 1.0f : 0.0f,
           StaticLightSource = staticLightSource ? 1.0f : 0.0f,
+          CropToFill = cropToFill ? 1.0f : 0.0f,
         };
           _context.UpdateSubresource(constants, _constantBuffer);
 

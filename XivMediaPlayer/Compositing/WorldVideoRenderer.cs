@@ -114,7 +114,8 @@ namespace XivMediaPlayer.Compositing {
       WorldScreenTransform? screenTransform = null,
       bool isolateCompositeOutput = false,
       WorldTvRenderPass renderPass = WorldTvRenderPass.Full,
-      bool preserveSortedDrawOrder = false) {
+      bool preserveSortedDrawOrder = false,
+      bool cropToFill = true) {
 
       var placement = screenTransform ?? _transform;
       if (_disposed || !placement.Enabled || textureSrv == IntPtr.Zero) return;
@@ -162,9 +163,9 @@ namespace XivMediaPlayer.Compositing {
         bool allCornersInFront = zTL > 0.1f && zTR > 0.1f && zBR > 0.1f && zBL > 0.1f;
 
         RenderWithOcclusion(placement, textureSrv, depthCapture, cameraPos.Value,
-          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, bufferProgress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize, uiBlendThreshold, uvBottom, uvRight, loadingPulse, isLoadingOverlay, idleBrandingSrvPtr, idleBrandingAspect, renderPass, isolateCompositeOutput);
+          cameraForward.Value, cameraRight.Value, cameraUp.Value, fovY, aspectRatio, uiCapture, nearPlane, farPlane, hoverUV, progress, bufferProgress, playbackState, lockState, volume, titleSrvPtr, isLooping, isShuffle, time, showScreensaver, videoAspect, allCornersInFront, useDifferenceFallback, viewProjMatrix, viewportPos, viewportSize, uiBlendThreshold, uvBottom, uvRight, loadingPulse, isLoadingOverlay, idleBrandingSrvPtr, idleBrandingAspect, renderPass, isolateCompositeOutput, cropToFill);
       } else if (renderPass != WorldTvRenderPass.CompositeOnly) {
-        RenderScreenSpace(placement, textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, renderPass);
+        RenderScreenSpace(placement, textureSrv, videoAspect, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, renderPass, cropToFill);
       }
       
       if (pushCompositeToFront) {
@@ -335,7 +336,7 @@ namespace XivMediaPlayer.Compositing {
       Vector3 cameraPos, Vector3 cameraForward, Vector3 cameraRight, Vector3 cameraUp, float fovY, float aspectRatio, UILayerCapture uiCapture,
       float nearPlane, float farPlane, Vector2? hoverUV, float progress, float bufferProgress, float playbackState, float lockState, float volume, IntPtr titleSrvPtr, bool isLooping, bool isShuffle, float time, float showScreensaver, float videoAspectRatio, bool allCornersInFront, bool useDifferenceFallback,
       Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize, float uiBlendThreshold, float uvBottom, float uvRight, float loadingPulse = 0f, bool isLoadingOverlay = false, IntPtr idleBrandingSrvPtr = default, float idleBrandingAspect = 1.0f,
-      WorldTvRenderPass renderPass = WorldTvRenderPass.Full, bool isolateCompositeOutput = false) {
+      WorldTvRenderPass renderPass = WorldTvRenderPass.Full, bool isolateCompositeOutput = false, bool cropToFill = true) {
       bool renderGlow = renderPass == WorldTvRenderPass.GlowOnly || renderPass == WorldTvRenderPass.Full;
       bool renderComposite = renderPass != WorldTvRenderPass.GlowOnly;
       bool lightingOnly = renderPass == WorldTvRenderPass.RoomLightingOnly;
@@ -422,7 +423,7 @@ namespace XivMediaPlayer.Compositing {
             DepthRendererError = string.IsNullOrEmpty(_depthRenderer.InitError)
               ? "DepthTestedRenderer initialization failed."
               : _depthRenderer.InitError;
-            RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
+            RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, cropToFill: cropToFill);
             return;
           }
         }
@@ -438,7 +439,7 @@ namespace XivMediaPlayer.Compositing {
       try {
         if (depthCapture.CapturedSRV == null) {
           DepthRendererError = "Depth SRV not available";
-          RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
+          RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, cropToFill: cropToFill);
           return;
         }
 
@@ -485,14 +486,15 @@ namespace XivMediaPlayer.Compositing {
           visualEffectMode: placement.VisualEffectMode,
           effectIntensity: placement.EffectIntensity,
           effectSpeed: placement.EffectSpeed,
-          audioVisuals: SharedAudioVisuals);
+          audioVisuals: SharedAudioVisuals,
+          cropToFill: cropToFill);
 
         DepthDebugInfo = $"Cam: {cameraPos:F1}\nFwd: {cameraForward:F2}\nFov: {fovY:F3}\nAspect: {aspectRatio:F3}";
 
         if (success && _depthRenderer.OutputSRV != null) {
           var snapshotSrv = isolateCompositeOutput ? _depthRenderer.AcquireOutputSnapshot() : _depthRenderer.OutputSRV;
           if (snapshotSrv == null) {
-            RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
+            RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, cropToFill: cropToFill);
             return;
           }
 
@@ -520,12 +522,12 @@ namespace XivMediaPlayer.Compositing {
           DepthRendererError = null;
         } else {
           if (uiCapture == null || !uiCapture.IsInitialized) {
-            RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
+            RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, cropToFill: cropToFill);
           }
         }
       } catch (Exception ex) {
         // Fallback to screen space if custom shader fails
-        RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight);
+        RenderScreenSpace(placement, textureSrv, videoAspectRatio, viewProjMatrix, viewportPos, viewportSize, uvBottom, uvRight, cropToFill: cropToFill);
       }
     }
 
@@ -571,7 +573,7 @@ namespace XivMediaPlayer.Compositing {
     /// <summary>
     /// Renders using ImGui screen-space projection (no occlusion).
     /// </summary>
-    private void RenderScreenSpace(WorldScreenTransform placement, IntPtr textureSrv, float videoAspect, Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize, float uvBottom = 1.0f, float uvRight = 1.0f, WorldTvRenderPass renderPass = WorldTvRenderPass.Full) {
+    private void RenderScreenSpace(WorldScreenTransform placement, IntPtr textureSrv, float videoAspect, Matrix4x4? viewProjMatrix, Vector2? viewportPos, Vector2? viewportSize, float uvBottom = 1.0f, float uvRight = 1.0f, WorldTvRenderPass renderPass = WorldTvRenderPass.Full, bool cropToFill = true) {
       bool renderGlow = renderPass != WorldTvRenderPass.CompositeOnly;
       bool renderComposite = renderPass != WorldTvRenderPass.GlowOnly;
       var (tl, tr, br, bl) = placement.Corners;
@@ -606,26 +608,47 @@ namespace XivMediaPlayer.Compositing {
         float quadH = Vector3.Distance(tl, bl);
         float quadAspect = quadH > 0 ? quadW / quadH : 1.0f;
         float aspectDiff = MathF.Abs(quadAspect - videoAspect) / MathF.Max(quadAspect, videoAspect);
-        
-          if (aspectDiff > 0.005f && videoAspect > quadAspect) {
+        if (aspectDiff > 0.005f) {
+          if (cropToFill) {
+            if (videoAspect > quadAspect) {
               float scale = quadAspect / videoAspect;
               float offset = (1.0f - scale) * 0.5f;
               uvTL.X = offset * uvRight;
               uvBL.X = offset * uvRight;
               uvTR.X = uvRight * (1.0f - offset);
               uvBR.X = uvRight * (1.0f - offset);
-            } else if (aspectDiff > 0.005f && videoAspect < quadAspect) {
+            } else {
               float scale = videoAspect / quadAspect;
               float offset = (1.0f - scale) * 0.5f;
-              Vector2 origTL = sTL;
-              Vector2 origTR = sTR;
-              Vector2 origBL = sBL;
-              Vector2 origBR = sBR;
+              uvTL.Y = offset * uvBottom;
+              uvTR.Y = offset * uvBottom;
+              uvBL.Y = uvBottom * (1.0f - offset);
+              uvBR.Y = uvBottom * (1.0f - offset);
+            }
+          } else {
+            Vector2 origTL = sTL;
+            Vector2 origTR = sTR;
+            Vector2 origBL = sBL;
+            Vector2 origBR = sBR;
+            if (!placement.IsProjectorMode) {
+              byte barAlpha = (byte)(Math.Clamp(placement.Opacity, 0f, 1f) * 255f);
+              drawList.AddQuadFilled(origTL, origTR, origBR, origBL, (uint)barAlpha << 24);
+            }
+            float scale = videoAspect > quadAspect ? quadAspect / videoAspect : videoAspect / quadAspect;
+            float offset = (1.0f - scale) * 0.5f;
+            if (videoAspect > quadAspect) {
+              sTL = Vector2.Lerp(origTL, origBL, offset);
+              sTR = Vector2.Lerp(origTR, origBR, offset);
+              sBL = Vector2.Lerp(origBL, origTL, offset);
+              sBR = Vector2.Lerp(origBR, origTR, offset);
+            } else {
               sTL = Vector2.Lerp(origTL, origTR, offset);
               sBL = Vector2.Lerp(origBL, origBR, offset);
               sTR = Vector2.Lerp(origTR, origTL, offset);
               sBR = Vector2.Lerp(origBR, origBL, offset);
             }
+          }
+        }
       }
 
       byte alpha = (byte)(Math.Clamp(placement.Opacity, 0f, 1f) * 255f);

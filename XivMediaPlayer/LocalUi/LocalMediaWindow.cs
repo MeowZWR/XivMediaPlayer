@@ -2,6 +2,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.ImGuiFileDialog;
+using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
 using NAudio.Wave;
 using System;
@@ -16,12 +17,16 @@ namespace XivMediaPlayer.LocalUi
         private static readonly Vector4 SyncOff = new(1f, 0.75f, 0.25f, 1f);
         private static readonly Vector4 ToggleOn = new(0.2f, 0.55f, 0.3f, 1f);
         private static readonly Vector4 LockOn = new(0.75f, 0.55f, 0.15f, 1f);
-        private static readonly Vector4 MuteOn = new(0.55f, 0.28f, 0.28f, 1f);
+        private static readonly Vector4 VolumeIcon = new(0.68f, 0.68f, 0.70f, 1f);
         private static readonly Vector4 MissingTag = new(0.85f, 0.45f, 0.40f, 1f);
         private static readonly Vector4 MissingText = new(0.62f, 0.62f, 0.62f, 1f);
 
         private const float CompactPadX = 2f;
         private const float CompactGap = 2f;
+        private const float ControlGap = 4f;
+        private const float ClusterGap = 10f;
+        private const float VolumeTrackWidth = 100f;
+        private const float VolumeIconScale = 0.62f;
 
         private readonly Plugin _plugin;
         private readonly FileDialogManager _fileDialogs = new();
@@ -32,6 +37,10 @@ namespace XivMediaPlayer.LocalUi
         private string _filePath = string.Empty;
         private bool _seekDrag;
         private float _seekValue;
+        private float _seekGrabAlpha;
+        private bool _volumeDrag;
+        private float _volumeGrabAlpha;
+        private float _controlsWidth;
         private bool _plotRegistryOpen;
         private bool _chromePushed;
         private bool _pushedAlpha;
@@ -92,7 +101,6 @@ namespace XivMediaPlayer.LocalUi
                 PlaybackPanelChrome.DrawAtmosphere();
             }
 
-            float surfaceTop = ImGui.GetCursorScreenPos().Y;
             DrawTitleRow();
             if (_chromePushed)
                 PlaybackPanelChrome.DrawHairline();
@@ -101,8 +109,6 @@ namespace XivMediaPlayer.LocalUi
 
             DrawSeek();
             DrawControls();
-            if (_chromePushed)
-                PlaybackPanelChrome.DrawRail(surfaceTop, ImGui.GetCursorScreenPos().Y - ImGui.GetStyle().ItemSpacing.Y);
 
             ImGui.Spacing();
             ImGui.Separator();
@@ -115,20 +121,17 @@ namespace XivMediaPlayer.LocalUi
 
         private void ApplyWidthLimit()
         {
+            if (_controlsWidth <= 1f)
+                return;
+
             var style = ImGui.GetStyle();
-            float width = PlaybackRowWidth() + style.WindowPadding.X * 2f + style.WindowBorderSize * 2f;
+            float scale = Math.Max(ImGuiHelpers.GlobalScale, 0.01f);
+            float width = (_controlsWidth + style.WindowPadding.X * 2f + style.WindowBorderSize * 2f) / scale;
             SizeConstraints = new WindowSizeConstraints
             {
                 MinimumSize = new Vector2(width, 96f),
                 MaximumSize = new Vector2(width, 820f),
             };
-        }
-
-        private float PlaybackRowWidth()
-        {
-            const float gap = 4f;
-            const float volumeWidth = 116f;
-            return PlaybackButtonWidth() * 10f + gap * 8f + 12f + volumeWidth;
         }
 
         private void DrawTitleRow()
@@ -144,8 +147,7 @@ namespace XivMediaPlayer.LocalUi
             string tag = "";
             bool hasTag = hasTitle && LocalMediaPaths.TrySplitLocalName(title, url, out name, out tag);
             float tagWidth = hasTag ? PlaybackPanelChrome.ExtensionTagSize(tag).X : 0f;
-            float toolsWidth = TitleToolWidth();
-            float textWidth = ImGui.GetContentRegionAvail().X - syncW - toolsWidth - spacing * (hasTag ? 3f : 2f) - tagWidth;
+            float textWidth = ImGui.GetContentRegionAvail().X - syncW - spacing * (hasTag ? 2f : 1f) - tagWidth;
 
             ImGui.AlignTextToFramePadding();
             string shown = Ellipsize(name, Math.Max(48f, textWidth));
@@ -166,13 +168,6 @@ namespace XivMediaPlayer.LocalUi
 
             ImGui.SameLine();
             DrawModeSwitch();
-
-            float buttonsX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - toolsWidth;
-            if (buttonsX > ImGui.GetCursorPosX())
-                ImGui.SameLine(buttonsX);
-            else
-                ImGui.SameLine();
-            DrawTitleTools(spacing);
         }
 
         private static string TitleTip(string title, string url, bool missing)
@@ -235,19 +230,10 @@ namespace XivMediaPlayer.LocalUi
         {
             DrawMarkedIcon(FontAwesomeIcon.Bars, "plots", "播放设置", _plotRegistryOpen, () => _plotRegistryOpen = !_plotRegistryOpen);
             ImGui.SameLine(0, spacing);
-            if (CompactIconButton(FontAwesomeIcon.HouseChimney, "housing", "房屋菜单"))
+            if (IconButton(FontAwesomeIcon.HouseChimney, "housing", "房屋菜单"))
                 _plugin.ExecuteChatCommand("/housing");
             ImGui.SameLine(0, spacing);
             DrawMarkedIcon(FontAwesomeIcon.Cog, "plugin-settings", "插件设置", _plugin.IsConfigUiOpen, _plugin.ToggleConfigUi);
-        }
-
-        private float TitleToolWidth()
-        {
-            float spacing = ImGui.GetStyle().ItemSpacing.X;
-            return CompactIconWidth(FontAwesomeIcon.Bars)
-                + CompactIconWidth(FontAwesomeIcon.HouseChimney)
-                + CompactIconWidth(FontAwesomeIcon.Cog)
-                + spacing * 2f;
         }
 
         private void DrawMarkedIcon(FontAwesomeIcon icon, string id, string tooltip, bool open, Action onClick)
@@ -269,7 +255,7 @@ namespace XivMediaPlayer.LocalUi
                 }
             }
 
-            if (CompactIconButton(icon, id, tooltip, open, openFace, openHover))
+            if (IconButton(icon, id, tooltip, open, openFace, openHover))
                 onClick();
         }
 
@@ -627,72 +613,159 @@ namespace XivMediaPlayer.LocalUi
                 _seekValue = progress;
             }
 
-            long displayMs = hasDuration && _seekDrag ? (long)(_seekValue * durationMs) : (active?.Time ?? 0);
-            string left = FormatTime(displayMs);
-            string right = FormatTime(hasDuration ? durationMs : 0);
-            float rightWidth = ImGui.CalcTextSize(right).X;
+            float muteW = VolumeIconSlotWidth();
+            float drawWidth = Math.Max(1f, ImGui.GetContentRegionAvail().X - muteW - VolumeTrackWidth - 16f);
 
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(left);
-            ImGui.SameLine(0, 8);
-
-            float sliderWidth = ImGui.GetContentRegionAvail().X - rightWidth - 8f;
-            var padding = ImGui.GetStyle().FramePadding;
-            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(padding.X, 2));
-            ImGui.PushStyleVar(ImGuiStyleVar.GrabMinSize, 8);
-            ImGui.SetNextItemWidth(Math.Max(40f, sliderWidth));
             if (!canSeek) ImGui.BeginDisabled();
-            bool edited = ImGui.SliderFloat("##local-seek", ref _seekValue, 0f, 1f, " ");
+            ImGui.InvisibleButton("##local-seek", new Vector2(drawWidth, ImGui.GetFrameHeight()));
+            bool seekHeld = canSeek && ImGui.IsItemActive();
+            if (canSeek && ImGui.IsItemHovered())
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            var seekMin = ImGui.GetItemRectMin();
+            var seekMax = ImGui.GetItemRectMax();
             if (!canSeek) ImGui.EndDisabled();
-            ImGui.PopStyleVar(2);
 
-            if (canSeek && edited)
+            if (seekHeld)
+            {
                 _seekDrag = true;
-            if (canSeek && ImGui.IsItemDeactivatedAfterEdit())
+                float span = Math.Max(1f, seekMax.X - seekMin.X);
+                _seekValue = Math.Clamp((ImGui.GetIO().MousePos.X - seekMin.X) / span, 0f, 1f);
+            }
+            if (canSeek && ImGui.IsItemDeactivated() && _seekDrag)
             {
                 _seekDrag = false;
                 _plugin.SeekToMs((long)(_seekValue * durationMs));
             }
 
-            if (sliderWidth >= 40f)
+            bool seekHover = canSeek && (ImGui.IsItemHovered() || seekHeld);
+            FadeGrab(ref _seekGrabAlpha, seekHover);
+            DrawThinTrack(seekMin, seekMax, _seekValue, _seekGrabAlpha);
+
+            ImGui.SameLine(0, 8f);
+            bool volumeOn = CanControl() && _plugin.HasPlayableScreen();
+            if (!volumeOn) ImGui.BeginDisabled();
+            DrawMute();
+            ImGui.SameLine(0, 8f);
+            DrawVolume(VolumeTrackWidth);
+            if (!volumeOn) ImGui.EndDisabled();
+        }
+
+        private static void FadeGrab(ref float alpha, bool visible)
+        {
+            float target = visible ? 1f : 0f;
+            float step = ImGui.GetIO().DeltaTime / 0.16f;
+            if (alpha < target)
+                alpha = Math.Min(target, alpha + step);
+            else
+                alpha = Math.Max(target, alpha - step);
+        }
+
+        private void DrawThinTrack(Vector2 min, Vector2 max, float t, float grabAlpha)
+        {
+            float midY = (min.Y + max.Y) * 0.5f;
+            float trackH = Math.Clamp(ImGui.GetFontSize() * 0.22f, 3f, 5f);
+            float grabH = Math.Max(trackH + 4f, ImGui.GetFontSize() * 0.55f);
+            float grabW = grabH * 0.72f;
+            var trackMin = new Vector2(min.X, midY - trackH * 0.5f);
+            var trackMax = new Vector2(max.X, midY + trackH * 0.5f);
+            var drawList = ImGui.GetWindowDrawList();
+            uint track = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.22f));
+            drawList.AddRectFilled(trackMin, trackMax, track, trackH * 0.5f);
+
+            t = Math.Clamp(t, 0f, 1f);
+            float playX = min.X + (max.X - min.X) * t;
+            if (playX - trackMin.X >= 2f)
             {
-                ImGui.SameLine(0, 8);
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(right);
+                var colors = ImGui.GetStyle().Colors;
+                Vector4 fill = _chromePushed
+                    ? PlaybackPanelChrome.Accent
+                    : colors[(int)ImGuiCol.SliderGrab];
+                PlaybackPanelChrome.DrawTrackFill(trackMin, new Vector2(playX, trackMax.Y), fill);
             }
+
+            if (grabAlpha <= 0.01f)
+                return;
+
+            float grabX = Math.Clamp(playX, min.X + grabW * 0.5f, max.X - grabW * 0.5f);
+            var grabMin = new Vector2(grabX - grabW * 0.5f, midY - grabH * 0.5f);
+            var grabMax = new Vector2(grabX + grabW * 0.5f, midY + grabH * 0.5f);
+            bool held = ImGui.IsItemActive();
+            var grabColors = ImGui.GetStyle().Colors;
+            Vector4 grab = grabColors[(int)(held ? ImGuiCol.SliderGrabActive : ImGuiCol.SliderGrab)];
+            grab.W *= grabAlpha;
+            drawList.AddRectFilled(grabMin, grabMax, ImGui.GetColorU32(grab), grabH * 0.5f);
         }
 
         private void DrawControls()
         {
             bool enabled = CanControl() && _plugin.HasPlayableScreen();
             if (!enabled) ImGui.BeginDisabled();
-
-            const float gap = 4f;
-            const float volumeWidth = 116f;
-            float buttonW = PlaybackButtonWidth();
-            float used = buttonW * 10f + gap * 8f + 12f;
-            bool oneRow = ImGui.GetContentRegionAvail().X >= used + volumeWidth;
-
-            DrawTransport(gap);
-            if (oneRow)
-                ImGui.SameLine(0, 12);
-            DrawToggles(gap);
-
-            if (oneRow)
-            {
-                float volumeX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - volumeWidth;
-                if (volumeX > ImGui.GetCursorPosX())
-                    ImGui.SameLine(volumeX);
-                else
-                    ImGui.SameLine(0, 12);
-                DrawVolume(116f);
-            }
-            else
-            {
-                DrawVolume(Math.Max(80f, ImGui.GetContentRegionAvail().X));
-            }
-
+            DrawTransport(ControlGap);
+            ImGui.SameLine(0, ControlGap);
+            DrawToggles(ControlGap);
             if (!enabled) ImGui.EndDisabled();
+            ImGui.SameLine(0, ClusterGap);
+            DrawStatusCluster();
+            float contentLeft = ImGui.GetWindowPos().X + ImGui.GetCursorStartPos().X;
+            _controlsWidth = ImGui.GetItemRectMax().X - contentLeft;
+        }
+
+        private void DrawStatusCluster()
+        {
+            float clockW = PlaybackClockSlotWidth();
+            DrawRowSeparator();
+            ImGui.SameLine(0, ClusterGap);
+            DrawPlaybackClock(clockW);
+            ImGui.SameLine(0, ClusterGap);
+            DrawRowSeparator();
+            ImGui.SameLine(0, ClusterGap);
+            DrawTitleTools(ControlGap);
+        }
+
+        private static void DrawRowSeparator()
+        {
+            float height = ImGui.GetFrameHeight();
+            ImGui.Dummy(new Vector2(1f, height));
+            var min = ImGui.GetItemRectMin();
+            float inset = Math.Max(5f, height * 0.28f);
+            uint color = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 0.28f));
+            ImGui.GetWindowDrawList().AddLine(
+                new Vector2(min.X, min.Y + inset),
+                new Vector2(min.X, min.Y + height - inset),
+                color,
+                1f);
+        }
+
+        private float PlaybackClockSlotWidth()
+        {
+            ReadPlaybackClock(out long displayMs, out long durationMs);
+            bool hours = TimeSpan.FromMilliseconds(displayMs).Hours > 0
+                || TimeSpan.FromMilliseconds(durationMs).Hours > 0;
+            return ImGui.CalcTextSize(hours ? "00:00:00 / 00:00:00" : "00:00 / 00:00").X;
+        }
+
+        private void ReadPlaybackClock(out long displayMs, out long durationMs)
+        {
+            var active = _plugin.MediaManager?.ActiveStream;
+            durationMs = _plugin.GetPlaybackDurationMs();
+            bool hasDuration = active != null && durationMs > 0;
+            if (!hasDuration)
+                durationMs = 0;
+            displayMs = hasDuration && _seekDrag
+                ? (long)(_seekValue * durationMs)
+                : active?.Time ?? 0;
+        }
+
+        private void DrawPlaybackClock(float slotWidth)
+        {
+            ReadPlaybackClock(out long displayMs, out long durationMs);
+            string text = FormatTime(displayMs) + " / " + FormatTime(durationMs);
+            float frame = ImGui.GetFrameHeight();
+            ImGui.Dummy(new Vector2(slotWidth, frame));
+            var min = ImGui.GetItemRectMin();
+            var textSize = ImGui.CalcTextSize(text);
+            var pos = new Vector2(min.X + Math.Max(0f, (slotWidth - textSize.X) * 0.5f), min.Y + (frame - textSize.Y) * 0.5f);
+            ImGui.GetWindowDrawList().AddText(pos, ImGui.GetColorU32(ImGuiCol.Text), text);
         }
 
         private void DrawTransport(float gap)
@@ -750,7 +823,52 @@ namespace XivMediaPlayer.LocalUi
                 _plugin.ToggleCurrentTvLock();
             ImGui.SameLine(0, gap);
 
-            if (IconButton(_plugin.IsMuted ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp, "mute", _plugin.IsMuted ? "取消静音" : "静音", _plugin.IsMuted, MuteOn))
+            bool crop = _plugin.Config.CropToFill;
+            if (IconButton(FontAwesomeIcon.Crop, "crop", crop ? "裁切：开，铺满屏幕" : "裁切：关，完整显示", crop, ToggleOn))
+            {
+                _plugin.Config.CropToFill = !crop;
+                _plugin.Config.SaveLocal();
+            }
+        }
+
+        private static float VolumeIconSlotWidth()
+        {
+            float glyph = Math.Max(
+                IconGlyphWidth(FontAwesomeIcon.VolumeUp),
+                IconGlyphWidth(FontAwesomeIcon.VolumeMute));
+            return glyph * VolumeIconScale + 4f;
+        }
+
+        private void DrawMute()
+        {
+            float height = ImGui.GetFrameHeight();
+            bool pressed = ImGui.InvisibleButton("##mute", new Vector2(VolumeIconSlotWidth(), height));
+            bool hover = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled);
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            if (hover)
+            {
+                float wash = ImGui.IsItemActive() ? 0.14f : 0.08f;
+                ImGui.GetWindowDrawList().AddRectFilled(min, max, ImGui.GetColorU32(new Vector4(1f, 1f, 1f, wash)), 3f);
+                ImGui.SetTooltip(_plugin.IsMuted ? "取消静音" : "静音");
+            }
+
+            var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
+            if (handle.Available)
+            {
+                using (handle.Push())
+                {
+                    ImGui.SetWindowFontScale(VolumeIconScale);
+                    string glyph = (_plugin.IsMuted ? FontAwesomeIcon.VolumeMute : FontAwesomeIcon.VolumeUp).ToIconString();
+                    var size = ImGui.CalcTextSize(glyph);
+                    var pos = new Vector2((min.X + max.X - size.X) * 0.5f, (min.Y + max.Y - size.Y) * 0.5f);
+                    var color = hover ? new Vector4(0.92f, 0.92f, 0.94f, 1f) : VolumeIcon;
+                    ImGui.GetWindowDrawList().AddText(ImGui.GetFont(), ImGui.GetFontSize(), pos, ImGui.GetColorU32(color), glyph);
+                    ImGui.SetWindowFontScale(1f);
+                }
+            }
+
+            if (pressed)
                 _plugin.ToggleMute();
         }
 
@@ -760,16 +878,31 @@ namespace XivMediaPlayer.LocalUi
             if (manager == null) return;
 
             float volume = manager.LiveStreamVolume;
-            ImGui.SetNextItemWidth(sliderWidth);
-            if (ImGui.SliderFloat("##volume", ref volume, 0f, 3f, "%.2f"))
-                manager.LiveStreamVolume = volume;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("音量");
-            if (ImGui.IsItemDeactivatedAfterEdit())
+            ImGui.InvisibleButton("##volume", new Vector2(sliderWidth, ImGui.GetFrameHeight()));
+            bool held = ImGui.IsItemActive();
+            bool hover = ImGui.IsItemHovered();
+            if (hover)
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            var min = ImGui.GetItemRectMin();
+            var max = ImGui.GetItemRectMax();
+            if (held)
             {
+                _volumeDrag = true;
+                float span = Math.Max(1f, max.X - min.X);
+                volume = Math.Clamp((ImGui.GetIO().MousePos.X - min.X) / span, 0f, 1f) * 3f;
+                manager.LiveStreamVolume = volume;
+            }
+            if (ImGui.IsItemDeactivated() && _volumeDrag)
+            {
+                _volumeDrag = false;
                 _plugin.Config.LivestreamVolume = manager.LiveStreamVolume;
                 _plugin.Config.Save();
             }
+
+            if (hover)
+                ImGui.SetTooltip($"音量 {manager.LiveStreamVolume:0.00}");
+            FadeGrab(ref _volumeGrabAlpha, hover || held);
+            DrawThinTrack(min, max, manager.LiveStreamVolume / 3f, _volumeGrabAlpha);
         }
 
         private void DrawLibrary()
@@ -1016,8 +1149,6 @@ namespace XivMediaPlayer.LocalUi
         private float CompactButtonWidth() => IconWidth() + CompactPadX * 2f;
 
         private float CompactIconWidth(FontAwesomeIcon icon) => IconGlyphWidth(icon) + CompactPadX * 2f;
-
-        private float PlaybackButtonWidth() => IconWidth() + ImGui.GetStyle().FramePadding.X * 2f;
 
         private float IconWidth() => IconGlyphWidth(FontAwesomeIcon.Play);
 

@@ -15,7 +15,6 @@ namespace XivMediaPlayer.LocalUi
 
         private const int ColorCount = 28;
         private const int StyleCount = 5;
-        private const int RailFadeBands = 6;
         private const int MaxSparks = 16;
         private const float DotSpacing = 8f;
         private const float PillPadX = 8f;
@@ -184,14 +183,14 @@ namespace XivMediaPlayer.LocalUi
                 1f);
         }
 
-        public static void DrawRail(float top, float bottom)
+        public static void DrawTrackFill(Vector2 min, Vector2 max, Vector4 color)
         {
-            float height = bottom - top;
-            if (height <= 4f)
+            if (max.X - min.X < 2f || max.Y - min.Y < 1f)
                 return;
 
-            float fade = MathF.Min(28f, height * 0.4f);
-            DrawFadedRail(ImGui.GetWindowDrawList(), ImGui.GetWindowPos().X + 4f, 3f, top, bottom, Alpha(Accent, 0.9f), fade);
+            uint tail = ImGui.GetColorU32(Alpha(color, 0.10f));
+            uint head = ImGui.GetColorU32(Alpha(color, 0.72f));
+            ImGui.GetWindowDrawList().AddRectFilledMultiColor(min, max, tail, head, head, tail);
         }
 
         public static float PillWidth(string label)
@@ -240,46 +239,6 @@ namespace XivMediaPlayer.LocalUi
             if (hovered)
                 ImGui.SetTooltip(tooltip);
             return clicked;
-        }
-
-        private static void DrawFadedRail(ImDrawListPtr drawList, float railX, float railWidth, float top, float bottom, Vector4 color, float fade)
-        {
-            float height = bottom - top;
-            float right = railX + railWidth;
-            fade = Math.Clamp(fade, 0f, height * 0.5f);
-            if (fade <= 0f)
-            {
-                drawList.AddRectFilled(new Vector2(railX, top), new Vector2(right, bottom), ImGui.GetColorU32(color));
-                return;
-            }
-
-            float solidTop = top + fade;
-            float solidBottom = bottom - fade;
-            if (solidBottom > solidTop)
-                drawList.AddRectFilled(new Vector2(railX, solidTop), new Vector2(right, solidBottom), ImGui.GetColorU32(color));
-
-            for (int band = 0; band < RailFadeBands; band++)
-            {
-                float near = band / (float)RailFadeBands;
-                float far = (band + 1) / (float)RailFadeBands;
-                uint nearColor = ImGui.GetColorU32(Alpha(color, color.W * FadeAlpha(near)));
-                uint farColor = ImGui.GetColorU32(Alpha(color, color.W * FadeAlpha(far)));
-
-                drawList.AddRectFilledMultiColor(
-                    new Vector2(railX, solidTop - fade * far),
-                    new Vector2(right, solidTop - fade * near),
-                    farColor,
-                    farColor,
-                    nearColor,
-                    nearColor);
-                drawList.AddRectFilledMultiColor(
-                    new Vector2(railX, solidBottom + fade * near),
-                    new Vector2(right, solidBottom + fade * far),
-                    nearColor,
-                    nearColor,
-                    farColor,
-                    farColor);
-            }
         }
 
         private static void DrawDots(ImDrawListPtr drawList, Vector2 min, Vector2 max)
@@ -422,9 +381,6 @@ namespace XivMediaPlayer.LocalUi
             float y = Math.Min(position.Y, size.Y - position.Y);
             return Math.Clamp(Math.Min(x, y) / distance, 0f, 1f);
         }
-
-        private static float FadeAlpha(float t)
-            => 1f - t * t * (3f - 2f * t);
 
         private static Vector4 Alpha(Vector4 color, float alpha)
             => new(color.X, color.Y, color.Z, alpha);

@@ -5991,7 +5991,8 @@ namespace XivMediaPlayer
                                         screenTransform: tvTransform,
                                         isolateCompositeOutput: isolateComposite,
                                         renderPass: pass,
-                                        preserveSortedDrawOrder: useSortedDrawOrder);
+                                        preserveSortedDrawOrder: useSortedDrawOrder,
+                                        cropToFill: _config.CropToFill);
                                 }
                                 else
                                 {
