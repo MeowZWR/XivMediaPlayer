@@ -234,7 +234,6 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.TableNextColumn();
                 if (ImGui.Checkbox("Lightless 风格", ref lightless))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     _plugin.Config.PlaybackLightlessStyle = lightless;
                     _plugin.Config.SaveLocal();
                 }
@@ -243,7 +242,6 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.TableNextColumn();
                 if (ImGui.Checkbox("停止播放后恢复游戏BGM", ref restoreBgm))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     _plugin.SetRestoreGameBgmOnStop(restoreBgm);
                 }
                 bool restoreBgmHovered = ImGui.IsItemHovered();
@@ -252,7 +250,6 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.TableNextColumn();
                 if (ImGui.Checkbox("检测到屏幕时显示边缘图标", ref showEdge))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     _plugin.Config.ShowEdgeIconWhenScreenDetected = showEdge;
                     _plugin.Config.SaveLocal();
                 }
@@ -261,7 +258,6 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.TableNextColumn();
                 if (ImGui.Checkbox("打开面板时保留边缘图标", ref keepEdge))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     _plugin.Config.KeepEdgeIconWithPanel = keepEdge;
                     _plugin.Config.SaveLocal();
                 }
@@ -271,7 +267,6 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.TableNextColumn();
                 if (ImGui.Checkbox("边缘图标旁显示滚动标题", ref showTitle))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     _plugin.Config.ShowEdgePlaybackTitle = showTitle;
                     _plugin.Config.SaveLocal();
                 }
@@ -280,30 +275,10 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.TableNextColumn();
                 if (ImGui.Checkbox("隐藏滚动区域背景", ref hideBackground))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     _plugin.Config.HideEdgeTitleBackground = hideBackground;
                     _plugin.Config.SaveLocal();
                 }
                 bool hideBackgroundHovered = ImGui.IsItemHovered();
-
-                float scrollSpeed = Math.Clamp(_plugin.Config.EdgeTitleScrollSpeed, 0f, 3f);
-                ImGui.TableNextColumn();
-                if (DrawLabeledSlider("速度", ref scrollSpeed, 0f, 3f, "%.2f", ImGui.GetContentRegionAvail().X))
-                    _plugin.Config.EdgeTitleScrollSpeed = scrollSpeed;
-                bool speedActive = ImGui.IsItemActive();
-                bool speedDone = ImGui.IsItemDeactivatedAfterEdit();
-                bool speedHovered = ImGui.IsItemHovered();
-
-                float marqueeLines = _plugin.Config.EdgeTitleMarqueeLines;
-                if (marqueeLines < 3f)
-                    marqueeLines = 8f;
-                marqueeLines = Math.Clamp(marqueeLines, 3f, 16f);
-                ImGui.TableNextColumn();
-                if (DrawLabeledSlider("长度", ref marqueeLines, 3f, 16f, "%.0f", ImGui.GetContentRegionAvail().X))
-                    _plugin.Config.EdgeTitleMarqueeLines = marqueeLines;
-                bool lengthActive = ImGui.IsItemActive();
-                bool lengthDone = ImGui.IsItemDeactivatedAfterEdit();
-                bool lengthHovered = ImGui.IsItemHovered();
 
                 ImGui.EndTable();
 
@@ -317,14 +292,8 @@ namespace XivMediaPlayer.LocalUi
                     ImGui.SetTooltip("有播放内容时，在边缘图标旁用固定长度滚动标题。图标在屏幕左右时，标题在图标上侧或下侧；在屏幕上下时，标题与图标同一行，在左侧或右侧。哪一侧由屏幕中心决定，使标题留在屏幕内。");
                 if (hideBackgroundHovered)
                     ImGui.SetTooltip("隐藏滚动文字的边框、背景、粒子和流星，只留下文字。");
-                if (speedActive || lengthActive)
-                    _plugin.KeepPlaybackPanelOpen();
-                if (speedDone || lengthDone)
-                    _plugin.Config.SaveLocal();
-                if (speedHovered)
-                    ImGui.SetTooltip("文字滚动速度。0 为静止，1 为默认速度。");
-                if (lengthHovered)
-                    ImGui.SetTooltip("滚动区域可见长度，按大约能看见的字数计算。");
+
+                DrawPlaybackSliders();
             }
 
             ImGui.Spacing();
@@ -339,8 +308,10 @@ namespace XivMediaPlayer.LocalUi
                 return;
             }
 
-            float row = ImGui.GetFrameHeightWithSpacing() * 3f + ImGui.GetStyle().ItemSpacing.Y;
-            float height = Math.Min(280f, row * plots.Count);
+            var plotStyle = ImGui.GetStyle();
+            float row = ImGui.GetFrameHeightWithSpacing() * 3f + plotStyle.ItemSpacing.Y;
+            float visibleRows = Math.Min(plots.Count, 2.5f);
+            float height = row * visibleRows + plotStyle.WindowPadding.Y * 2f + plotStyle.WindowBorderSize * 2f;
             ImGui.BeginChild("##registered-plots", new Vector2(0, height), true);
             int removeIndex = -1;
             for (int i = 0; i < plots.Count; i++)
@@ -370,7 +341,6 @@ namespace XivMediaPlayer.LocalUi
                 if (scope < 0 || scope >= ScopeLabels.Length) scope = 0;
                 if (DrawAlignedCombo("触发", "##scope", labelColumn, ref scope, ScopeLabels))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     plot.Scope = (PlotTriggerScope)scope;
                     _plugin.Config.SaveLocal();
                 }
@@ -384,7 +354,6 @@ namespace XivMediaPlayer.LocalUi
                 if (arrival < 0 || arrival >= ArrivalLabels.Length) arrival = 0;
                 if (DrawAlignedCombo("动作", "##arrival", labelColumn, ref arrival, ArrivalLabels))
                 {
-                    _plugin.KeepPlaybackPanelOpen();
                     plot.Arrival = (PlotArrivalAction)arrival;
                     _plugin.Config.SaveLocal();
                 }
@@ -445,11 +414,130 @@ namespace XivMediaPlayer.LocalUi
                 _plugin.RegisterCurrentPlot();
         }
 
-        private static bool DrawLabeledSlider(string label, ref float value, float min, float max, string format, float width)
+        private void DrawPlaybackSliders()
         {
-            float labelW = ImGui.CalcTextSize(label).X + ImGui.GetStyle().ItemInnerSpacing.X;
-            ImGui.SetNextItemWidth(Math.Max(48f, width - labelW));
-            return ImGui.SliderFloat(label, ref value, min, max, format);
+            float spacing = ImGui.GetStyle().ItemSpacing.X;
+            float resetWidth = CompactButtonWidth();
+            float labelWidth = 0f;
+            foreach (string name in new[] { "边缘图标屏幕边距", "文字滚动速度", "滚动区域长度", "滚动区域间距" })
+                labelWidth = Math.Max(labelWidth, ImGui.CalcTextSize(name).X);
+            float sliderWidth = Math.Max(72f, ImGui.GetContentRegionAvail().X - resetWidth - labelWidth - spacing * 2f);
+            bool done = false;
+
+            float margin = Math.Clamp(_plugin.Config.EdgeIconScreenMargin, 0f, LocalUiConfig.MaxEdgeIconScreenMargin);
+            if (DrawResetSlider(
+                "edge-margin",
+                "边缘图标屏幕边距",
+                ref margin,
+                0f,
+                LocalUiConfig.MaxEdgeIconScreenMargin,
+                "%.0f",
+                LocalUiConfig.DefaultEdgeIconScreenMargin,
+                sliderWidth,
+                "边缘图标离屏幕边缘的距离。",
+                ref done))
+                _plugin.Config.EdgeIconScreenMargin = margin;
+
+            float scrollSpeed = Math.Clamp(_plugin.Config.EdgeTitleScrollSpeed, 0f, 3f);
+            if (DrawResetSlider(
+                "scroll-speed",
+                "文字滚动速度",
+                ref scrollSpeed,
+                0f,
+                3f,
+                "%.2f",
+                LocalUiConfig.DefaultEdgeTitleScrollSpeed,
+                sliderWidth,
+                "文字滚动速度。0 为静止，默认值为 1。",
+                ref done))
+                _plugin.Config.EdgeTitleScrollSpeed = scrollSpeed;
+
+            float marqueeLines = _plugin.Config.EdgeTitleMarqueeLines;
+            if (marqueeLines < 3f)
+                marqueeLines = LocalUiConfig.DefaultEdgeTitleMarqueeLines;
+            marqueeLines = Math.Clamp(marqueeLines, 3f, 16f);
+            if (DrawResetSlider(
+                "marquee-lines",
+                "滚动区域长度",
+                ref marqueeLines,
+                3f,
+                16f,
+                "%.0f",
+                LocalUiConfig.DefaultEdgeTitleMarqueeLines,
+                sliderWidth,
+                "滚动区域可见长度。",
+                ref done))
+                _plugin.Config.EdgeTitleMarqueeLines = marqueeLines;
+
+            float titleGap = Math.Clamp(_plugin.Config.EdgeTitleIconGap, 0f, LocalUiConfig.MaxEdgeTitleIconGap);
+            if (DrawResetSlider(
+                "title-gap",
+                "滚动区域间距",
+                ref titleGap,
+                0f,
+                LocalUiConfig.MaxEdgeTitleIconGap,
+                "%.0f",
+                LocalUiConfig.DefaultEdgeTitleIconGap,
+                sliderWidth,
+                "滚动标题和边缘图标之间的空隙。",
+                ref done))
+                _plugin.Config.EdgeTitleIconGap = titleGap;
+
+            if (done)
+                _plugin.Config.SaveLocal();
+        }
+
+        private bool DrawResetSlider(
+            string id,
+            string label,
+            ref float value,
+            float min,
+            float max,
+            string format,
+            float resetValue,
+            float sliderWidth,
+            string tooltip,
+            ref bool done)
+        {
+            ImGui.PushID(id);
+            ImGui.SetNextItemWidth(sliderWidth);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 1f);
+            if (_chromePushed)
+            {
+                ImGui.PushStyleColor(
+                    ImGuiCol.Border,
+                    new Vector4(PlaybackPanelChrome.Accent.X, PlaybackPanelChrome.Accent.Y, PlaybackPanelChrome.Accent.Z, 0.45f));
+            }
+
+            bool changed = ImGui.SliderFloat("##value", ref value, min, max, format);
+            if (_chromePushed)
+                ImGui.PopStyleColor();
+            ImGui.PopStyleVar();
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                done = true;
+            bool hovered = ImGui.IsItemHovered();
+
+            ImGui.SameLine();
+            bool atDefault = Math.Abs(value - resetValue) < 0.001f;
+            if (atDefault)
+                ImGui.BeginDisabled();
+            if (CompactIconButton(FontAwesomeIcon.Undo, "reset", "重置"))
+            {
+                value = resetValue;
+                changed = true;
+                done = true;
+            }
+
+            if (atDefault)
+                ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted(label);
+            if (hovered)
+                ImGui.SetTooltip(tooltip);
+            ImGui.PopID();
+            return changed;
         }
 
         private static bool DrawAlignedCombo(string label, string id, float labelColumn, ref int value, string[] items)

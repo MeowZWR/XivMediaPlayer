@@ -10,7 +10,6 @@ namespace XivMediaPlayer.LocalUi
     internal sealed class PlaybackEdgeTabWindow : Window
     {
         private const float MarqueeSecondsPerLine = 0.3f;
-        private const float TitleGap = 6f;
         private const float MarqueePad = 4f;
         private const float ChipPad = 3f;
         private const float TextNarrower = 8f;
@@ -42,10 +41,10 @@ namespace XivMediaPlayer.LocalUi
             RespectCloseHotkey = false;
         }
 
-        public static Vector2 CollapsedWindowPos(Vector2 windowSize, PlaybackScreenEdge edge, float anchor)
+        public static Vector2 CollapsedWindowPos(Vector2 windowSize, PlaybackScreenEdge edge, float anchor, float screenMargin)
         {
             var viewport = ImGui.GetMainViewport();
-            EdgePlacement(viewport.Pos, viewport.Size, edge, anchor, out Vector2 pos, out Vector2 pivot);
+            EdgePlacement(viewport.Pos, viewport.Size, edge, anchor, screenMargin, out Vector2 pos, out Vector2 pivot);
             return pos - pivot * windowSize;
         }
 
@@ -95,7 +94,7 @@ namespace XivMediaPlayer.LocalUi
             }
 
             var origin = ImGui.GetCursorPos();
-            ContentSlots(layout, out Vector2 content, out Vector2 textOffset, out Vector2 iconOffset);
+            ContentSlots(layout, TitleIconGap(), out Vector2 content, out Vector2 textOffset, out Vector2 iconOffset);
             ImGui.Dummy(content);
             DrawEdgeTitle(layout, origin + textOffset);
             DrawEdgeIcon(origin + iconOffset, layout);
@@ -141,7 +140,7 @@ namespace XivMediaPlayer.LocalUi
         {
             var viewport = ImGui.GetMainViewport();
             PlaybackScreenEdge edge = NormalizeEdge(_plugin.Config.PlaybackEdgeSide);
-            EdgePlacement(viewport.Pos, viewport.Size, edge, _plugin.Config.PlaybackEdgeAnchor, out Vector2 anchor, out _);
+            EdgePlacement(viewport.Pos, viewport.Size, edge, _plugin.Config.PlaybackEdgeAnchor, ScreenMargin(), out Vector2 anchor, out _);
             if (!TryGetTitleLayout(out TitleLayout layout))
                 layout = IconOnlyLayout();
             WindowFrame(layout, out Vector2 windowSize, out Vector2 pivot);
@@ -206,7 +205,7 @@ namespace XivMediaPlayer.LocalUi
             iconChip = vertical ? new Vector2(iconCross, iconAlong) : new Vector2(iconAlong, iconCross);
         }
 
-        private static void ContentSlots(TitleLayout layout, out Vector2 content, out Vector2 textOffset, out Vector2 iconOffset)
+        private static void ContentSlots(TitleLayout layout, float titleGap, out Vector2 content, out Vector2 textOffset, out Vector2 iconOffset)
         {
             textOffset = Vector2.Zero;
             iconOffset = Vector2.Zero;
@@ -221,49 +220,52 @@ namespace XivMediaPlayer.LocalUi
                 : Math.Max(layout.TextSize.Y, layout.IconChip.Y);
             if (layout.Vertical)
             {
-                content = new Vector2(cross, layout.TextSize.Y + TitleGap + layout.IconChip.Y);
+                content = new Vector2(cross, layout.TextSize.Y + titleGap + layout.IconChip.Y);
                 textOffset.X = (cross - layout.TextSize.X) * 0.5f;
                 iconOffset.X = (cross - layout.IconChip.X) * 0.5f;
                 if (layout.TextFirst)
-                    iconOffset.Y = layout.TextSize.Y + TitleGap;
+                    iconOffset.Y = layout.TextSize.Y + titleGap;
                 else
-                    textOffset.Y = layout.IconChip.Y + TitleGap;
+                    textOffset.Y = layout.IconChip.Y + titleGap;
                 return;
             }
 
-            content = new Vector2(layout.TextSize.X + TitleGap + layout.IconChip.X, cross);
+            content = new Vector2(layout.TextSize.X + titleGap + layout.IconChip.X, cross);
             textOffset.Y = (cross - layout.TextSize.Y) * 0.5f;
             iconOffset.Y = (cross - layout.IconChip.Y) * 0.5f;
             if (layout.TextFirst)
-                iconOffset.X = layout.TextSize.X + TitleGap;
+                iconOffset.X = layout.TextSize.X + titleGap;
             else
-                textOffset.X = layout.IconChip.X + TitleGap;
+                textOffset.X = layout.IconChip.X + titleGap;
         }
 
         private bool IconOnStartSide(PlaybackScreenEdge edge)
         {
             var viewport = ImGui.GetMainViewport();
             var center = viewport.Pos + viewport.Size * 0.5f;
-            EdgePlacement(viewport.Pos, viewport.Size, edge, _plugin.Config.PlaybackEdgeAnchor, out Vector2 pos, out _);
+            EdgePlacement(viewport.Pos, viewport.Size, edge, _plugin.Config.PlaybackEdgeAnchor, ScreenMargin(), out Vector2 pos, out _);
             bool vertical = edge is PlaybackScreenEdge.Left or PlaybackScreenEdge.Right;
             return vertical ? pos.Y <= center.Y : pos.X <= center.X;
         }
 
-        private static void WindowFrame(TitleLayout layout, out Vector2 windowSize, out Vector2 pivot)
+        private void WindowFrame(TitleLayout layout, out Vector2 windowSize, out Vector2 pivot)
         {
             var style = ImGui.GetStyle();
             float padX = style.WindowPadding.X;
             float padY = style.WindowPadding.Y;
-            ContentSlots(layout, out Vector2 content, out _, out Vector2 iconOffset);
+            ContentSlots(layout, TitleIconGap(), out Vector2 content, out _, out Vector2 iconOffset);
             windowSize = new Vector2(
                 Math.Max(1f, content.X + padX * 2f),
                 Math.Max(1f, content.Y + padY * 2f));
             float along = layout.Vertical
                 ? (padY + iconOffset.Y + layout.IconChip.Y * 0.5f) / windowSize.Y
                 : (padX + iconOffset.X + layout.IconChip.X * 0.5f) / windowSize.X;
+            float outer = layout.Vertical
+                ? (padX + iconOffset.X + (layout.Edge == PlaybackScreenEdge.Right ? layout.IconChip.X : 0f)) / windowSize.X
+                : (padY + iconOffset.Y + (layout.Edge == PlaybackScreenEdge.Bottom ? layout.IconChip.Y : 0f)) / windowSize.Y;
             pivot = layout.Vertical
-                ? new Vector2(layout.Edge == PlaybackScreenEdge.Right ? 1f : 0f, along)
-                : new Vector2(along, layout.Edge == PlaybackScreenEdge.Bottom ? 1f : 0f);
+                ? new Vector2(outer, along)
+                : new Vector2(along, outer);
         }
 
         private void DrawEdgeIcon(Vector2 cursor, TitleLayout layout)
@@ -504,7 +506,10 @@ namespace XivMediaPlayer.LocalUi
         }
 
         private float MarqueeLength()
-            => ImGui.GetTextLineHeight() * Math.Clamp(_plugin.Config.EdgeTitleMarqueeLines <= 0f ? 8f : _plugin.Config.EdgeTitleMarqueeLines, 3f, 16f);
+            => ImGui.GetTextLineHeight() * Math.Clamp(
+                _plugin.Config.EdgeTitleMarqueeLines <= 0f ? LocalUiConfig.DefaultEdgeTitleMarqueeLines : _plugin.Config.EdgeTitleMarqueeLines,
+                3f,
+                16f);
 
         private static float MarqueeThickness(string title, bool vertical)
         {
@@ -579,7 +584,13 @@ namespace XivMediaPlayer.LocalUi
             public float Width { get; }
         }
 
-        private static void EdgePlacement(Vector2 viewportPos, Vector2 viewportSize, PlaybackScreenEdge edge, float anchor, out Vector2 pos, out Vector2 pivot)
+        private float ScreenMargin()
+            => Math.Clamp(_plugin.Config.EdgeIconScreenMargin, 0f, LocalUiConfig.MaxEdgeIconScreenMargin);
+
+        private float TitleIconGap()
+            => Math.Clamp(_plugin.Config.EdgeTitleIconGap, 0f, LocalUiConfig.MaxEdgeTitleIconGap);
+
+        private static void EdgePlacement(Vector2 viewportPos, Vector2 viewportSize, PlaybackScreenEdge edge, float anchor, float screenMargin, out Vector2 pos, out Vector2 pivot)
         {
             if (edge is not (PlaybackScreenEdge.Left or PlaybackScreenEdge.Right or PlaybackScreenEdge.Top or PlaybackScreenEdge.Bottom))
                 edge = PlaybackScreenEdge.Right;
@@ -588,7 +599,7 @@ namespace XivMediaPlayer.LocalUi
             float length = vertical ? viewportSize.Y : viewportSize.X;
             GetEdgeRange(length, out float start, out float end);
             float along = start + (end - start) * Math.Clamp(anchor, 0f, 1f);
-            const float inset = 6f;
+            float inset = Math.Clamp(screenMargin, 0f, LocalUiConfig.MaxEdgeIconScreenMargin);
 
             switch (edge)
             {

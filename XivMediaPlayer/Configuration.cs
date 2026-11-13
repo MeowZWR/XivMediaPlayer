@@ -129,8 +129,10 @@ namespace XivMediaPlayer {
     public bool ShowEdgeIconWhenScreenDetected { get; set; } = true;
     public bool ShowEdgePlaybackTitle { get; set; } = true;
     public bool HideEdgeTitleBackground { get; set; } = true;
-    public float EdgeTitleScrollSpeed { get; set; } = 1f;
-    public float EdgeTitleMarqueeLines { get; set; } = 8f;
+    public float EdgeTitleScrollSpeed { get; set; } = LocalUiConfig.DefaultEdgeTitleScrollSpeed;
+    public float EdgeTitleMarqueeLines { get; set; } = LocalUiConfig.DefaultEdgeTitleMarqueeLines;
+    public float EdgeIconScreenMargin { get; set; } = LocalUiConfig.DefaultEdgeIconScreenMargin;
+    public float EdgeTitleIconGap { get; set; } = LocalUiConfig.DefaultEdgeTitleIconGap;
     public bool KeepEdgeIconWithPanel { get; set; } = true;
 
     public bool ShouldSerializeLocalPlaylist() => false;
@@ -151,6 +153,8 @@ namespace XivMediaPlayer {
     public bool ShouldSerializeHideEdgeTitleBackground() => false;
     public bool ShouldSerializeEdgeTitleScrollSpeed() => false;
     public bool ShouldSerializeEdgeTitleMarqueeLines() => false;
+    public bool ShouldSerializeEdgeIconScreenMargin() => false;
+    public bool ShouldSerializeEdgeTitleIconGap() => false;
     public bool ShouldSerializeKeepEdgeIconWithPanel() => false;
 
     public string ServerUrl
@@ -411,6 +415,8 @@ namespace XivMediaPlayer {
       HideEdgeTitleBackground = loaded.HideEdgeTitleBackground;
       EdgeTitleScrollSpeed = loaded.EdgeTitleScrollSpeed;
       EdgeTitleMarqueeLines = loaded.EdgeTitleMarqueeLines;
+      EdgeIconScreenMargin = loaded.EdgeIconScreenMargin;
+      EdgeTitleIconGap = loaded.EdgeTitleIconGap;
       KeepEdgeIconWithPanel = loaded.KeepEdgeIconWithPanel;
     }
 
@@ -437,6 +443,8 @@ namespace XivMediaPlayer {
         HideEdgeTitleBackground = source.HideEdgeTitleBackground,
         EdgeTitleScrollSpeed = source.EdgeTitleScrollSpeed,
         EdgeTitleMarqueeLines = source.EdgeTitleMarqueeLines,
+        EdgeIconScreenMargin = source.EdgeIconScreenMargin,
+        EdgeTitleIconGap = source.EdgeTitleIconGap,
         KeepEdgeIconWithPanel = source.KeepEdgeIconWithPanel,
       };
       var json = JsonConvert.SerializeObject(snapshot, LocalUiConfig.JsonSettings);

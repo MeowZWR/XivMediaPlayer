@@ -23,8 +23,16 @@ namespace XivMediaPlayer.LocalUi
         public bool ShowEdgeIconWhenScreenDetected { get; set; } = true;
         public bool ShowEdgePlaybackTitle { get; set; } = true;
         public bool HideEdgeTitleBackground { get; set; } = true;
-        public float EdgeTitleScrollSpeed { get; set; } = 1f;
-        public float EdgeTitleMarqueeLines { get; set; } = 8f;
+        public const float DefaultEdgeTitleScrollSpeed = 1f;
+        public const float DefaultEdgeTitleMarqueeLines = 10f;
+        public const float DefaultEdgeIconScreenMargin = 6f;
+        public const float DefaultEdgeTitleIconGap = 6f;
+        public const float MaxEdgeIconScreenMargin = 64f;
+        public const float MaxEdgeTitleIconGap = 48f;
+        public float EdgeTitleScrollSpeed { get; set; } = DefaultEdgeTitleScrollSpeed;
+        public float EdgeTitleMarqueeLines { get; set; } = DefaultEdgeTitleMarqueeLines;
+        public float EdgeIconScreenMargin { get; set; } = DefaultEdgeIconScreenMargin;
+        public float EdgeTitleIconGap { get; set; } = DefaultEdgeTitleIconGap;
         public bool KeepEdgeIconWithPanel { get; set; } = true;
 
         public static readonly JsonSerializerSettings JsonSettings = new()

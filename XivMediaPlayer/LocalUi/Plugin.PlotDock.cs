@@ -17,7 +17,6 @@ namespace XivMediaPlayer
         private bool _screenEdgeFallback;
         private bool _ignoreNextPanelClose;
         private bool _plotPlaceTracked;
-        private int _keepPlaybackPanelTicks;
         private uint _plotDockWorldId;
         private HousingDistrict _plotDockDistrict;
         private int _plotDockWard;
@@ -124,15 +123,8 @@ namespace XivMediaPlayer
             var plots = RegisteredPlots;
             if ((uint)index >= (uint)plots.Count)
                 return;
-            KeepPlaybackPanelOpen();
             plots.RemoveAt(index);
             _config.SaveLocal();
-        }
-
-        internal void KeepPlaybackPanelOpen()
-        {
-            if (_localMediaWindow?.IsOpen == true)
-                _keepPlaybackPanelTicks = 8;
         }
 
         internal bool PlaybackDockMoving => _dockMotion.Active;
@@ -217,9 +209,6 @@ namespace XivMediaPlayer
 
         private void UpdatePlotPlaybackDock()
         {
-            if (_keepPlaybackPanelTicks > 0)
-                _keepPlaybackPanelTicks--;
-
             bool motionDone = _dockMotion.Advance();
 
             HousePlotRead read = ReadHousePlot();
@@ -246,11 +235,8 @@ namespace XivMediaPlayer
             {
                 if (ShouldShowScreenEdgeFallback())
                 {
-                    bool leavingPlotDock = _plotDockActive && !_screenEdgeFallback;
                     _screenEdgeFallback = true;
                     _plotDockActive = true;
-                    if (leavingPlotDock && placeChanged && !_dockMotion.Active && _localMediaWindow?.IsOpen == true && _keepPlaybackPanelTicks == 0)
-                        _localMediaWindow.IsOpen = false;
                     EnsurePlotDockVisible();
                     if (motionDone && _dockMotion.Active)
                         FinishDockMotion();
@@ -259,7 +245,7 @@ namespace XivMediaPlayer
 
                 _screenEdgeFallback = false;
                 if (_plotDockActive)
-                    DismissPlotPlaybackDock(closePanel: placeChanged && _keepPlaybackPanelTicks == 0);
+                    DismissPlotPlaybackDock(closePanel: false);
                 return;
             }
 
@@ -318,7 +304,11 @@ namespace XivMediaPlayer
         }
 
         private Vector2 CollapsedPanelPos()
-            => PlaybackEdgeTabWindow.CollapsedWindowPos(_playbackPanelSize, _config.PlaybackEdgeSide, _config.PlaybackEdgeAnchor);
+            => PlaybackEdgeTabWindow.CollapsedWindowPos(
+                _playbackPanelSize,
+                _config.PlaybackEdgeSide,
+                _config.PlaybackEdgeAnchor,
+                _config.EdgeIconScreenMargin);
 
         private bool SameTrackedPlace(HousePlotRead read)
             => _plotDockWorldId == read.WorldId
@@ -350,8 +340,6 @@ namespace XivMediaPlayer
         {
             if (plot.Arrival == PlotArrivalAction.OpenPanel)
                 OpenPlaybackPanel();
-            else if (_localMediaWindow != null && _keepPlaybackPanelTicks == 0)
-                _localMediaWindow.IsOpen = false;
         }
 
         private void EnsurePlotDockVisible()
