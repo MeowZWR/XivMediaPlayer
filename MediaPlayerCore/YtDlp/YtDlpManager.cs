@@ -68,12 +68,19 @@ namespace MediaPlayerCore.YtDlp
     public class YtDlpManager : IDisposable
     {
         private string _ytDlpPath;
-        private string? _cookiesPath;
+        private readonly string _cookiesConfigDir;
         private int _preferredMaxHeight;
         private readonly object _lock = new object();
         private TcpListener? _cookieListener;
         private Thread? _cookieListenerThread;
         private bool _isListeningForCookies;
+
+        public enum CookieJarKind
+        {
+            Unknown,
+            YouTube,
+            Bilibili,
+        }
 
         public bool EnableSabrProxy { get; set; } = true;
         private HttpListener? _sabrProxyListener;
@@ -443,11 +450,14 @@ namespace MediaPlayerCore.YtDlp
             set => _preferredMaxHeight = value;
         }
 
-        public YtDlpManager(string pluginDir, int preferredMaxHeight = 720)
+        public YtDlpManager(string pluginDir, string? cookiesConfigDir = null, int preferredMaxHeight = 720)
         {
             _ytDlpPath = Path.Combine(pluginDir, "yt-dlp.exe");
+            _cookiesConfigDir = string.IsNullOrWhiteSpace(cookiesConfigDir)
+                ? (Path.GetDirectoryName(_ytDlpPath) ?? ".")
+                : cookiesConfigDir;
             _preferredMaxHeight = preferredMaxHeight;
-            _cookiesPath = FindCookiesFile();
+            Directory.CreateDirectory(_cookiesConfigDir);
             StartCookieListener();
             Task.Run(CleanupOrphanedSabrTempDirs);
         }
@@ -790,14 +800,8 @@ namespace MediaPlayerCore.YtDlp
             }
         }
 
-        /// <summary>
-        /// Returns true if a valid cookies file was found (e.g. from VRCVideoCacher).
-        /// </summary>
-        public bool HasCookies => !string.IsNullOrEmpty(_cookiesPath) && File.Exists(_cookiesPath);
+        public bool HasCookies => FindYouTubeCookiesFile() != null;
 
-        /// <summary>
-        /// Returns true if the yt-dlp binary exists at the configured path.
-        /// </summary>
         public bool IsAvailable()
         {
             return !string.IsNullOrEmpty(_ytDlpPath) && File.Exists(_ytDlpPath);
@@ -1095,7 +1099,8 @@ namespace MediaPlayerCore.YtDlp
             try
             {
                 string result = await RunYtDlp(
-                    $"--no-download --no-playlist --print title --print duration --print uploader --print filesize_approx \"{url}\"");
+                    $"--no-download --no-playlist --print title --print duration --print uploader --print filesize_approx \"{url}\"",
+                    pageUrl: url);
                 if (string.IsNullOrWhiteSpace(result)) return null;
 
                 var lines = result.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -1146,7 +1151,7 @@ namespace MediaPlayerCore.YtDlp
 
             try
             {
-                string result = await RunYtDlp($"--dump-json --no-download --no-playlist \"{url}\"");
+                string result = await RunYtDlp($"--dump-json --no-download --no-playlist \"{url}\"", pageUrl: url);
                 if (!string.IsNullOrEmpty(result))
                 {
                     var firstJsonLine = result.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
@@ -1309,15 +1314,24 @@ namespace MediaPlayerCore.YtDlp
             }
 
             // Report cookie status
-            if (HasCookies)
+            string? youtubeCookies = FindYouTubeCookiesFile();
+            string? bilibiliCookies = FindBilibiliCookiesFile();
+            if (!string.IsNullOrEmpty(youtubeCookies))
             {
-                OnStatusUpdate?.Invoke(this, $"Using cookies from: {_cookiesPath}");
-            } else if (!string.IsNullOrEmpty(CookieBrowser))
+                OnStatusUpdate?.Invoke(this, $"Using cookies from: {youtubeCookies}");
+            }
+            else if (!string.IsNullOrEmpty(CookieBrowser))
             {
                 OnStatusUpdate?.Invoke(this, $"Using cookies from browser: {CookieBrowser}");
-            } else
+            }
+            else
             {
-                OnStatusUpdate?.Invoke(this, "No YouTube cookies found. Place cookies.txt in plugin dir, or install VRCVideoCacher browser extension.");
+                OnStatusUpdate?.Invoke(this, "No YouTube cookies found. Place cookies.txt in plugin config dir, or install VRCVideoCacher browser extension.");
+            }
+
+            if (!string.IsNullOrEmpty(bilibiliCookies))
+            {
+                OnStatusUpdate?.Invoke(this, $"Using cookies from: {bilibiliCookies}");
             }
         }
 
@@ -1395,7 +1409,7 @@ namespace MediaPlayerCore.YtDlp
         {
             try
             {
-                string result = await RunYtDlp($"--get-url -f \"{format}\" \"{url}\"");
+                string result = await RunYtDlp($"--get-url -f \"{format}\" \"{url}\"", pageUrl: url);
                 return result?.Trim().Split('\n').FirstOrDefault()?.Trim();
             } catch
             {
@@ -1494,7 +1508,7 @@ namespace MediaPlayerCore.YtDlp
             var merged = MergeStreamHeaders(primary, secondary, pageUrl);
             if (!merged.ContainsKey("Cookie"))
             {
-                string? cookieHeader = BuildCookieHeaderForStreaming();
+                string? cookieHeader = BuildCookieHeaderForStreaming(pageUrl);
                 if (!string.IsNullOrEmpty(cookieHeader))
                 {
                     merged["Cookie"] = cookieHeader;
@@ -1504,20 +1518,19 @@ namespace MediaPlayerCore.YtDlp
             return merged;
         }
 
-        /// <summary>
-        /// Builds a Cookie header from the Netscape cookies.txt (YouTube / googlevideo domains).
-        /// </summary>
-        public string? BuildCookieHeaderForStreaming()
+        public string? BuildCookieHeaderForStreaming(string? pageUrl = null)
         {
-            if (!HasCookies)
+            string? cookiesPath = ResolveCookiesPath(pageUrl);
+            if (string.IsNullOrEmpty(cookiesPath) || !File.Exists(cookiesPath))
             {
                 return null;
             }
 
+            bool bilibili = IsBilibiliUrl(pageUrl);
             try
             {
                 var pairs = new List<string>();
-                foreach (string line in File.ReadAllLines(_cookiesPath!))
+                foreach (string line in File.ReadAllLines(cookiesPath))
                 {
                     if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
                     {
@@ -1531,8 +1544,7 @@ namespace MediaPlayerCore.YtDlp
                     }
 
                     string domain = parts[0];
-                    if (!domain.Contains("youtube", StringComparison.OrdinalIgnoreCase)
-                        && !domain.Contains("googlevideo", StringComparison.OrdinalIgnoreCase))
+                    if (bilibili ? !IsBilibiliCookieDomain(domain) : !IsYouTubeCookieDomain(domain))
                     {
                         continue;
                     }
@@ -1587,7 +1599,8 @@ namespace MediaPlayerCore.YtDlp
                 {
                     string result = await RunYtDlp(
                         $"--no-playlist -j -f \"{formatArg}\" \"{url}\"",
-                        isLiveYouTube: true);
+                        isLiveYouTube: true,
+                        pageUrl: url);
                     YtDlpMetadata? info = TryParseYtDlpJson(result);
                     string? playbackUrl = info?.PlaybackUrl;
                     if (info == null || string.IsNullOrEmpty(playbackUrl))
@@ -1617,12 +1630,12 @@ namespace MediaPlayerCore.YtDlp
             string arguments,
             bool withCommonArgs = true,
             bool isLiveYouTube = false,
-            string? forceYouTubeClient = null)
+            string? forceYouTubeClient = null,
+            string? pageUrl = null)
         {
             return await Task.Run(() =>
             {
-                // Inject cookies if available (e.g. from VRCVideoCacher browser extension)
-                string fullArgs = (withCommonArgs ? BuildCommonArgs(isLiveYouTube, forceYouTubeClient) : "") + arguments;
+                string fullArgs = (withCommonArgs ? BuildCommonArgs(isLiveYouTube, forceYouTubeClient, pageUrl) : "") + arguments;
                 var psi = new ProcessStartInfo
                 {
                     FileName = _ytDlpPath,
@@ -1682,40 +1695,79 @@ namespace MediaPlayerCore.YtDlp
             });
         }
 
-        /// <summary>
-        /// Looks for a cookies file in order of priority:
-        /// 1. Plugin directory (cookies.txt, user-provided or auto-saved from clipboard)
-        /// 2. VRCVideoCacher's youtube_cookies.txt (from browser extension)
-        /// </summary>
-        private string? FindCookiesFile()
-        {
-            // 1. Check plugin directory first
-            string pluginDir = Path.GetDirectoryName(_ytDlpPath) ?? ".";
-            string localCookies = Path.Combine(pluginDir, "cookies.txt");
-            if (File.Exists(localCookies)) return localCookies;
+        public bool HasCookiesFile => HasCookies;
 
-            // 2. Check VRCVideoCacher's youtube_cookies.txt
-            string vrcCookies = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VRCVideoCacher", "youtube_cookies.txt");
-            if (File.Exists(vrcCookies)) return vrcCookies;
+        public bool HasBilibiliCookiesFile => FindBilibiliCookiesFile() != null;
+
+        public string? CookiesFilePath => FindYouTubeCookiesFile();
+
+        public string CookiesPath(CookieJarKind kind)
+            => FindCookiesFile(kind) ?? CookiesSavePath(kind);
+
+        public static string CookieJarLabel(CookieJarKind kind)
+            => kind == CookieJarKind.Bilibili ? "Bilibili" : "YouTube";
+
+        private string CookiesSavePath(CookieJarKind kind)
+            => Path.Combine(
+                _cookiesConfigDir,
+                kind == CookieJarKind.Bilibili ? "bilibili_cookies.txt" : "cookies.txt");
+
+        private string? FindCookiesFile(CookieJarKind kind)
+            => kind == CookieJarKind.Bilibili ? FindBilibiliCookiesFile() : FindYouTubeCookiesFile();
+
+        private string? FindYouTubeCookiesFile()
+        {
+            string[] candidates =
+            {
+                CookiesSavePath(CookieJarKind.YouTube),
+                Path.Combine(_cookiesConfigDir, "youtube_cookies.txt"),
+                Path.Combine(PluginDir, "cookies.txt"),
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "VRCVideoCacher",
+                    "youtube_cookies.txt"),
+            };
+
+            foreach (string path in candidates)
+            {
+                if (File.Exists(path)) return path;
+            }
 
             return null;
         }
 
-        public bool HasCookiesFile => FindCookiesFile() != null;
+        private string? FindBilibiliCookiesFile()
+        {
+            string path = CookiesSavePath(CookieJarKind.Bilibili);
+            return File.Exists(path) ? path : null;
+        }
 
-        /// <summary>Netscape cookies.txt path used for yt-dlp and Twitch viewer telemetry.</summary>
-        public string? CookiesFilePath => FindCookiesFile();
+        public string? ResolveCookiesPath(string? pageUrl)
+            => IsBilibiliUrl(pageUrl) ? FindBilibiliCookiesFile() : FindYouTubeCookiesFile();
 
-        /// <summary>
-        /// Returns the path where cookies.txt will be saved (plugin directory).
-        /// </summary>
-        public string CookiesSavePath => Path.Combine(
-          Path.GetDirectoryName(_ytDlpPath) ?? ".", "cookies.txt");
+        public static bool IsBilibiliUrl(string? url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            return url.Contains("bilibili.com", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("b23.tv", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("bilivideo.", StringComparison.OrdinalIgnoreCase);
+        }
 
-        /// <summary>
-        /// Checks if text looks like Netscape cookie format (tab-separated, 7 fields per line).
-        /// Used for auto-detecting cookies on the clipboard.
-        /// </summary>
+        private static bool IsBilibiliCookieDomain(string domain)
+        {
+            return domain.Contains("bilibili", StringComparison.OrdinalIgnoreCase)
+                || domain.Contains("bilivideo", StringComparison.OrdinalIgnoreCase)
+                || domain.Contains("hdslb", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsYouTubeCookieDomain(string domain)
+        {
+            return domain.Contains("youtube", StringComparison.OrdinalIgnoreCase)
+                || domain.Contains("googlevideo", StringComparison.OrdinalIgnoreCase)
+                || domain.Contains("google.com", StringComparison.OrdinalIgnoreCase)
+                || domain.Contains("youtu.be", StringComparison.OrdinalIgnoreCase);
+        }
+
         public static bool IsNetscapeCookieFormat(string? text)
         {
             if (string.IsNullOrWhiteSpace(text)) return false;
@@ -1727,7 +1779,6 @@ namespace MediaPlayerCore.YtDlp
 
             if (lines.Length < 2) return false;
 
-            // At least half the non-comment lines should be 7-field tab-separated
             int validCount = 0;
             foreach (var line in lines)
             {
@@ -1741,29 +1792,73 @@ namespace MediaPlayerCore.YtDlp
             return validCount >= 2 && validCount >= lines.Length / 2;
         }
 
-        /// <summary>
-        /// Saves cookie text to the plugin directory and updates the cookie path.
-        /// Returns true if saved successfully.
-        /// </summary>
-        public bool SaveCookiesFromText(string cookieText, string source = "clipboard")
+        public static CookieJarKind DetectCookieJarKind(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return CookieJarKind.Unknown;
+
+            int youtube = 0;
+            int bilibili = 0;
+            foreach (string raw in text.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (string.IsNullOrEmpty(line) || line.StartsWith('#')) continue;
+
+                string domain = line.Split('\t')[0];
+                if (IsBilibiliCookieDomain(domain)) bilibili++;
+                else if (IsYouTubeCookieDomain(domain)) youtube++;
+            }
+
+            if (bilibili > youtube && bilibili > 0) return CookieJarKind.Bilibili;
+            if (youtube > 0) return CookieJarKind.YouTube;
+            if (bilibili > 0) return CookieJarKind.Bilibili;
+            return CookieJarKind.Unknown;
+        }
+
+        public bool SaveCookiesFromText(
+            string cookieText,
+            string source = "clipboard",
+            CookieJarKind? forceKind = null)
         {
             try
             {
-                File.WriteAllText(CookiesSavePath, cookieText);
-                _cookiesPath = CookiesSavePath;
-                OnStatusUpdate?.Invoke(this, $"YouTube cookies saved from {source}.");
+                CookieJarKind kind = forceKind ?? DetectCookieJarKind(cookieText);
+                if (kind == CookieJarKind.Unknown)
+                {
+                    kind = CookieJarKind.YouTube;
+                }
+
+                Directory.CreateDirectory(_cookiesConfigDir);
+                File.WriteAllText(CookiesSavePath(kind), cookieText);
+                OnStatusUpdate?.Invoke(this, $"{CookieJarLabel(kind)} cookies saved from {source}.");
                 return true;
-            } catch (Exception e)
+            }
+            catch (Exception e)
             {
                 OnError?.Invoke(this, new Exception("Failed to save cookies: " + e.Message, e));
                 return false;
             }
         }
 
-        /// <summary>
-        /// Optional: set to a browser name (chrome, firefox, edge) to use
-        /// yt-dlp's --cookies-from-browser feature instead of a cookie file.
-        /// </summary>
+        public bool ClearCookies(CookieJarKind kind)
+        {
+            try
+            {
+                string path = CookiesSavePath(kind);
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+
+                OnStatusUpdate?.Invoke(this, $"{CookieJarLabel(kind)} cookies cleared.");
+                return true;
+            }
+            catch (Exception e)
+            {
+                OnError?.Invoke(this, new Exception("Failed to clear cookies: " + e.Message, e));
+                return false;
+            }
+        }
+
         public string? CookieBrowser { get; set; }
 
         private async Task<string[]?> ResolveDirectStreamUrlsAsync(string url, string formatArg, bool isLiveYouTube)
@@ -1798,7 +1893,8 @@ namespace MediaPlayerCore.YtDlp
                 string result = await RunYtDlp(
                     $"--no-playlist --get-url -f \"{formatArg}\" \"{url}\"",
                     isLiveYouTube: isLiveYouTube,
-                    forceYouTubeClient: forceYouTubeClient);
+                    forceYouTubeClient: forceYouTubeClient,
+                    pageUrl: url);
                 string[]? streamUrls = ParseStreamUrls(result);
                 if (streamUrls == null || streamUrls.Length == 0)
                 {
@@ -1826,7 +1922,8 @@ namespace MediaPlayerCore.YtDlp
                 string result = await RunYtDlp(
                     $"--no-playlist -j -f \"{formatArg}\" \"{url}\"",
                     isLiveYouTube: isLiveYouTube,
-                    forceYouTubeClient: forceYouTubeClient);
+                    forceYouTubeClient: forceYouTubeClient,
+                    pageUrl: url);
                 YtDlpMetadata? info = TryParseYtDlpJson(result);
                 if (info?.HttpHeaders != null && info.HttpHeaders.Count > 0)
                 {
@@ -1857,7 +1954,10 @@ namespace MediaPlayerCore.YtDlp
         /// <summary>
         /// Builds the common argument prefix (cookies, etc.) for all yt-dlp calls.
         /// </summary>
-        private string BuildCommonArgs(bool isLiveYouTube = false, string? forceYouTubeClient = null)
+        private string BuildCommonArgs(
+            bool isLiveYouTube = false,
+            string? forceYouTubeClient = null,
+            string? pageUrl = null)
         {
             string args = $"--extractor-args \"{BuildYouTubeExtractorArgs(isLive: isLiveYouTube, includeSabrFormats: false, forceClient: forceYouTubeClient)}\" --extractor-args \"youtubetab:skip=authcheck\" ";
             args += BuildPotProviderExtractorArgs();
@@ -1869,13 +1969,17 @@ namespace MediaPlayerCore.YtDlp
 
             args += "--remote-components ejs:github --socket-timeout 30 ";
 
-            // Cookie injection
             if (!string.IsNullOrEmpty(CookieBrowser))
             {
                 args += $"--cookies-from-browser {CookieBrowser} ";
-            } else if (HasCookies)
-             {
-                args += $"--cookies {QuotedYtDlpPath(_cookiesPath!)} ";
+            }
+            else
+            {
+                string? cookiesPath = ResolveCookiesPath(pageUrl);
+                if (!string.IsNullOrEmpty(cookiesPath))
+                {
+                    args += $"--cookies {QuotedYtDlpPath(cookiesPath)} ";
+                }
             }
 
             return args;
@@ -1954,8 +2058,9 @@ namespace MediaPlayerCore.YtDlp
             return ex is IOException or HttpListenerException;
         }
 
-        private static bool IsYouTubeUrl(string url)
+        private static bool IsYouTubeUrl(string? url)
         {
+            if (string.IsNullOrEmpty(url)) return false;
             return url.Contains("youtube.com", StringComparison.OrdinalIgnoreCase)
                 || url.Contains("youtu.be", StringComparison.OrdinalIgnoreCase);
         }
@@ -2034,7 +2139,8 @@ namespace MediaPlayerCore.YtDlp
             {
                 OnStatusUpdate?.Invoke(this, "Checking if YouTube link is live...");
                 string result = await RunYtDlp(
-                    $"--no-download --no-playlist --print live_status --print is_live \"{url}\"");
+                    $"--no-download --no-playlist --print live_status --print is_live \"{url}\"",
+                    pageUrl: url);
                 var lines = result
                     .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                     .Select(l => l.Trim())
@@ -2095,9 +2201,13 @@ namespace MediaPlayerCore.YtDlp
             {
                 args += $"--cookies-from-browser {CookieBrowser} ";
             }
-            else if (HasCookies)
+            else
             {
-                args += $"--cookies {QuotedYtDlpPath(_cookiesPath!)} ";
+                string? cookiesPath = ResolveCookiesPath(url);
+                if (!string.IsNullOrEmpty(cookiesPath))
+                {
+                    args += $"--cookies {QuotedYtDlpPath(cookiesPath)} ";
+                }
             }
 
             string ffmpegPath = Path.Combine(PluginDir, "ffmpeg.exe");

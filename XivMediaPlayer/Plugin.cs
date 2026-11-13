@@ -569,7 +569,6 @@ namespace XivMediaPlayer
 
         private bool _isDisposing;
 
-        private DateTime _lastClipboardCheck = DateTime.MinValue;
         private DateTime _lastServerSyncPush = DateTime.MinValue;
         private DateTime _lastHistoryUpdate = DateTime.MinValue;
         private DateTime? _deferredTerritoryChangeTime = null;
@@ -589,7 +588,6 @@ namespace XivMediaPlayer
         private System.Numerics.Vector3? _cachedLocalPlayerPosition = null;
         private uint _cachedLocalPlayerWorldId = 0;
 
-        private int _lastCookieHash;
         private bool _hasBeenInitialized;
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -704,7 +702,7 @@ namespace XivMediaPlayer
             ApplySavedPlaybackMode();
 
             // Initialize yt-dlp manager
-            _ytDlpManager = new YtDlpManager(pluginDir, _config.PreferredQuality) { EnableSabrProxy = _config.EnableSabrProxy };
+            _ytDlpManager = new YtDlpManager(pluginDir, configDir, _config.PreferredQuality) { EnableSabrProxy = _config.EnableSabrProxy };
             _ytDlpManager.OnStatusUpdate += (s, msg) =>
             {
                 _pluginLog.Info("[yt-dlp] " + msg);
@@ -1122,38 +1120,9 @@ namespace XivMediaPlayer
                 }
             }
 
-            // Clipboard cookie watcher. Check every 5 seconds.
             CheckClipboardForCookies();
 
             FlushPendingConfigSave();
-        }
-
-        private void CheckClipboardForCookies()
-        {
-            if ((DateTime.UtcNow - _lastClipboardCheck).TotalSeconds < 5) return;
-            _lastClipboardCheck = DateTime.UtcNow;
-
-            try
-            {
-                string? clipText = ImGui.GetClipboardText();
-                if (string.IsNullOrEmpty(clipText)) return;
-
-                int hash = clipText.GetHashCode();
-                if (hash == _lastCookieHash) return;
-
-                if (YtDlpManager.IsNetscapeCookieFormat(clipText))
-                {
-                    _lastCookieHash = hash;
-                    if (_ytDlpManager.SaveCookiesFromText(clipText))
-                    {
-                        _pluginLog.Info("[yt-dlp] Auto-detected YouTube cookies from clipboard.");
-                    }
-                }
-            }
-            catch
-            {
-                // Clipboard access can throw. Silently ignore.
-            }
         }
 
         private bool IsPlayerAlone()

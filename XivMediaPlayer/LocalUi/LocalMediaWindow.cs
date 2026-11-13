@@ -4,6 +4,7 @@ using Dalamud.Interface.Components;
 using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
+using MediaPlayerCore.YtDlp;
 using NAudio.Wave;
 using System;
 using System.Collections.Generic;
@@ -1116,7 +1117,172 @@ namespace XivMediaPlayer.LocalUi
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Cookies"))
+            {
+                DrawCookiesTab();
+                ImGui.EndTabItem();
+            }
+
             ImGui.EndTabBar();
+        }
+
+        private void DrawCookiesTab()
+        {
+            var yt = _plugin.YtDlpManager;
+            if (yt == null)
+            {
+                ImGui.TextDisabled("播放器还没准备好。");
+                return;
+            }
+
+            bool autoClip = _plugin.Config.AutoImportCookiesFromClipboard;
+            if (ImGui.Checkbox("自动从剪贴板导入 cookies", ref autoClip))
+            {
+                _plugin.Config.AutoImportCookiesFromClipboard = autoClip;
+                _plugin.Config.SaveLocal();
+            }
+            DrawInlineTipIcon(
+                FontAwesomeIcon.ExclamationTriangle,
+                autoClip
+                    ? "开启后会定期扫描剪贴板；检测到 Netscape cookies.txt 时按站点自动保存。"
+                    : "已关闭自动导入。请用下方按钮从剪贴板手动粘贴。",
+                alignToFrame: true);
+
+            ImGui.Spacing();
+            DrawCookieSectionHeader("YouTube", yt.HasCookiesFile, yt.CookiesPath(YtDlpManager.CookieJarKind.YouTube));
+            ImGui.TextWrapped("手动粘贴或通过浏览器安装 VRCVideoCacher 扩展自动同步到本机。");
+            DrawCookieJarButtons(YtDlpManager.CookieJarKind.YouTube);
+            ImGui.SameLine(0, CompactGap);
+            if (ImGui.SmallButton("Chrome 扩展"))
+                OpenUrl("https://chromewebstore.google.com/detail/vrcvideocacher-cookies-ex/kfgelknbegappcajiflgfbjbdpbpokge");
+            ImGui.SameLine(0, CompactGap);
+            if (ImGui.SmallButton("Firefox 扩展"))
+                OpenUrl("https://addons.mozilla.org/en-US/firefox/addon/vrcvideocachercookiesexporter/");
+
+            if (_plugin.Config.EnableSabrProxy)
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "YouTube 助手");
+                ImGui.SameLine(0, CompactGap);
+                if (yt.IsPoTokenServerReady)
+                    ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), "就绪");
+                else
+                    ImGui.TextColored(new Vector4(1f, 0.7f, 0.3f, 1f), "需要修复");
+                ImGui.Separator();
+
+                if (yt.IsYouTubeSetupRunning)
+                    ImGui.TextWrapped("正在设置…大约 1–2 分钟。若 Windows 询问网络权限请点允许。");
+                else if (ImGui.Button("修复 YouTube 设置"))
+                    _plugin.RetryYouTubeSetup();
+            }
+
+            ImGui.Spacing();
+            DrawCookieSectionHeader("Bilibili", yt.HasBilibiliCookiesFile, yt.CookiesPath(YtDlpManager.CookieJarKind.Bilibili));
+            ImGui.TextWrapped("可通过安装浏览器扩展 Get cookies.txt LOCALLY 获取。\n登录后在 Bilibili 页面打开扩展，点击 Copy ，在下方粘贴。大会员等内容需要 SESSDATA。");
+            DrawCookieJarButtons(YtDlpManager.CookieJarKind.Bilibili);
+        }
+
+        private void DrawCookieSectionHeader(string title, bool present, string path)
+        {
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), title);
+            ImGui.SameLine(0, CompactGap);
+            ImGui.TextColored(
+                present ? new Vector4(0.4f, 1f, 0.4f, 1f) : new Vector4(1f, 0.45f, 0.4f, 1f),
+                present ? "已配置" : "未配置");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(path);
+            ImGui.Separator();
+        }
+
+        private void DrawCookieJarButtons(YtDlpManager.CookieJarKind kind)
+        {
+            string label = YtDlpManager.CookieJarLabel(kind);
+            if (ImGui.SmallButton($"粘贴 {label} cookies"))
+                ImportCookiesFromClipboard(kind);
+            ImGui.SameLine(0, CompactGap);
+            if (ImGui.SmallButton($"清除 {label}###clear-{kind}-cookies")
+                && _plugin.YtDlpManager?.ClearCookies(kind) == true)
+            {
+                _plugin.PrintPlain($"已清除 {label} cookies。");
+            }
+        }
+
+        private static void DrawInlineTipIcon(FontAwesomeIcon icon, string tooltip, bool alignToFrame = false)
+        {
+            ImGui.SameLine(0, CompactGap);
+            if (alignToFrame)
+                ImGui.AlignTextToFramePadding();
+
+            var handle = Plugin.PluginInterface.UiBuilder.IconFontHandle;
+            if (handle.Available)
+            {
+                using (handle.Push())
+                    ImGui.TextUnformatted(icon.ToIconString());
+            }
+            else
+            {
+                ImGui.TextDisabled("i");
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(tooltip);
+        }
+
+        private void ImportCookiesFromClipboard(YtDlpManager.CookieJarKind kind)
+        {
+            var yt = _plugin.YtDlpManager;
+            if (yt == null) return;
+
+            string clip;
+            try
+            {
+                clip = ImGui.GetClipboardText() ?? string.Empty;
+            }
+            catch
+            {
+                _plugin.PrintPlainError("无法读取剪贴板。");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(clip))
+            {
+                _plugin.PrintPlainError("剪贴板是空的，或读取失败。");
+                return;
+            }
+
+            if (!YtDlpManager.IsNetscapeCookieFormat(clip))
+            {
+                _plugin.PrintPlainError("剪贴板内容不是 Netscape cookies.txt 格式。");
+                return;
+            }
+
+            var detected = YtDlpManager.DetectCookieJarKind(clip);
+            if (detected != YtDlpManager.CookieJarKind.Unknown && detected != kind)
+            {
+                _plugin.PrintPlainError(
+                    $"剪贴板像是 {YtDlpManager.CookieJarLabel(detected)} cookies，当前按钮是 {YtDlpManager.CookieJarLabel(kind)}。请换对应按钮，或确认导出站点。");
+                return;
+            }
+
+            if (yt.SaveCookiesFromText(clip, "manual paste", kind))
+                _plugin.PrintPlain($"已保存 {YtDlpManager.CookieJarLabel(kind)} cookies。");
+            else
+                _plugin.PrintPlainError("保存 cookies 失败。");
+        }
+
+        private static void OpenUrl(string url)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true,
+                });
+            }
+            catch
+            {
+            }
         }
 
         private void DrawUrlRow()

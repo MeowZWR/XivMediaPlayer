@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Dalamud.Bindings.ImGui;
+using MediaPlayerCore.YtDlp;
 using XivMediaPlayer.LocalUi;
 using XivMediaPlayer.Networking.Models;
 
@@ -20,6 +22,39 @@ namespace XivMediaPlayer
         private bool _resumeAfterStopIsLive;
         private int _localPlaylistIndex = -1;
         private int _syncPlaylistIndex = -1;
+        private DateTime _lastClipboardCheck = DateTime.MinValue;
+        private int _lastCookieHash;
+
+        private void CheckClipboardForCookies()
+        {
+            if (!_config.AutoImportCookiesFromClipboard) return;
+            if (_ytDlpManager == null) return;
+            if ((DateTime.UtcNow - _lastClipboardCheck).TotalSeconds < 5) return;
+            _lastClipboardCheck = DateTime.UtcNow;
+
+            try
+            {
+                string? clipText = ImGui.GetClipboardText();
+                if (string.IsNullOrEmpty(clipText)) return;
+
+                int hash = clipText.GetHashCode();
+                if (hash == _lastCookieHash) return;
+
+                if (YtDlpManager.IsNetscapeCookieFormat(clipText))
+                {
+                    _lastCookieHash = hash;
+                    var kind = YtDlpManager.DetectCookieJarKind(clipText);
+                    if (_ytDlpManager.SaveCookiesFromText(clipText, "clipboard"))
+                    {
+                        _pluginLog.Info(
+                            $"[yt-dlp] Auto-detected {YtDlpManager.CookieJarLabel(kind)} cookies from clipboard.");
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
 
         private void ApplySavedPlaybackMode()
         {

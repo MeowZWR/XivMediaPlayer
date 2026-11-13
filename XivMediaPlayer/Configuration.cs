@@ -146,6 +146,8 @@ namespace XivMediaPlayer {
     public bool ShowEdgeTransportPluginSettings { get; set; }
     public List<int> EdgeTransportOrder { get; set; } = EdgeTransportCatalog.DefaultOrder();
 
+    public bool AutoImportCookiesFromClipboard { get; set; }
+
     public bool ShouldSerializeLocalPlaylist() => false;
     public bool ShouldSerializeLocalPlaybackMode() => false;
     public bool ShouldSerializeLastPlayedUrl() => false;
@@ -179,6 +181,7 @@ namespace XivMediaPlayer {
     public bool ShouldSerializeShowEdgeTransportPluginSettings() => false;
     public bool ShouldSerializeEdgeTransportOrder() => false;
     public bool ShouldSerializeCropToFill() => false;
+    public bool ShouldSerializeAutoImportCookiesFromClipboard() => false;
 
     public string ServerUrl
     {
@@ -445,6 +448,7 @@ namespace XivMediaPlayer {
       EdgeTransportCatalog.CopyShow(loaded, this);
       if (loaded.CropToFill is bool cropToFill)
         CropToFill = cropToFill;
+      AutoImportCookiesFromClipboard = loaded.AutoImportCookiesFromClipboard;
     }
 
     private static void WriteLocalUi(IDalamudPluginInterface pi, Configuration source) {
@@ -474,6 +478,7 @@ namespace XivMediaPlayer {
         EdgeTitleIconGap = source.EdgeTitleIconGap,
         KeepEdgeIconWithPanel = source.KeepEdgeIconWithPanel,
         CropToFill = source.CropToFill,
+        AutoImportCookiesFromClipboard = source.AutoImportCookiesFromClipboard,
       };
       EdgeTransportCatalog.CopyShow(source, snapshot);
       var json = JsonConvert.SerializeObject(snapshot, LocalUiConfig.JsonSettings);

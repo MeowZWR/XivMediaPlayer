@@ -47,6 +47,8 @@ namespace XivMediaPlayer.LocalUi
         public List<int> EdgeTransportOrder { get; set; } = EdgeTransportCatalog.DefaultOrder();
         public bool? CropToFill { get; set; }
 
+        public bool AutoImportCookiesFromClipboard { get; set; }
+
         public static readonly JsonSerializerSettings JsonSettings = new()
         {
             Formatting = Formatting.Indented,
