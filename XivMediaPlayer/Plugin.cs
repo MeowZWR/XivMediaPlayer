@@ -3377,7 +3377,9 @@ namespace XivMediaPlayer
                 EffectSpeed = source.EffectSpeed,
                 OwnerId = source.OwnerId,
                 IsLocked = source.IsLocked,
-                BypassLock = source.BypassLock
+                BypassLock = source.BypassLock,
+                AllowedDiscordOwnerIdsJson = source.AllowedDiscordOwnerIdsJson,
+                LastUpdated = source.LastUpdated,
             };
         }
 
@@ -3775,6 +3777,59 @@ namespace XivMediaPlayer
             }
 
             PersistTvPlacementLocally(tv);
+        }
+
+        internal Task SyncTvPlacementToServerAsync(TvPlacement tv, string? locationKey = null)
+        {
+            locationKey ??= tv.LocationKey;
+            if (string.IsNullOrEmpty(locationKey) || string.IsNullOrEmpty(tv.Id))
+            {
+                return Task.CompletedTask;
+            }
+
+            return SyncTvPlacementToServerCoreAsync(tv, locationKey);
+        }
+
+        private async Task SyncTvPlacementToServerCoreAsync(TvPlacement tv, string locationKey)
+        {
+            try
+            {
+                var payload = CopyTvPlacementForSync(tv);
+                payload.LocationKey = locationKey;
+                payload.LastUpdated = tv.LastUpdated;
+                payload.BypassLock = IsHousingMenuOpen
+                    || locationKey.StartsWith("zone_", StringComparison.Ordinal)
+                    || locationKey.StartsWith("island_", StringComparison.Ordinal);
+
+                var result = await ServerClient.RegisterTvAsync(locationKey, payload, create: false);
+                if (result == null)
+                {
+                    _pluginLog.Warning($"[Social] TV sync returned no result for {tv.Id} (locked={tv.IsLocked}).");
+                    return;
+                }
+
+                RunOnFrameworkThread(() =>
+                {
+                    var merged = MergeTvPlacementFromServer(result, payload);
+                    merged.IsLocked = payload.IsLocked;
+                    if (payload.LastUpdated > merged.LastUpdated)
+                    {
+                        merged.LastUpdated = payload.LastUpdated;
+                    }
+
+                    UpsertRoomTv(merged);
+                    if (CurrentTvPlacement != null
+                        && string.Equals(CurrentTvPlacement.Id, merged.Id, StringComparison.Ordinal))
+                    {
+                        CurrentTvPlacement.IsLocked = merged.IsLocked;
+                        CurrentTvPlacement.LastUpdated = merged.LastUpdated;
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _pluginLog.Warning(ex, $"[Social] Failed to sync TV {tv.Id} (locked={tv.IsLocked}).");
+            }
         }
 
         internal void RemoveRoomTv(string tvId)

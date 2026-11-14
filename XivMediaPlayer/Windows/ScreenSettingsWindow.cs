@@ -715,16 +715,17 @@ namespace XivMediaPlayer.Windows {
               if (_plugin.CurrentTvPlacement != null) {
                 _plugin.CurrentTvPlacement.IsLocked = isLocked;
                 _plugin.CurrentTvPlacement.LastUpdated = DateTime.UtcNow;
+                _plugin.CurrentTvPlacement.LocationKey = locationKey;
                 _plugin.UpsertRoomTv(_plugin.CurrentTvPlacement);
+                _ = _plugin.SyncTvPlacementToServerAsync(_plugin.CurrentTvPlacement, locationKey);
               } else {
-                _plugin.CurrentTvPlacement = new Networking.Models.TvPlacement {
-                  OwnerId = _plugin.Config.OwnerId,
-                  IsLocked = isLocked,
-                  LastUpdated = DateTime.UtcNow
-                };
-                _plugin.UpsertRoomTv(_plugin.CurrentTvPlacement);
+                var created = _plugin.MaterializeTvFromWorkingTransform(locationKey);
+                created.IsLocked = isLocked;
+                created.LastUpdated = DateTime.UtcNow;
+                _plugin.CurrentTvPlacement = created;
+                _plugin.UpsertRoomTv(created);
+                _ = _plugin.SyncTvPlacementToServerAsync(created, locationKey);
               }
-              RegisterTvAsync(locationKey, quiet: true, bypassDebounce: true);
             }
           }
 
@@ -1229,6 +1230,7 @@ namespace XivMediaPlayer.Windows {
     }
 
     public async void RegisterTvAsync(string locationKey, bool quiet = false, bool bypassDebounce = false) {
+      SyncFromTransform();
       if (!_enabled) {
         if (!quiet) {
           _statusMessage = "World screen is not enabled!";
@@ -1254,6 +1256,7 @@ namespace XivMediaPlayer.Windows {
         _onSave?.Invoke();
       }
       var placement = BuildPlacementFromTransform(locationKey, createNewId: false);
+      placement.LastUpdated = _plugin.CurrentTvPlacement?.LastUpdated ?? DateTime.UtcNow;
 
       try 
       {

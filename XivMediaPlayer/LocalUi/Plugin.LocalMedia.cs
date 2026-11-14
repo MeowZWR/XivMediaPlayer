@@ -865,21 +865,30 @@ namespace XivMediaPlayer
             {
                 CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
                 CurrentTvPlacement.LastUpdated = DateTime.UtcNow;
-                UpsertRoomTv(CurrentTvPlacement);
                 if (!string.IsNullOrEmpty(LocationKey))
                 {
-                    _screenSettingsWindow.RegisterTvAsync(LocationKey, quiet: true, bypassDebounce: true);
-                    PrintChat(CurrentTvPlacement.IsLocked
-                        ? "[Media Player] TV is now Locked."
-                        : "[Media Player] TV is now Unlocked.");
+                    CurrentTvPlacement.LocationKey = LocationKey;
                 }
+
+                UpsertRoomTv(CurrentTvPlacement);
+                _ = SyncTvPlacementToServerAsync(CurrentTvPlacement, LocationKey);
+                PrintChat(CurrentTvPlacement.IsLocked
+                    ? "[Media Player] TV is now Locked."
+                    : "[Media Player] TV is now Unlocked.");
             }
             else if (CurrentTvPlacement == null)
             {
-                CurrentTvPlacement = new TvPlacement { OwnerId = _config.OwnerId, IsLocked = false, LastUpdated = DateTime.UtcNow };
+                if (string.IsNullOrEmpty(LocationKey))
+                {
+                    PrintChat("[Media Player] You do not own this TV.");
+                    return;
+                }
+
+                CurrentTvPlacement = MaterializeTvFromWorkingTransform(LocationKey);
+                CurrentTvPlacement.IsLocked = false;
+                CurrentTvPlacement.LastUpdated = DateTime.UtcNow;
                 UpsertRoomTv(CurrentTvPlacement);
-                if (!string.IsNullOrEmpty(LocationKey))
-                    _screenSettingsWindow.RegisterTvAsync(LocationKey, quiet: true, bypassDebounce: true);
+                _ = SyncTvPlacementToServerAsync(CurrentTvPlacement, LocationKey);
                 PrintChat("[Media Player] TV registered and Unlocked.");
             }
             else
