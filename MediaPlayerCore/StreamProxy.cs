@@ -318,6 +318,22 @@ namespace MediaPlayerCore
                 }
             }
 
+            bool isBilibiliCdn = targetUrl.Contains("bilivideo.", StringComparison.OrdinalIgnoreCase)
+                || targetUrl.Contains("bilibili.com", StringComparison.OrdinalIgnoreCase)
+                || targetUrl.Contains("hdslb.com", StringComparison.OrdinalIgnoreCase);
+            if (isBilibiliCdn)
+            {
+                if (!client.DefaultRequestHeaders.TryGetValues("Referer", out _))
+                {
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://live.bilibili.com/");
+                }
+
+                if (!client.DefaultRequestHeaders.TryGetValues("Origin", out _))
+                {
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
+                }
+            }
+
             return client;
         }
 
@@ -365,6 +381,27 @@ namespace MediaPlayerCore
             cache.Start(client, mediaUrl);
 
             _sessions[sessionId] = new ProxySession { OriginalM3u8Url = mediaUrl, Headers = headers, Client = client, Cache = cache };
+
+            string targetBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(mediaUrl));
+            return $"http://127.0.0.1:{_port}/proxy_media?sid={sessionId}&target={Uri.EscapeDataString(targetBase64)}";
+        }
+
+        public string RegisterPassthroughMediaSession(string mediaUrl, Dictionary<string, string>? headers = null)
+        {
+            if (string.IsNullOrEmpty(mediaUrl)) return string.Empty;
+            if (IsWineRuntime) return mediaUrl;
+
+            Start();
+            ClearSessions();
+            string sessionId = Guid.NewGuid().ToString("N");
+            var client = CreateStreamingHttpClient(headers, mediaUrl);
+            _sessions[sessionId] = new ProxySession
+            {
+                OriginalM3u8Url = mediaUrl,
+                Headers = headers,
+                Client = client,
+                Cache = null,
+            };
 
             string targetBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(mediaUrl));
             return $"http://127.0.0.1:{_port}/proxy_media?sid={sessionId}&target={Uri.EscapeDataString(targetBase64)}";
@@ -634,24 +671,6 @@ namespace MediaPlayerCore
 
                     string targetUrl = Encoding.UTF8.GetString(Convert.FromBase64String(req.QueryString["target"]));
                     var requestMessage = new HttpRequestMessage(HttpMethod.Get, targetUrl);
-
-                    long requestedOffset = 0;
-                    long? requestedEnd = null;
-                    string rangeHeader = req.Headers["Range"];
-                    if (!string.IsNullOrEmpty(rangeHeader) && rangeHeader.StartsWith("bytes="))
-                    {
-                        string[] rangeParts = rangeHeader.Substring("bytes=".Length).Split('-', 2);
-                        if (long.TryParse(rangeParts[0], out long offset))
-                        {
-                            requestedOffset = offset;
-                            if (rangeParts.Length == 2 && long.TryParse(rangeParts[1], out long end))
-                            {
-                                requestedEnd = end;
-                            }
-                            requestMessage.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(offset, requestedEnd);
-                        }
-                    }
-
                     using var response = await session.Client.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead);
 
                     if (!response.IsSuccessStatusCode)
@@ -664,69 +683,19 @@ namespace MediaPlayerCore
                         return;
                     }
 
+                    res.StatusCode = (int)HttpStatusCode.OK;
                     res.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
-
-                    using var stream = await response.Content.ReadAsStreamAsync();
-
-                    if (response.StatusCode == HttpStatusCode.OK
-                        && (requestedOffset > 0 || requestedEnd.HasValue))
+                    if (response.Content.Headers.ContentLength.HasValue)
                     {
-                        // SERVER IGNORED RANGE REQUEST. WE MUST MANUALLY DISCARD BYTES.
-                        long bytesToDiscard = requestedOffset;
-                        byte[] discardBuffer = new byte[81920]; // 80KB buffer
-                        while (bytesToDiscard > 0)
-                        {
-                            int toRead = (int)Math.Min(bytesToDiscard, discardBuffer.Length);
-                            int read = await stream.ReadAsync(discardBuffer, 0, toRead);
-                            if (read == 0) break; // EOF
-                            bytesToDiscard -= read;
-                        }
-
-                        long totalLength = response.Content.Headers.ContentLength ?? 0;
-                        if (totalLength <= 0 || requestedOffset >= totalLength)
-                        {
-                            res.StatusCode = (int)HttpStatusCode.RequestedRangeNotSatisfiable;
-                            if (totalLength > 0) res.Headers["Content-Range"] = $"bytes */{totalLength}";
-                            return;
-                        }
-
-                        long lastByte = Math.Min(requestedEnd ?? totalLength - 1, totalLength - 1);
-                        if (lastByte < requestedOffset)
-                        {
-                            res.StatusCode = (int)HttpStatusCode.RequestedRangeNotSatisfiable;
-                            res.Headers["Content-Range"] = $"bytes */{totalLength}";
-                            return;
-                        }
-
-                        res.StatusCode = (int)HttpStatusCode.PartialContent;
-                        res.Headers["Accept-Ranges"] = "bytes";
-                        res.ContentLength64 = lastByte - requestedOffset + 1;
-                        res.Headers["Content-Range"] = $"bytes {requestedOffset}-{lastByte}/{totalLength}";
-                        await CopyBytesAsync(stream, res.OutputStream, res.ContentLength64);
+                        res.ContentLength64 = response.Content.Headers.ContentLength.Value;
                     }
                     else
                     {
-                        res.StatusCode = (int)response.StatusCode;
-                        if (response.Content.Headers.ContentLength.HasValue)
-                        {
-                            res.ContentLength64 = response.Content.Headers.ContentLength.Value;
-                            // The proxy can satisfy future ranges by reopening
-                            // and discarding from this static download.
-                            res.Headers["Accept-Ranges"] = "bytes";
-                        }
-                        else
-                        {
-                            res.SendChunked = true;
-                        }
-
-                        if (response.StatusCode == HttpStatusCode.PartialContent)
-                        {
-                            res.Headers["Content-Range"] = response.Content.Headers.ContentRange?.ToString();
-                            res.Headers["Accept-Ranges"] = "bytes";
-                        }
-
-                        await stream.CopyToAsync(res.OutputStream);
+                        res.SendChunked = true;
                     }
+
+                    using var stream = await response.Content.ReadAsStreamAsync();
+                    await stream.CopyToAsync(res.OutputStream);
                 }
                 else
                 {
@@ -741,18 +710,6 @@ namespace MediaPlayerCore
             finally
             {
                 try { context.Response.Close(); } catch { }
-            }
-        }
-
-        private static async Task CopyBytesAsync(Stream source, Stream destination, long bytesToCopy)
-        {
-            byte[] buffer = new byte[81920];
-            while (bytesToCopy > 0)
-            {
-                int read = await source.ReadAsync(buffer, 0, (int)Math.Min(buffer.Length, bytesToCopy));
-                if (read == 0) break;
-                await destination.WriteAsync(buffer, 0, read);
-                bytesToCopy -= read;
             }
         }
 

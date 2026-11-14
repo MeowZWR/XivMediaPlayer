@@ -714,13 +714,17 @@ namespace XivMediaPlayer.Windows {
             if (ImGui.Checkbox(Localize("Lock TV to Owner Only"), ref isLocked)) {
               if (_plugin.CurrentTvPlacement != null) {
                 _plugin.CurrentTvPlacement.IsLocked = isLocked;
+                _plugin.CurrentTvPlacement.LastUpdated = DateTime.UtcNow;
+                _plugin.UpsertRoomTv(_plugin.CurrentTvPlacement);
               } else {
                 _plugin.CurrentTvPlacement = new Networking.Models.TvPlacement {
                   OwnerId = _plugin.Config.OwnerId,
-                  IsLocked = isLocked
+                  IsLocked = isLocked,
+                  LastUpdated = DateTime.UtcNow
                 };
+                _plugin.UpsertRoomTv(_plugin.CurrentTvPlacement);
               }
-              RegisterTvAsync(locationKey);
+              RegisterTvAsync(locationKey, quiet: true, bypassDebounce: true);
             }
           }
 

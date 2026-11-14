@@ -1732,12 +1732,13 @@ namespace XivMediaPlayer
                 }
                 else
                 {
-                    playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterDirectMediaSession(resolvedStreamUrl, resolvedHeaders);
-                    _pluginLog.Warning("[Live] Non-HLS live URL — playback may fail.");
+                    playUrl = MediaPlayerCore.StreamProxy.Instance.RegisterPassthroughMediaSession(resolvedStreamUrl, resolvedHeaders);
+                    _pluginLog.Information("[Live] Proxying progressive live stream.");
                 }
             }
 
             _liveProxyFallbackPending = false;
+            _mediaLoadingMessage = "Connecting to live stream...";
             _mediaManager.PlayStream(audioGameObject, playUrl, _config.SpatialAudioEnabled, finalStartTimeMs, resolvedHeaders, false, resolvedSlaveAudioUrl, true);
         }
         private bool _isIntentionallyPaused = false;
@@ -2415,16 +2416,18 @@ namespace XivMediaPlayer
                     // Twitch streams often don't explicitly return is_live=true, but they lack a duration!
                     // Also explicitly check if it's a twitch channel URL (not a video)
                     bool isTwitchLive = url.Contains("twitch.tv") && !url.Contains("/videos/");
+                    bool isBilibiliLive = YtDlpManager.IsBilibiliLiveUrl(url);
                     bool isYouTubeLive = youTubeLiveProbe == true
                         || (youTubeLiveProbe == null && isYouTube && YtDlpManager.IsYouTubeLiveUrlHeuristic(url));
                     var resolvedStreamUrl = streamUrls[0];
                     bool isLive = isYouTubeLive
+                        || isBilibiliLive
                         || metadata?.IsLiveBroadcast == true
                         || (isTwitchLive && metadata?.IsLiveBroadcast != false)
                         // A generic extractor often has no duration for a normal
                         // downloadable file. Only infer live playback from that
                         // absence when the resolved media is actually HLS.
-                        || (!isYouTube && !isTwitchLive && metadata?.Duration == null
+                        || (!isYouTube && !isTwitchLive && !isBilibiliLive && metadata?.Duration == null
                             && YtDlpManager.IsHlsStreamUrl(resolvedStreamUrl));
                     if (isYouTube && youTubeLiveProbe != false && YtDlpManager.IsHlsStreamUrl(resolvedStreamUrl))
                     {
@@ -2965,6 +2968,26 @@ namespace XivMediaPlayer
 
             _roomTvPlacements.RemoveAll(t => t != null && t.LocationKey == primaryKey);
             _roomTvPlacements.AddRange(localById.Values.Where(IsValidTvPlacement));
+        }
+
+        private void PreserveNewerLocalTvLockState(string primaryKey, List<TvPlacement> incomingTvs)
+        {
+            var localById = _roomTvPlacements
+                .Where(t => t != null && t.LocationKey == primaryKey && !string.IsNullOrEmpty(t.Id))
+                .GroupBy(t => t.Id, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+            foreach (var tv in incomingTvs)
+            {
+                if (string.IsNullOrEmpty(tv.Id)) continue;
+                if (!localById.TryGetValue(tv.Id, out var local)) continue;
+                if (!string.Equals(local.OwnerId, _config.OwnerId, StringComparison.Ordinal)) continue;
+                if (local.LastUpdated <= tv.LastUpdated) continue;
+                if (local.IsLocked == tv.IsLocked) continue;
+
+                tv.IsLocked = local.IsLocked;
+                tv.LastUpdated = local.LastUpdated;
+            }
         }
 
         internal bool TryGetBannerImageAspect(BannerPlacement? banner, out float widthOverHeight)
@@ -4160,6 +4183,7 @@ namespace XivMediaPlayer
                 else
                 {
                     var mergedRoomTvs = new List<TvPlacement>(roomTvsSnapshot);
+                    PreserveNewerLocalTvLockState(primaryKey, mergedRoomTvs);
                     var serverTvIds = new HashSet<string>(mergedRoomTvs.Select(t => t.Id));
                     foreach (var localTv in _roomTvPlacements.Where(t => t != null && t.LocationKey == primaryKey && !serverTvIds.Contains(t.Id)))
                     {
@@ -5709,28 +5733,7 @@ namespace XivMediaPlayer
                                 // Lock (0.80 - 0.84)
                                 else if (uv.X >= 0.80f && uv.X <= 0.84f)
                                 {
-                                    if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
-                                    {
-                                        CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
-                                        if (!string.IsNullOrEmpty(LocationKey))
-                                        {
-                                            _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                            if (CurrentTvPlacement.IsLocked)
-                                                PrintChat("[Media Player] TV is now Locked.");
-                                            else
-                                                PrintChat("[Media Player] TV is now Unlocked.");
-                                        }
-                                    }
-                                    else if (CurrentTvPlacement == null)
-                                    {
-                                        CurrentTvPlacement = new Networking.Models.TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
-                                        if (!string.IsNullOrEmpty(LocationKey))
-                                        {
-                                            _screenSettingsWindow.RegisterTvAsync(LocationKey);
-                                        }
-                                        PrintChat("[Media Player] TV registered and Unlocked.");
-                                    }
-                                    else { PrintChat("[Media Player] You do not own this TV."); }
+                                    ToggleCurrentTvLock();
                                 }
                                 // Paste (0.85 - 0.89)
                                 else if (uv.X >= 0.85f && uv.X <= 0.89f)

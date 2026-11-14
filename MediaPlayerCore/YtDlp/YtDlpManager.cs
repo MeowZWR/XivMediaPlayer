@@ -1058,11 +1058,11 @@ namespace MediaPlayerCore.YtDlp
                 OnStatusUpdate?.Invoke(this, "Resolving stream URL...");
 
                 string formatArg;
-                if (youTubeLive == true)
+                if (youTubeLive == true || IsBilibiliLiveUrl(url))
                 {
                     formatArg = _preferredMaxHeight > 0
-                      ? $"best[height<={_preferredMaxHeight}][protocol*=m3u8_native]/best[height<={_preferredMaxHeight}][protocol*=m3u8]/b[height<={_preferredMaxHeight}]"
-                      : "best[protocol*=m3u8_native]/best[protocol*=m3u8]/b";
+                      ? $"best[height<={_preferredMaxHeight}][protocol*=m3u8_native]/best[height<={_preferredMaxHeight}][protocol*=m3u8]/best[height<={_preferredMaxHeight}][ext=m3u8]/best[height<={_preferredMaxHeight}]"
+                      : "best[protocol*=m3u8_native]/best[protocol*=m3u8]/best[ext=m3u8]/best";
                 }
                 else
                 {
@@ -1494,7 +1494,45 @@ namespace MediaPlayerCore.YtDlp
                 }
             }
 
-            return IsYouTubeUrl(pageUrl) ? EnsureYouTubeHttpHeaders(merged, pageUrl) : merged;
+            if (IsYouTubeUrl(pageUrl))
+            {
+                return EnsureYouTubeHttpHeaders(merged, pageUrl);
+            }
+
+            if (IsBilibiliUrl(pageUrl))
+            {
+                return EnsureBilibiliHttpHeaders(merged, pageUrl);
+            }
+
+            return merged;
+        }
+
+        public static Dictionary<string, string> EnsureBilibiliHttpHeaders(
+            Dictionary<string, string>? headers,
+            string pageUrl)
+        {
+            headers ??= new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            bool live = IsBilibiliLiveUrl(pageUrl);
+
+            if (!headers.ContainsKey("Referer"))
+            {
+                headers["Referer"] = live
+                    ? "https://live.bilibili.com/"
+                    : (IsBilibiliUrl(pageUrl) ? pageUrl : "https://www.bilibili.com/");
+            }
+
+            if (!headers.ContainsKey("Origin"))
+            {
+                headers["Origin"] = live ? "https://live.bilibili.com" : "https://www.bilibili.com";
+            }
+
+            if (!headers.ContainsKey("User-Agent"))
+            {
+                headers["User-Agent"] =
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+            }
+
+            return headers;
         }
 
         /// <summary>
@@ -1751,6 +1789,12 @@ namespace MediaPlayerCore.YtDlp
             return url.Contains("bilibili.com", StringComparison.OrdinalIgnoreCase)
                 || url.Contains("b23.tv", StringComparison.OrdinalIgnoreCase)
                 || url.Contains("bilivideo.", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsBilibiliLiveUrl(string? url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            return url.Contains("live.bilibili.com", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsBilibiliCookieDomain(string domain)

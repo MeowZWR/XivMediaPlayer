@@ -864,9 +864,11 @@ namespace XivMediaPlayer
             if (CurrentTvPlacement != null && CurrentTvPlacement.OwnerId == _config.OwnerId)
             {
                 CurrentTvPlacement.IsLocked = !CurrentTvPlacement.IsLocked;
+                CurrentTvPlacement.LastUpdated = DateTime.UtcNow;
+                UpsertRoomTv(CurrentTvPlacement);
                 if (!string.IsNullOrEmpty(LocationKey))
                 {
-                    _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                    _screenSettingsWindow.RegisterTvAsync(LocationKey, quiet: true, bypassDebounce: true);
                     PrintChat(CurrentTvPlacement.IsLocked
                         ? "[Media Player] TV is now Locked."
                         : "[Media Player] TV is now Unlocked.");
@@ -874,9 +876,10 @@ namespace XivMediaPlayer
             }
             else if (CurrentTvPlacement == null)
             {
-                CurrentTvPlacement = new TvPlacement { OwnerId = _config.OwnerId, IsLocked = false };
+                CurrentTvPlacement = new TvPlacement { OwnerId = _config.OwnerId, IsLocked = false, LastUpdated = DateTime.UtcNow };
+                UpsertRoomTv(CurrentTvPlacement);
                 if (!string.IsNullOrEmpty(LocationKey))
-                    _screenSettingsWindow.RegisterTvAsync(LocationKey);
+                    _screenSettingsWindow.RegisterTvAsync(LocationKey, quiet: true, bypassDebounce: true);
                 PrintChat("[Media Player] TV registered and Unlocked.");
             }
             else
