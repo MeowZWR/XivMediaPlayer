@@ -83,6 +83,8 @@ namespace MediaPlayerCore {
     private bool _audioOnly;
     private long _pendingResumeSeekMs;
     private int _audioVisualSampleBytes;
+    private string? _slaveAudioPath;
+    private Dictionary<string, string>? _httpHeaders;
 
     public bool IsPendingResumeSeek => _pendingResumeSeekMs > 0;
 
@@ -295,7 +297,8 @@ namespace MediaPlayerCore {
           } catch {}
 
           if (_vlcPlayer.State == LibVLCSharp.Shared.VLCState.Ended || _vlcPlayer.State == LibVLCSharp.Shared.VLCState.Stopped) {
-            ChangeVideoStream(_soundPath, _width, (int)value);
+            // Must reattach slave audio + headers; seek alone drops :input-slave (Bilibili DASH).
+            ChangeVideoStream(_soundPath, _width, (int)value, _httpHeaders, _slaveAudioPath, _isLiveStream);
           } else {
             _vlcPlayer.Time = value;
             _bufferedWaveProvider?.ClearBuffer();
@@ -474,6 +477,8 @@ namespace MediaPlayerCore {
               } else {
                 startTimeMs = PrepareSabrResumeSeek(mediaPath, startTimeMs);
               }
+              _slaveAudioPath = slaveAudioPath;
+              _httpHeaders = httpHeaders;
               if (!TryResolvePlaybackPath(ref mediaPath))
               {
                 return;
@@ -649,6 +654,8 @@ namespace MediaPlayerCore {
             } else {
               startTimeMs = PrepareSabrResumeSeek(soundPath, startTimeMs);
             }
+            _slaveAudioPath = slaveAudioPath;
+            _httpHeaders = httpHeaders;
             if (!TryResolvePlaybackPath(ref soundPath))
             {
               return;

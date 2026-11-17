@@ -323,14 +323,17 @@ namespace MediaPlayerCore
                 || targetUrl.Contains("hdslb.com", StringComparison.OrdinalIgnoreCase);
             if (isBilibiliCdn)
             {
+                bool isLiveCdn = targetUrl.Contains("live", StringComparison.OrdinalIgnoreCase);
+                string bilibiliReferer = isLiveCdn ? "https://live.bilibili.com/" : "https://www.bilibili.com/";
+                string bilibiliOrigin = isLiveCdn ? "https://live.bilibili.com" : "https://www.bilibili.com";
                 if (!client.DefaultRequestHeaders.TryGetValues("Referer", out _))
                 {
-                    client.DefaultRequestHeaders.TryAddWithoutValidation("Referer", "https://live.bilibili.com/");
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Referer", bilibiliReferer);
                 }
 
                 if (!client.DefaultRequestHeaders.TryGetValues("Origin", out _))
                 {
-                    client.DefaultRequestHeaders.TryAddWithoutValidation("Origin", "https://live.bilibili.com");
+                    client.DefaultRequestHeaders.TryAddWithoutValidation("Origin", bilibiliOrigin);
                 }
             }
 

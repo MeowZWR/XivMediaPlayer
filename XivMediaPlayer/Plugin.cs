@@ -5087,7 +5087,9 @@ namespace XivMediaPlayer
 
             _pluginLog.Warning(e.Exception, $"[Media Player] Media error: {errorMsg}");
 
-            if (!errorMsg.Contains("demux", StringComparison.OrdinalIgnoreCase))
+            bool isDemuxError = errorMsg.Contains("demux", StringComparison.OrdinalIgnoreCase);
+            bool isBilibiliCdnError = IsRetryableBilibiliCdnError(errorMsg);
+            if (!isDemuxError && !isBilibiliCdnError)
             {
                 return;
             }
@@ -5101,9 +5103,16 @@ namespace XivMediaPlayer
 
             _lastMediaErrorTime = DateTime.UtcNow;
             _mediaErrorCount++;
-            _pluginLog.Warning(e.Exception, $"[Media Player] Media error occurred. Error count: {_mediaErrorCount}");
+            _pluginLog.Warning(e.Exception,
+                $"[Media Player] Media error occurred. Error count: {_mediaErrorCount}"
+                + (isBilibiliCdnError ? " (Bilibili CDN retry)" : ""));
             if (_mediaErrorCount < 5)
             {
+                if (isBilibiliCdnError)
+                {
+                    PrintVerbose("[Media Player] Bilibili CDN failed; resolving a new mirror...");
+                }
+
                 RequestRefreshCurrentMedia();
             }
             else if (_mediaErrorCount == 5)
@@ -5115,6 +5124,26 @@ namespace XivMediaPlayer
                     ResetStreamValues();
                 });
             }
+        }
+
+        private bool IsRetryableBilibiliCdnError(string errorMsg)
+        {
+            if (string.IsNullOrEmpty(errorMsg) || !YtDlpManager.IsBilibiliUrl(_lastStreamURL))
+            {
+                return false;
+            }
+
+            if (YtDlpManager.IsBilibiliMcdnUrl(errorMsg)
+                || errorMsg.Contains("mcdn.bilivideo", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return errorMsg.Contains("TLS session handshake", StringComparison.OrdinalIgnoreCase)
+                || errorMsg.Contains("HTTP connection failure", StringComparison.OrdinalIgnoreCase)
+                || errorMsg.Contains("Resource temporarily unavailable", StringComparison.OrdinalIgnoreCase)
+                || errorMsg.Contains("无法打开 MRL", StringComparison.OrdinalIgnoreCase)
+                || errorMsg.Contains("Your input can't be opened", StringComparison.OrdinalIgnoreCase);
         }
 
         private void UpdateWatchHistory()

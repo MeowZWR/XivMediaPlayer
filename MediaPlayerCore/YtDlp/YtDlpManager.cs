@@ -1797,6 +1797,20 @@ namespace MediaPlayerCore.YtDlp
             return url.Contains("live.bilibili.com", StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// Bilibili PCDN/mCDN edges (often *:8082) frequently fail VLC TLS handshakes.
+        /// Prefer official bilivideo.com hosts when the API offers them.
+        /// </summary>
+        public static bool IsBilibiliMcdnUrl(string? url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            return url.Contains("mcdn.bilivideo.cn", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("mcdn.bilivideo.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool ContainsBilibiliMcdnUrl(IEnumerable<string>? urls)
+            => urls != null && urls.Any(IsBilibiliMcdnUrl);
+
         private static bool IsBilibiliCookieDomain(string domain)
         {
             return domain.Contains("bilibili", StringComparison.OrdinalIgnoreCase)
@@ -1910,6 +1924,12 @@ namespace MediaPlayerCore.YtDlp
             string[]? streamUrls = await TryGetStreamUrlsAsync(url, formatArg, isLiveYouTube, forceYouTubeClient: null);
             if (streamUrls != null && streamUrls.Length > 0)
             {
+                if (IsBilibiliUrl(url) && !IsBilibiliLiveUrl(url) && ContainsBilibiliMcdnUrl(streamUrls))
+                {
+                    streamUrls = await PreferNonMcdnBilibiliUrlsAsync(url, formatArg, streamUrls).ConfigureAwait(false)
+                        ?? streamUrls;
+                }
+
                 return streamUrls;
             }
 
@@ -1926,11 +1946,120 @@ namespace MediaPlayerCore.YtDlp
             return await TryGetStreamUrlsAsync(url, combinedFormat, isLiveYouTube: false, forceYouTubeClient: null);
         }
 
+        private async Task<string[]?> PreferNonMcdnBilibiliUrlsAsync(
+            string pageUrl,
+            string formatArg,
+            string[] initialUrls)
+        {
+            string[] best = initialUrls;
+            int bestMcdnCount = CountBilibiliMcdnUrls(best);
+            var probeHeaders = EnsureBilibiliHttpHeaders(LastResolvedHttpHeaders, pageUrl);
+
+            if (bestMcdnCount > 0
+                && await AreBilibiliMcdnUrlsReachableAsync(best, probeHeaders).ConfigureAwait(false))
+            {
+                OnStatusUpdate?.Invoke(this, "Bilibili mCDN probe succeeded; keeping current CDN.");
+                return best;
+            }
+
+            const int maxAttempts = 4;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                OnStatusUpdate?.Invoke(this,
+                    $"Bilibili mCDN unstable; retrying CDN selection ({attempt}/{maxAttempts})...");
+                await Task.Delay(200 * attempt).ConfigureAwait(false);
+
+                string[]? next = await TryGetStreamUrlsAsync(
+                    pageUrl,
+                    formatArg,
+                    isLiveYouTube: false,
+                    forceYouTubeClient: null,
+                    captureHeaders: attempt == maxAttempts).ConfigureAwait(false);
+                if (next == null || next.Length == 0)
+                {
+                    continue;
+                }
+
+                int nextMcdnCount = CountBilibiliMcdnUrls(next);
+                if (nextMcdnCount == 0)
+                {
+                    OnStatusUpdate?.Invoke(this, "Bilibili CDN resolved without mCDN.");
+                    await TryCaptureFormatHttpHeadersAsync(pageUrl, formatArg, isLiveYouTube: false, forceYouTubeClient: null)
+                        .ConfigureAwait(false);
+                    return next;
+                }
+
+                if (nextMcdnCount < bestMcdnCount)
+                {
+                    best = next;
+                    bestMcdnCount = nextMcdnCount;
+                }
+
+                if (await AreBilibiliMcdnUrlsReachableAsync(next, probeHeaders).ConfigureAwait(false))
+                {
+                    OnStatusUpdate?.Invoke(this, "Bilibili mCDN probe succeeded after retry.");
+                    await TryCaptureFormatHttpHeadersAsync(pageUrl, formatArg, isLiveYouTube: false, forceYouTubeClient: null)
+                        .ConfigureAwait(false);
+                    return next;
+                }
+            }
+
+            OnStatusUpdate?.Invoke(this, "Bilibili still on mCDN after retries; playback may need a refresh.");
+            return best;
+        }
+
+        private static int CountBilibiliMcdnUrls(IEnumerable<string> urls)
+            => urls.Count(IsBilibiliMcdnUrl);
+
+        private async Task<bool> AreBilibiliMcdnUrlsReachableAsync(
+            IEnumerable<string> urls,
+            Dictionary<string, string> headers)
+        {
+            foreach (string url in urls.Where(IsBilibiliMcdnUrl))
+            {
+                if (!await ProbeBilibiliMediaUrlAsync(url, headers).ConfigureAwait(false))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static async Task<bool> ProbeBilibiliMediaUrlAsync(
+            string mediaUrl,
+            Dictionary<string, string> headers)
+        {
+            try
+            {
+                using var handler = new HttpClientHandler { UseCookies = false };
+                using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(4) };
+                foreach (var kvp in headers)
+                {
+                    try { client.DefaultRequestHeaders.TryAddWithoutValidation(kvp.Key, kvp.Value); }
+                    catch { /* ignore invalid header names */ }
+                }
+
+                using var request = new HttpRequestMessage(HttpMethod.Get, mediaUrl);
+                request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, 0);
+                using var response = await client
+                    .SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
+                    .ConfigureAwait(false);
+                return response.IsSuccessStatusCode
+                    || response.StatusCode == HttpStatusCode.PartialContent;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private async Task<string[]?> TryGetStreamUrlsAsync(
             string url,
             string formatArg,
             bool isLiveYouTube,
-            string? forceYouTubeClient)
+            string? forceYouTubeClient,
+            bool captureHeaders = true)
         {
             try
             {
@@ -1945,7 +2074,11 @@ namespace MediaPlayerCore.YtDlp
                     return null;
                 }
 
-                await TryCaptureFormatHttpHeadersAsync(url, formatArg, isLiveYouTube, forceYouTubeClient);
+                if (captureHeaders)
+                {
+                    await TryCaptureFormatHttpHeadersAsync(url, formatArg, isLiveYouTube, forceYouTubeClient);
+                }
+
                 return streamUrls;
             }
             catch (Exception e)

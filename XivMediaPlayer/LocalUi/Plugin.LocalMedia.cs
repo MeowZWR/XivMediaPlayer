@@ -215,6 +215,23 @@ namespace XivMediaPlayer
                 if (_disposed || !_config.LoopEnabled) return;
 
                 var active = _mediaManager?.ActiveStream;
+                // Bilibili/yt-dlp DASH uses a separate audio slave. Seeking an Ended
+                // VLC session (or stale CDN URL) often comes back video-only — re-resolve.
+                bool preferFreshResolve = !string.IsNullOrEmpty(replayUrl)
+                    && _playerObject != null
+                    && _ytDlpManager != null
+                    && _ytDlpManager.IsAvailable()
+                    && YtDlpManager.IsUrlSupported(replayUrl)
+                    && !LocalMediaPaths.IsLocalFile(replayUrl)
+                    && !YtDlpManager.IsSabrLocalFile(active?.SoundPath);
+
+                if (preferFreshResolve)
+                {
+                    PrintVerbose("[Media Player] Looping via fresh resolve.");
+                    PlayRouted(replayUrl, CurrentAudioSource, 0);
+                    return;
+                }
+
                 if (active != null && !string.IsNullOrEmpty(active.SoundPath))
                 {
                     PrintVerbose("[Media Player] Looping current media.");
