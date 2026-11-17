@@ -23,7 +23,10 @@ namespace XivMediaPlayer.Networking
         {
             _baseUrl = baseUrl;
             _log = log;
-            _httpClient = new HttpClient();
+            _httpClient = new HttpClient
+            {
+                Timeout = TimeSpan.FromSeconds(20)
+            };
         }
 
         public void SetDiscordSessionToken(string? token)
@@ -55,7 +58,8 @@ namespace XivMediaPlayer.Networking
             return 0;
         }
 
-        public async Task<List<TvPlacement>> GetTvsForRoomAsync(string locationKey)
+        // null = request failed (do not treat as empty room)
+        public async Task<List<TvPlacement>?> GetTvsForRoomAsync(string locationKey)
         {
             try
             {
@@ -65,12 +69,14 @@ namespace XivMediaPlayer.Networking
                     var tvs = await response.Content.ReadFromJsonAsync<List<TvPlacement>>();
                     return tvs ?? new List<TvPlacement>();
                 }
+
+                _log.Warning($"Failed to get TVs for room {locationKey} ({(int)response.StatusCode})");
             }
             catch (Exception ex)
             {
                 LogRequestError(ex, $"Failed to get TVs for room {locationKey}");
             }
-            return new List<TvPlacement>();
+            return null;
         }
 
         public async Task<TvPlacement> RegisterTvAsync(string locationKey, TvPlacement placement, bool create = false)
@@ -111,7 +117,8 @@ namespace XivMediaPlayer.Networking
                     && !string.IsNullOrWhiteSpace(placement.Id))
                 {
                     var serverTvs = await GetTvsForRoomAsync(locationKey);
-                    if (!serverTvs.Any(t => string.Equals(t.Id, placement.Id, StringComparison.Ordinal)))
+                    if (serverTvs != null
+                        && !serverTvs.Any(t => string.Equals(t.Id, placement.Id, StringComparison.Ordinal)))
                     {
                         _log.Info($"TV id {placement.Id} is not on server for {locationKey}; registering as a new screen.");
                         return await RegisterTvInternalAsync(locationKey, placement, create: true, allowAutoCreate: false);
@@ -205,7 +212,8 @@ namespace XivMediaPlayer.Networking
             return null;
         }
 
-        public async Task<List<TvPlacement>> GetTvsBatchAsync(List<string> locationKeys)
+        // null = request failed (do not treat as empty room)
+        public async Task<List<TvPlacement>?> GetTvsBatchAsync(List<string> locationKeys)
         {
             try
             {
@@ -215,12 +223,14 @@ namespace XivMediaPlayer.Networking
                     var tvs = await response.Content.ReadFromJsonAsync<List<TvPlacement>>();
                     return tvs ?? new List<TvPlacement>();
                 }
+
+                _log.Warning($"Failed to get TVs in batch ({(int)response.StatusCode})");
             }
             catch (Exception ex)
             {
                 LogRequestError(ex, "Failed to get TVs in batch");
             }
-            return new List<TvPlacement>();
+            return null;
         }
 
         public async Task<List<RoomMediaStateSync>> GetMediaStatesBatchAsync(List<string> locationKeys)

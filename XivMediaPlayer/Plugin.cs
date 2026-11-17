@@ -573,6 +573,11 @@ namespace XivMediaPlayer
         private DateTime _lastHistoryUpdate = DateTime.MinValue;
         private DateTime? _deferredTerritoryChangeTime = null;
         private DateTime _lastServerSyncFetch = DateTime.MinValue;
+        private DateTime _nextTvPlacementFetchUtc = DateTime.MinValue;
+        private int _tvPlacementFetchFailStreak = 0;
+        private int _fetchServerDataInFlight = 0;
+        private string _lastLoadedRoomTvSignature = string.Empty;
+        private const int TvPlacementFetchBackoffCapSeconds = 300;
         // The initial restore must prefer the room state held by the sync server.
         // Keep the location so the local cache can be used only when that fetch
         // did not yield playable media (for example, while offline).
@@ -825,7 +830,7 @@ namespace XivMediaPlayer
                 await Task.Delay(3000);
                 EnqueueFrameworkAction(() =>
                 {
-                    RestoreScreenForCurrentLocation();
+                    RestoreLocalScreensForCurrentLocation();
                     BeginInitialMediaRestore();
                 });
             });
@@ -926,7 +931,7 @@ namespace XivMediaPlayer
                 if (isHousingLoaded)
                 {
                     _deferredTerritoryChangeTime = null;
-                    RestoreScreenForCurrentLocation();
+                    RestoreLocalScreensForCurrentLocation();
                     StopMediaIfNoPlayableTarget();
                     RestoreMediaForCurrentLocation();
                     _ = FetchServerDataForCurrentLocationAsync();
@@ -963,10 +968,7 @@ namespace XivMediaPlayer
                     _hasBeenInitialized = _playerObject != null;
                     if (_hasBeenInitialized)
                     {
-                        // Restore saved screen placement for current location on plugin load
-                        RestoreScreenForCurrentLocation();
-
-                        // Automatically fetch TV placement and media state from the server if already in a house
+                        RestoreLocalScreensForCurrentLocation();
                         _ = FetchServerDataForCurrentLocationAsync();
                     }
                 }
@@ -2711,6 +2713,7 @@ namespace XivMediaPlayer
             ClearRoomPlacementState();
             _lastGridLocationKey = string.Empty;
             _lastServerSyncFetch = DateTime.MinValue;
+            ResetTvPlacementFetchBackoff();
 
             _deferredTerritoryChangeTime = DateTime.UtcNow.AddSeconds(3);
         }
@@ -2759,14 +2762,32 @@ namespace XivMediaPlayer
             if (string.IsNullOrEmpty(currentKey) || previousKey == currentKey) return;
 
             ClearRoomPlacementState();
-            RestoreScreenForCurrentLocation();
+            RestoreLocalScreensForCurrentLocation();
             _screenSettingsWindow?.SyncFromTransform();
             _mediaManager?.StopStream();
             RestoreMediaForCurrentLocation();
             if (_mediaManager?.ActiveStream == null)
                 ScheduleBgmRestore();
             _lastServerSyncFetch = DateTime.MinValue;
+            ResetTvPlacementFetchBackoff();
             _ = FetchServerDataForCurrentLocationAsync();
+        }
+
+        private void ResetTvPlacementFetchBackoff()
+        {
+            _tvPlacementFetchFailStreak = 0;
+            _nextTvPlacementFetchUtc = DateTime.MinValue;
+            _lastLoadedRoomTvSignature = string.Empty;
+        }
+
+        private void NoteTvPlacementFetchFailure()
+        {
+            _tvPlacementFetchFailStreak = Math.Min(_tvPlacementFetchFailStreak + 1, 8);
+            int delaySeconds = Math.Min(
+                TvPlacementFetchBackoffCapSeconds,
+                10 * (1 << Math.Min(_tvPlacementFetchFailStreak - 1, 5)));
+            _nextTvPlacementFetchUtc = DateTime.UtcNow.AddSeconds(delaySeconds);
+            _pluginLog.Warning($"[Social] TV placement fetch failed; retry in {delaySeconds}s.");
         }
 
         private bool IsMediaSyncLocation(string? locationKey)
@@ -2955,19 +2976,18 @@ namespace XivMediaPlayer
         private void ApplyRoomTvsPreferringLocal(string primaryKey, IEnumerable<TvPlacement> serverTvs)
         {
             var localById = _roomTvPlacements
-                .Where(t => t != null && t.LocationKey == primaryKey)
-                .ToDictionary(t => t.Id, StringComparer.Ordinal);
+                .Where(t => t != null && t.LocationKey == primaryKey && !string.IsNullOrEmpty(t.Id))
+                .GroupBy(t => t.Id, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
             foreach (var serverTv in serverTvs)
             {
+                if (string.IsNullOrEmpty(serverTv.Id)) continue;
                 if (!localById.ContainsKey(serverTv.Id))
-                {
                     localById[serverTv.Id] = serverTv;
-                }
             }
 
-            _roomTvPlacements.RemoveAll(t => t != null && t.LocationKey == primaryKey);
-            _roomTvPlacements.AddRange(localById.Values.Where(IsValidTvPlacement));
+            ReplaceRoomTvsForLocation(primaryKey, localById.Values);
         }
 
         private void PreserveNewerLocalTvLockState(string primaryKey, List<TvPlacement> incomingTvs)
@@ -3762,6 +3782,159 @@ namespace XivMediaPlayer
             MarkConfigDirty();
         }
 
+        private bool HasLocalTvCacheForLocation(string primaryKey)
+        {
+            if (string.IsNullOrEmpty(primaryKey)) return false;
+            string prefix = primaryKey + "#";
+            return _config.ScreenPlacementsByTvId.Keys.Any(k => k.StartsWith(prefix, StringComparison.Ordinal))
+                || _config.ScreenPlacements.ContainsKey(primaryKey);
+        }
+
+        private void PruneLocalTvCacheForLocation(string primaryKey, IEnumerable<string> keepIds)
+        {
+            if (string.IsNullOrEmpty(primaryKey)) return;
+
+            var keep = new HashSet<string>(keepIds.Where(id => !string.IsNullOrEmpty(id)), StringComparer.Ordinal);
+            string prefix = primaryKey + "#";
+            var toRemove = _config.ScreenPlacementsByTvId.Keys
+                .Where(k => k.StartsWith(prefix, StringComparison.Ordinal) && !keep.Contains(k.Substring(prefix.Length)))
+                .ToList();
+            if (toRemove.Count == 0) return;
+
+            foreach (var key in toRemove)
+                _config.ScreenPlacementsByTvId.Remove(key);
+
+            MarkConfigDirty();
+            _pluginLog.Information($"[Social] Pruned {toRemove.Count} stale TV cache entries for {primaryKey}.");
+        }
+
+        private static List<TvPlacement> DeduplicateLocalTvPlacements(List<TvPlacement> tvs)
+        {
+            var result = new List<TvPlacement>();
+            foreach (var tv in tvs
+                .OrderByDescending(t => t.LastUpdated)
+                .ThenBy(t => t.Id, StringComparer.Ordinal))
+            {
+                bool duplicate = result.Any(existing =>
+                    MathF.Abs(existing.PositionX - tv.PositionX) < 0.15f
+                    && MathF.Abs(existing.PositionY - tv.PositionY) < 0.15f
+                    && MathF.Abs(existing.PositionZ - tv.PositionZ) < 0.15f
+                    && MathF.Abs(existing.RotationY - tv.RotationY) < 2f
+                    && MathF.Abs(existing.ScaleX - tv.ScaleX) < 0.05f);
+                if (!duplicate)
+                    result.Add(tv);
+            }
+            return result;
+        }
+
+        private void ReplaceRoomTvsForLocation(string primaryKey, IEnumerable<TvPlacement> tvs)
+        {
+            var next = DeduplicateLocalTvPlacements(tvs.Where(IsValidTvPlacement).ToList());
+            _roomTvPlacements.RemoveAll(t => t != null && t.LocationKey == primaryKey);
+            _roomTvPlacements.AddRange(next);
+        }
+
+        private TvPlacement BuildTvFromCachedTransform(string primaryKey, string tvId, MediaPlayerCore.Compositing.WorldScreenTransform t)
+        {
+            return new TvPlacement
+            {
+                Id = tvId,
+                LocationKey = primaryKey,
+                PositionX = t.Position.X,
+                PositionY = t.Position.Y,
+                PositionZ = t.Position.Z,
+                RotationX = t.RotationDegrees.X,
+                RotationY = t.RotationDegrees.Y,
+                RotationZ = t.RotationDegrees.Z,
+                ScaleX = t.Scale.X,
+                ScaleY = t.Scale.Y,
+                ScaleAspectMode = t.ScaleAspectMode,
+                Opacity = t.Opacity,
+                IsProjectorMode = t.IsProjectorMode,
+                ScreensaverColorR = t.ScreensaverColor.X,
+                ScreensaverColorG = t.ScreensaverColor.Y,
+                ScreensaverColorB = t.ScreensaverColor.Z,
+                ScreensaverStyle = t.ScreensaverStyle,
+                IdleBrandingUrl = t.IdleBrandingUrl ?? string.Empty,
+                VisualEffectMode = t.VisualEffectMode,
+                EffectIntensity = t.EffectIntensity,
+                EffectSpeed = t.EffectSpeed,
+                OwnerId = _config.OwnerId,
+                IsLocked = !primaryKey.StartsWith("zone_", StringComparison.Ordinal)
+                    && !primaryKey.StartsWith("island_", StringComparison.Ordinal),
+            };
+        }
+
+        private void ActivatePreferredTv(TvPlacement preferred, bool selectInEditor = false)
+        {
+            if (IsBannerEditActive() || _worldRenderer == null) return;
+
+            CurrentTvPlacement = preferred;
+            ApplyTvPlacementToRenderer(preferred);
+            _screenSettingsWindow?.SyncFromTransform();
+            if (selectInEditor)
+            {
+                _placementManipulator.SetSelection(
+                    Compositing.PlacementManipulator.TargetType.Tv,
+                    preferred.Id,
+                    _worldRenderer.Transform,
+                    notify: false);
+            }
+        }
+
+        private bool TryRestoreLocalTvsForLocation(string primaryKey)
+        {
+            if (string.IsNullOrEmpty(primaryKey) || _worldRenderer == null)
+                return false;
+            if (_roomTvPlacements.Any(t => t != null && t.LocationKey == primaryKey))
+                return true;
+
+            string prefix = primaryKey + "#";
+            var restored = new List<TvPlacement>();
+            foreach (var kvp in _config.ScreenPlacementsByTvId)
+            {
+                if (kvp.Value == null || !kvp.Key.StartsWith(prefix, StringComparison.Ordinal))
+                    continue;
+                string tvId = kvp.Key.Substring(prefix.Length);
+                if (string.IsNullOrEmpty(tvId))
+                    continue;
+                restored.Add(BuildTvFromCachedTransform(primaryKey, tvId, kvp.Value));
+            }
+
+            int rawCount = restored.Count;
+            restored = DeduplicateLocalTvPlacements(restored);
+
+            if (restored.Count == 0
+                && _config.ScreenPlacements.TryGetValue(primaryKey, out var legacy)
+                && legacy != null)
+            {
+                ApplyTransformToRenderer(_worldRenderer, legacy);
+                restored.Add(BuildTvPlacementFromWorkingTransform(primaryKey, createNewId: false));
+            }
+
+            if (restored.Count == 0)
+                return false;
+
+            PruneLocalTvCacheForLocation(primaryKey, restored.Select(t => t.Id));
+            foreach (var tv in restored)
+                UpsertRoomTv(tv);
+
+            ActivatePreferredTv(SelectPreferredTv(restored) ?? restored[0]);
+            _pluginLog.Information(
+                rawCount > restored.Count
+                    ? $"[Social] Restored {restored.Count} local TV(s) for {primaryKey} (deduped from {rawCount})."
+                    : $"[Social] Restored {restored.Count} local TV(s) for {primaryKey}.");
+            return true;
+        }
+
+        private void RestoreLocalScreensForCurrentLocation()
+        {
+            string key = GetLocationKey();
+            if (!string.IsNullOrEmpty(key) && IsMediaSyncLocation(key))
+                TryRestoreLocalTvsForLocation(key);
+            RestoreScreenForCurrentLocation();
+        }
+
         internal void UpsertRoomTv(TvPlacement tv)
         {
             if (!IsValidTvPlacement(tv)) return;
@@ -4175,6 +4348,21 @@ namespace XivMediaPlayer
 
         private async Task FetchServerDataForCurrentLocationAsync()
         {
+            if (System.Threading.Interlocked.CompareExchange(ref _fetchServerDataInFlight, 1, 0) != 0)
+                return;
+
+            try
+            {
+                await FetchServerDataForCurrentLocationCoreAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                System.Threading.Interlocked.Exchange(ref _fetchServerDataInFlight, 0);
+            }
+        }
+
+        private async Task FetchServerDataForCurrentLocationCoreAsync()
+        {
             var keys = GetCurrentLocationKeys();
             if (keys.Count == 0) return;
 
@@ -4186,8 +4374,27 @@ namespace XivMediaPlayer
             // placement request cannot delay (or prevent) drift correction.
             Task mediaSyncTask = FetchMediaFromServerAsync(primaryKey);
 
-            var tvs = await ServerClient.GetTvsBatchAsync(keys);
-            var nearbySnapshot = tvs?.Where(t => t != null).ToList() ?? new List<TvPlacement>();
+            if (DateTime.UtcNow < _nextTvPlacementFetchUtc)
+            {
+                await mediaSyncTask.ConfigureAwait(false);
+                return;
+            }
+
+            List<TvPlacement>? tvs = await ServerClient.GetTvsBatchAsync(keys);
+            if (tvs == null && !HasLocalTvCacheForLocation(primaryKey))
+            {
+                _pluginLog.Warning("[Social] Batch TV fetch failed; trying per-room fallback.");
+                tvs = await ServerClient.GetTvsForRoomAsync(primaryKey);
+            }
+
+            bool tvFetchFailed = tvs == null;
+            tvs ??= new List<TvPlacement>();
+            if (tvFetchFailed)
+                NoteTvPlacementFetchFailure();
+            else
+                ResetTvPlacementFetchBackoff();
+
+            var nearbySnapshot = tvs.Where(t => t != null).ToList();
 
             var roomTvs = nearbySnapshot
                 .Where(t => t.LocationKey == primaryKey)
@@ -4230,62 +4437,72 @@ namespace XivMediaPlayer
 
                 _nearbyTvs = nearbyCopy;
 
+                bool hadRoomTvsBefore = HasRoomTvsForCurrentLocation();
                 bool preferLocalPlacements = ShouldPreferLocalPlacementEdits();
-                if (preferLocalPlacements)
+
+                if (tvFetchFailed)
                 {
-                    ApplyRoomTvsPreferringLocal(primaryKey, roomTvsSnapshot);
+                    if (!HasRoomTvsForCurrentLocation())
+                        TryRestoreLocalTvsForLocation(primaryKey);
+                    else if (_worldRenderer != null && !IsBannerEditActive()
+                        && (CurrentTvPlacement == null || !_worldRenderer.Transform.Enabled))
+                    {
+                        var localTvs = GetRoomTvsForPrimaryLocation();
+                        var preferredLocal = SelectPreferredTv(localTvs) ?? localTvs.FirstOrDefault();
+                        if (preferredLocal != null)
+                            ActivatePreferredTv(preferredLocal);
+                    }
                 }
                 else
                 {
-                    var mergedRoomTvs = new List<TvPlacement>(roomTvsSnapshot);
-                    PreserveNewerLocalTvLockState(primaryKey, mergedRoomTvs);
-                    var serverTvIds = new HashSet<string>(mergedRoomTvs.Select(t => t.Id));
-                    foreach (var localTv in _roomTvPlacements.Where(t => t != null && t.LocationKey == primaryKey && !serverTvIds.Contains(t.Id)))
+                    if (preferLocalPlacements)
                     {
-                        mergedRoomTvs.Add(CopyTvPlacementForSync(localTv));
+                        ApplyRoomTvsPreferringLocal(primaryKey, roomTvsSnapshot);
+                    }
+                    else
+                    {
+                        // Server list is authoritative; do not reattach stale local-only IDs.
+                        var mergedRoomTvs = new List<TvPlacement>(roomTvsSnapshot);
+                        PreserveNewerLocalTvLockState(primaryKey, mergedRoomTvs);
+                        ReplaceRoomTvsForLocation(primaryKey, mergedRoomTvs);
                     }
 
-                    _roomTvPlacements.Clear();
-                    _roomTvPlacements.AddRange(mergedRoomTvs.Where(IsValidTvPlacement));
-                }
+                    var mergedRoomTvsForSelection = _roomTvPlacements
+                        .Where(t => t != null && t.LocationKey == primaryKey)
+                        .ToList();
 
-                _roomTvPlacements.RemoveAll(t => t == null);
-
-                var mergedRoomTvsForSelection = _roomTvPlacements
-                    .Where(t => t != null && t.LocationKey == primaryKey)
-                    .ToList();
-
-                if (mergedRoomTvsForSelection.Count > 0)
-                {
-                    var preferredTv = SelectPreferredTv(mergedRoomTvsForSelection) ?? mergedRoomTvsForSelection[0];
-                    if (!IsBannerEditActive())
+                    if (mergedRoomTvsForSelection.Count > 0)
                     {
-                        CurrentTvPlacement = preferredTv;
-
-                        if (_worldRenderer != null && !IsHousingMenuOpen && !(_screenSettingsWindow?.IsOpen == true))
+                        var preferredTv = SelectPreferredTv(mergedRoomTvsForSelection) ?? mergedRoomTvsForSelection[0];
+                        if (!IsBannerEditActive() && _worldRenderer != null)
                         {
-                            ApplyTvPlacementToRenderer(preferredTv);
+                            bool editingOpen = IsHousingMenuOpen || _screenSettingsWindow?.IsOpen == true;
+                            if (!editingOpen || (!hadRoomTvsBefore && !_worldRenderer.Transform.Enabled))
+                                ActivatePreferredTv(preferredTv, selectInEditor: editingOpen);
+                        }
+
+                        foreach (var tv in mergedRoomTvsForSelection)
+                            PersistTvPlacementLocally(tv);
+                        PruneLocalTvCacheForLocation(primaryKey, mergedRoomTvsForSelection.Select(t => t.Id));
+
+                        string signature = string.Join(",", mergedRoomTvsForSelection.Select(t => t.Id).OrderBy(id => id, StringComparer.Ordinal));
+                        if (!string.Equals(signature, _lastLoadedRoomTvSignature, StringComparison.Ordinal))
+                        {
+                            _lastLoadedRoomTvSignature = signature;
+                            _pluginLog.Info($"[Social] Loaded {mergedRoomTvsForSelection.Count} TV placement(s) for room {preferredTv.LocationKey}.");
                         }
                     }
-
-                    foreach (var tv in mergedRoomTvsForSelection)
+                    else
                     {
-                        PersistTvPlacementLocally(tv);
+                        _lastLoadedRoomTvSignature = string.Empty;
+                        PruneLocalTvCacheForLocation(primaryKey, Array.Empty<string>());
+                        CurrentTvPlacement = null;
+                        _interactionTvId = null;
+                        if (!IsHousingMenuOpen)
+                            RestoreScreenForCurrentLocation();
+                        StopMediaIfNoPlayableTarget();
+                        DisableOrphanWorldScreen();
                     }
-
-                    _pluginLog.Info($"[Social] Loaded {mergedRoomTvsForSelection.Count} TV placement(s) for room {preferredTv.LocationKey}.");
-                }
-                else
-                {
-                    CurrentTvPlacement = null;
-                    _interactionTvId = null;
-                    if (!IsHousingMenuOpen)
-                    {
-                        RestoreScreenForCurrentLocation();
-                    }
-
-                    StopMediaIfNoPlayableTarget();
-                    DisableOrphanWorldScreen();
                 }
 
                 _roomVenueSettings = venueSettings ?? new Networking.Models.RoomVenueSettings { LocationKey = primaryKey };
@@ -6294,7 +6511,7 @@ namespace XivMediaPlayer
                 }
                 else
                 {
-                    RestoreScreenForCurrentLocation();
+                    RestoreLocalScreensForCurrentLocation();
                     RestoreMediaForCurrentLocation();
                     _ = FetchServerDataForCurrentLocationAsync();
                 }
